@@ -514,10 +514,17 @@ def test_infrastructure_audio_facade_and_leaves_are_unchanged():
         "VerifiedAudio",
         "apply_absolute_gain",
         "sum_stems",
+        "verify_resolved_wav_artifact",
         "verify_wav_artifact",
     ]
     for name in ("apply_absolute_gain", "sum_stems"):
         assert getattr(audio, name) is getattr(dsp, name)
-    for name in ("ArtifactVerificationError", "VerificationFailureCode", "VerifiedAudio", "verify_wav_artifact"):
+    for name in (
+        "ArtifactVerificationError",
+        "VerificationFailureCode",
+        "VerifiedAudio",
+        "verify_wav_artifact",
+        "verify_resolved_wav_artifact",
+    ):
         assert getattr(audio, name) is getattr(verification, name)
     assert verification.WAV_CONTAINERS == ("WAV", "WAVEX", "RF64")

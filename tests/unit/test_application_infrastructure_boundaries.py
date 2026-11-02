@@ -11,7 +11,10 @@ matches exact package segments and enforces:
   component interfaces, and component code never imports them;
 - the infrastructure source rules: the descriptive ``infrastructure`` initializer imports nothing;
   ``audio`` re-exports its two leaves; ``dsp`` uses the standard library and NumPy only;
-  ``verification`` uses the standard library, NumPy, soundfile and the ``domain.project`` interface.
+  ``verification`` uses the standard library, NumPy, soundfile, the ``domain.project`` interface and
+  the ``filesystem`` interface (never ``filesystem.locations`` directly); the ``filesystem``
+  initializer re-exports ``locations`` only; ``locations`` uses the standard library and the
+  ``domain.project`` interface only.
 
 These are source-import rules. The ``audio`` facade loads both leaves eagerly, so importing it is not
 claimed to avoid loading soundfile.
@@ -31,6 +34,8 @@ INFRASTRUCTURE = f"{PKG}.infrastructure"
 AUDIO = f"{INFRASTRUCTURE}.audio"
 DSP = f"{AUDIO}.dsp"
 VERIFICATION = f"{AUDIO}.verification"
+FILESYSTEM = f"{INFRASTRUCTURE}.filesystem"
+LOCATIONS = f"{FILESYSTEM}.locations"
 DOMAIN = f"{PKG}.domain"
 DOMAIN_COMPONENTS = ("shared", "project", "context", "observation", "action", "decision", "validation", "run")
 
@@ -170,9 +175,17 @@ def _infrastructure_rule(source: str, target: str, relative: bool, known_modules
     if source == VERIFICATION:
         if _is_stdlib(target, relative) or _top(target) in {"numpy", "soundfile"}:
             return None
+        if target in {f"{DOMAIN}.project", FILESYSTEM} and target in known_modules:
+            return None
+        return "verification may import only the standard library, NumPy, soundfile, domain.project and filesystem"
+    if source == FILESYSTEM:
+        return None if target == LOCATIONS else "filesystem initializer may re-export only locations"
+    if source == LOCATIONS:
+        if _is_stdlib(target, relative):
+            return None
         if target == f"{DOMAIN}.project" and target in known_modules:
             return None
-        return "verification may import only the standard library, NumPy, soundfile and domain.project"
+        return "locations may import only the standard library and domain.project"
     return "unclassified infrastructure module needs an explicit rule"
 
 
@@ -232,6 +245,9 @@ FIXTURE_MODULES = KNOWN | {
     f"{AUDIO}.dsp_extra",
     f"{AUDIO}.writer",
     f"{DOMAIN}.project_extra",
+    f"{INFRASTRUCTURE}.filesystem_extra",
+    f"{FILESYSTEM}.locations_extra",
+    f"{FILESYSTEM}.workspace",
 }
 PACKAGES = frozenset(name for name, path in ALL_MODULES.items() if path.name == "__init__.py")
 
@@ -372,7 +388,62 @@ FORBIDDEN = [
     ("import soundfile_extra", VERIFICATION, "verification"),
     ("import scipy", VERIFICATION, "verification"),
     ("import anthropic", VERIFICATION, "verification"),
+    # verification uses the filesystem public interface only, never its internals or look-alikes
+    (
+        "from autonomous_mixing.infrastructure.filesystem.locations import resolve_artifact_location",
+        VERIFICATION,
+        "verif",
+    ),
+    ("from autonomous_mixing.infrastructure.filesystem import locations", VERIFICATION, "verification"),
+    ("from ..filesystem.locations import ResolvedArtifactLocation", VERIFICATION, "verification"),
+    ("from ..filesystem import locations", VERIFICATION, "verification"),
+    ("import autonomous_mixing.infrastructure.filesystem.locations as locations", VERIFICATION, "verification"),
+    ("from autonomous_mixing.infrastructure.filesystem_extra import x", VERIFICATION, "verification"),
+    ("from ..filesystem_extra import x", VERIFICATION, "verification"),
+    ("from autonomous_mixing.infrastructure.filesystem.locations_extra import x", VERIFICATION, "verification"),
+    ("from ..filesystem.workspace import allocate", VERIFICATION, "verification"),
+    ("from ..filesystem_missing import x", VERIFICATION, "verification"),
+    ("from autonomous_mixing.infrastructure import audio", VERIFICATION, "verification"),
+    # dsp and the descriptive initializers never reach the filesystem component
+    ("from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location", DSP, "dsp"),
+    ("from ..filesystem import ResolvedArtifactLocation", DSP, "dsp"),
+    ("import autonomous_mixing.infrastructure.filesystem.locations", DSP, "dsp"),
+    ("from .filesystem import resolve_artifact_location", INFRASTRUCTURE, "descriptive"),
+    ("from . import filesystem", INFRASTRUCTURE, "descriptive"),
+    ("from ..filesystem import resolve_artifact_location", AUDIO, "audio facade"),
+    ("from autonomous_mixing.infrastructure.filesystem import ResolvedArtifactLocation", AUDIO, "audio facade"),
+    # filesystem initializer re-exports locations only
+    ("from autonomous_mixing.domain.project import AudioArtifact", FILESYSTEM, "filesystem initializer"),
+    ("import os", FILESYSTEM, "filesystem initializer"),
+    ("from .locations_extra import x", FILESYSTEM, "filesystem initializer"),
+    ("from .workspace import allocate", FILESYSTEM, "filesystem initializer"),
+    ("from ..audio import verify_wav_artifact", FILESYSTEM, "filesystem initializer"),
+    ("from .missing import x", FILESYSTEM, "filesystem initializer"),
+    # locations: standard library and the domain.project interface only
+    ("from autonomous_mixing.infrastructure.audio import verify_wav_artifact", LOCATIONS, "locations"),
+    ("from ..audio import verification", LOCATIONS, "locations"),
+    ("import autonomous_mixing.infrastructure.audio.dsp as dsp", LOCATIONS, "locations"),
+    ("from autonomous_mixing.application.execution import ExecutionWorkspace", LOCATIONS, "locations"),
+    ("from ...application import execution", LOCATIONS, "locations"),
+    ("import numpy as np", LOCATIONS, "locations"),
+    ("import soundfile", LOCATIONS, "locations"),
+    ("import numpy_extra", LOCATIONS, "locations"),
+    ("import pathlib_extra", LOCATIONS, "locations"),
+    ("from autonomous_mixing.domain.project.artifacts import AudioArtifact", LOCATIONS, "locations"),
+    ("from autonomous_mixing.domain.project import artifacts", LOCATIONS, "locations"),
+    ("from autonomous_mixing.domain.shared import require_text", LOCATIONS, "locations"),
+    ("from autonomous_mixing.domain import AudioArtifact", LOCATIONS, "locations"),
+    ("from autonomous_mixing.domain.project_extra import x", LOCATIONS, "locations"),
+    ("from autonomous_mixing.audio.io import load_stem", LOCATIONS, "locations"),
+    ("from autonomous_mixing import cli", LOCATIONS, "locations"),
+    ("from . import workspace", LOCATIONS, "locations"),
+    ("from .missing import x", LOCATIONS, "locations"),
+    ("from . import locations_extra", LOCATIONS, "locations"),
+    ("from ......... import x", LOCATIONS, "unresolvable"),
+    ("from ......... import x", FILESYSTEM, "unresolvable"),
     # unclassified infrastructure modules need an explicit rule first
+    ("import math", f"{FILESYSTEM}.workspace", "unclassified infrastructure"),
+    ("import math", f"{INFRASTRUCTURE}.filesystem_extra", "unclassified infrastructure"),
     ("import math", f"{AUDIO}.writer", "unclassified infrastructure"),
 ]
 
@@ -429,6 +500,21 @@ PERMITTED = [
     ("from autonomous_mixing.domain.project import AudioArtifact", VERIFICATION),
     ("from autonomous_mixing.domain import project", VERIFICATION),
     ("from ...domain.project import AudioArtifact", VERIFICATION),
+    ("from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location", VERIFICATION),
+    ("from ..filesystem import LocationResolutionError, ResolvedArtifactLocation", VERIFICATION),
+    ("from autonomous_mixing.infrastructure import filesystem", VERIFICATION),
+    ("import autonomous_mixing.infrastructure.filesystem as filesystem", VERIFICATION),
+    ("from .verification import verify_resolved_wav_artifact", AUDIO),
+    ("from .locations import resolve_artifact_location", FILESYSTEM),
+    ("from . import locations", FILESYSTEM),
+    ("from autonomous_mixing.infrastructure.filesystem.locations import ResolvedArtifactLocation", FILESYSTEM),
+    ("import errno", LOCATIONS),
+    ("import os", LOCATIONS),
+    ("from pathlib import Path", LOCATIONS),
+    ("from dataclasses import dataclass", LOCATIONS),
+    ("from autonomous_mixing.domain.project import AudioArtifact", LOCATIONS),
+    ("from autonomous_mixing.domain import project", LOCATIONS),
+    ("from ...domain.project import AudioArtifact", LOCATIONS),
 ]
 
 
@@ -465,7 +551,7 @@ EXPECTED_APPLICATION_MODULES = {
         for suffix in ("", ".identity", ".requests", ".processing", ".validation", ".preflight", ".ports")
     ),
 }
-EXPECTED_INFRASTRUCTURE_MODULES = {INFRASTRUCTURE, AUDIO, DSP, VERIFICATION}
+EXPECTED_INFRASTRUCTURE_MODULES = {INFRASTRUCTURE, AUDIO, DSP, VERIFICATION, FILESYSTEM, LOCATIONS}
 
 
 def _scanned(prefix: str) -> dict[str, Path]:
@@ -558,6 +644,68 @@ def test_infrastructure_initializer_is_descriptive_and_leaves_keep_their_locatio
     assert _resolved_imports(AUDIO) == {DSP, VERIFICATION}
     assert ALL_MODULES[DSP] == SRC / PKG / "infrastructure" / "audio" / "dsp.py"
     assert ALL_MODULES[VERIFICATION] == SRC / PKG / "infrastructure" / "audio" / "verification.py"
+    assert ALL_MODULES[FILESYSTEM] == SRC / PKG / "infrastructure" / "filesystem" / "__init__.py"
+    assert ALL_MODULES[LOCATIONS] == SRC / PKG / "infrastructure" / "filesystem" / "locations.py"
+
+
+def _project_imports(name: str) -> set[str]:
+    return {t for t in _resolved_imports(name) if _top(t) == PKG}
+
+
+def test_real_filesystem_and_audio_edges_are_exactly_the_permitted_ones():
+    assert _project_imports(FILESYSTEM) == {LOCATIONS}
+    assert _project_imports(LOCATIONS) == {f"{DOMAIN}.project"}
+    assert {_top(t) for t in _resolved_imports(LOCATIONS)} - {PKG} <= set(sys.stdlib_module_names)
+    assert _project_imports(VERIFICATION) == {f"{DOMAIN}.project", FILESYSTEM}
+    assert _project_imports(DSP) == set()
+    assert _project_imports(AUDIO) == {DSP, VERIFICATION}
+    for name in _scanned(INFRASTRUCTURE):
+        assert LOCATIONS not in _resolved_imports(name) or name == FILESYSTEM, name
+
+
+def _reexports(name: str) -> tuple[list[str], list[str]]:
+    """Return (imported names, ``__all__``) of a re-export-only initializer; fail on any other statement."""
+    tree = ast.parse(ALL_MODULES[name].read_text(encoding="utf-8"))
+    imported: list[str] = []
+    exported: list[str] = []
+    for index, node in enumerate(tree.body):
+        if index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            continue
+        if isinstance(node, ast.ImportFrom):
+            imported += [alias.asname or alias.name for alias in node.names]
+            continue
+        is_all = (
+            isinstance(node, ast.Assign)
+            and [t.id for t in node.targets if isinstance(t, ast.Name)] == ["__all__"]
+            and isinstance(node.value, ast.List)
+        )
+        assert is_all, f"{name} contains a non-re-export statement at line {node.lineno}"
+        exported = [element.value for element in node.value.elts]
+    return imported, exported
+
+
+FILESYSTEM_EXPORTS = {
+    "ResolvedArtifactLocation",
+    "LocationResolutionFailureCode",
+    "LocationResolutionError",
+    "resolve_artifact_location",
+}
+AUDIO_EXPORTS = {
+    "ArtifactVerificationError",
+    "VerificationFailureCode",
+    "VerifiedAudio",
+    "apply_absolute_gain",
+    "sum_stems",
+    "verify_wav_artifact",
+    "verify_resolved_wav_artifact",
+}
+
+
+@pytest.mark.parametrize("name, expected", [(FILESYSTEM, FILESYSTEM_EXPORTS), (AUDIO, AUDIO_EXPORTS)])
+def test_infrastructure_component_initializers_only_reexport_their_public_names(name, expected):
+    imported, exported = _reexports(name)
+    assert sorted(imported) == sorted(exported) and len(exported) == len(set(exported))
+    assert set(exported) == expected and len(exported) == len(expected)
 
 
 # --- consumers -------------------------------------------------------------------------------
@@ -611,6 +759,8 @@ contracts, results, execution_contracts, execution_preflight, ports = (
 audio = importlib.import_module("autonomous_mixing.infrastructure.audio")
 dsp = importlib.import_module("autonomous_mixing.infrastructure.audio.dsp")
 verification = importlib.import_module("autonomous_mixing.infrastructure.audio.verification")
+filesystem = importlib.import_module("autonomous_mixing.infrastructure.filesystem")
+locations = importlib.import_module("autonomous_mixing.infrastructure.filesystem.locations")
 assert app.PortResult is results.PortResult is shared.PortResult
 assert app.DecisionRequest is contracts.DecisionRequest is decision.DecisionRequest
 assert app.AnalysisResponse is contracts.AnalysisResponse is observation.AnalysisResponse
@@ -621,6 +771,13 @@ assert ports.AudioAnalyzer is observation.AudioAnalyzer
 assert ports.DecisionController is decision.DecisionController
 assert ports.AudioProcessor is execution.AudioProcessor
 assert audio.sum_stems is dsp.sum_stems and audio.verify_wav_artifact is verification.verify_wav_artifact
+assert audio.verify_resolved_wav_artifact is verification.verify_resolved_wav_artifact and len(audio.__all__) == 7
+for n in ("ResolvedArtifactLocation", "LocationResolutionFailureCode", "LocationResolutionError",
+          "resolve_artifact_location"):
+    assert getattr(filesystem, n) is getattr(locations, n)
+assert verification.ResolvedArtifactLocation is filesystem.ResolvedArtifactLocation
+assert verification.resolve_artifact_location is locations.resolve_artifact_location
+assert len(filesystem.__all__) == 4
 print("ok")
 """
 
@@ -639,6 +796,10 @@ def test_fresh_process_imports_succeed_in_every_order_without_partial_initializa
         "reverse shims first": LEGACY_ORDER[::-1] + CANONICAL_ORDER[::-1],
         "infrastructure leaves first": INFRA_ORDER + CANONICAL_ORDER,
         "infrastructure facade first": INFRA_ORDER[::-1] + LEGACY_ORDER,
+        "filesystem first": [FILESYSTEM, LOCATIONS, AUDIO, VERIFICATION, DSP],
+        "filesystem leaf first": [LOCATIONS, VERIFICATION, FILESYSTEM, AUDIO],
+        "audio first": [AUDIO, VERIFICATION, FILESYSTEM, LOCATIONS],
+        "verification first": [VERIFICATION, LOCATIONS, FILESYSTEM],
         "execution internals first": [f"{APPLICATION}.execution.{m}" for m in ("ports", "preflight", "processing")],
     }
     # Every module must also import on its own as the first import of a fresh process.
@@ -673,3 +834,18 @@ def test_infrastructure_audio_loads_no_application_m0_or_cli_modules_at_runtime(
     loaded = _loaded_after(f"import {AUDIO}")
     assert loaded, "the probe must observe newly loaded modules"
     assert not [n for n in loaded if _within(n, APPLICATION) or _within(n, f"{PKG}.audio") or n == f"{PKG}.cli"]
+
+
+def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0_or_cli_modules_at_runtime():
+    loaded = _loaded_after(f"import {FILESYSTEM}")
+    assert LOCATIONS in loaded, "the probe must observe the filesystem component loading"
+    forbidden = [
+        n
+        for n in loaded
+        if _within(n, APPLICATION)
+        or _within(n, AUDIO)
+        or _within(n, f"{PKG}.audio")
+        or n == f"{PKG}.cli"
+        or _top(n) in {"numpy", "soundfile"}
+    ]
+    assert forbidden == []

@@ -26,6 +26,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [020](0020-execution-contracts-and-metadata-preflight.md) | Offline execution contracts and deterministic metadata preflight | 2026-10-21 | Proposed |
 | [021](0021-processing-spec.md) | Explicit processing specification carried through execution contracts | 2026-10-21 | Proposed |
 | [022](0022-application-component-packages-and-infrastructure-boundaries.md) | Application component packages and enforced application/infrastructure import boundaries | 2026-10-22 | Proposed |
+| [023](0023-explicit-root-artifact-location-resolution.md) | Explicit-root, read-only artifact-location resolution with a separate provenance record | 2026-11-02 | Proposed |
 
 ## Template
 

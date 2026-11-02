@@ -7,10 +7,14 @@ pathname still holds those bytes afterwards, and it is not file-write protection
 later processor must consume the returned samples or reverify what it reads. Contributes to QR-01,
 QR-02, QR-03, FR-02 and FR-17 without completing them; nothing is written, renamed or removed.
 
-Only explicit absolute local paths are accepted. The lexical checks reject relative, URI-style and
-UNC/device-namespace locations; they do not confine access to any directory and do not rule out
-aliases, symbolic links, junctions or other reparse points. Regular-file checks are made on the
-pathname and on the opened handle, but no safety against concurrent modification is claimed.
+Two entry points share one private capture/hash/decode pipeline. ``verify_wav_artifact`` accepts only
+explicit absolute local paths: its lexical checks reject relative, URI-style and UNC/device-namespace
+locations; they do not confine access to any directory and do not rule out aliases, symbolic links,
+junctions or other reparse points. ``verify_resolved_wav_artifact`` takes a ``ResolvedArtifactLocation``,
+resolves its original artifact afresh against the record's configured root, requires the fresh root
+and path to equal the record's exactly, and then verifies at the freshly resolved path. That recheck
+precedes the single content open but is not race-free. Regular-file checks are made on the pathname
+and on the opened handle, but no safety against concurrent modification is claimed.
 
 ``max_file_bytes`` bounds the captured payload and ``max_decoded_bytes`` the returned float64 sample
 storage; neither bounds total interpreter or libsndfile memory use. Both are caller-supplied: no
@@ -31,6 +35,12 @@ import numpy as np
 import soundfile as sf
 
 from autonomous_mixing.domain.project import AudioArtifact
+from autonomous_mixing.infrastructure.filesystem import (
+    LocationResolutionError,
+    LocationResolutionFailureCode,
+    ResolvedArtifactLocation,
+    resolve_artifact_location,
+)
 
 # libsndfile container names accepted as WAV (RIFF, WAVE_FORMAT_EXTENSIBLE, RF64); detected from content.
 WAV_CONTAINERS = ("WAV", "WAVEX", "RF64")
@@ -198,6 +208,38 @@ def verify_wav_artifact(artifact: AudioArtifact, *, max_file_bytes: int, max_dec
     _require_limit(max_file_bytes, "max_file_bytes")
     _require_limit(max_decoded_bytes, "max_decoded_bytes")
     location = _local_absolute_path(artifact.location)
+    return _verify_at(artifact, location, max_file_bytes, max_decoded_bytes)
+
+
+def verify_resolved_wav_artifact(
+    location: ResolvedArtifactLocation, *, max_file_bytes: int, max_decoded_bytes: int
+) -> VerifiedAudio:
+    """Verify ``location.artifact`` at a fresh resolution of its location and return its decoded samples.
+
+    Invalid arguments raise ValueError before any filesystem access. The original artifact is resolved
+    again against ``location.configured_root``; resolution failures propagate as
+    ``LocationResolutionError``. If the fresh resolved root or absolute path differs from the record's,
+    ``STALE_RESOLUTION`` is raised before any content is opened. Otherwise the file at the fresh path is
+    verified exactly as by ``verify_wav_artifact`` against the original artifact's declared hash and
+    metadata. The returned ``VerifiedAudio.artifact`` is ``location.artifact`` itself; the record is not
+    retained in the result.
+    """
+    if not isinstance(location, ResolvedArtifactLocation):
+        raise ValueError(f"location must be a ResolvedArtifactLocation, got {type(location).__name__}")
+    _require_limit(max_file_bytes, "max_file_bytes")
+    _require_limit(max_decoded_bytes, "max_decoded_bytes")
+    fresh = resolve_artifact_location(location.artifact, root=location.configured_root)
+    if fresh.resolved_root != location.resolved_root or fresh.absolute_path != location.absolute_path:
+        raise LocationResolutionError(
+            LocationResolutionFailureCode.STALE_RESOLUTION,
+            f"record ({location.resolved_root!r}, {location.absolute_path!r}) differs from fresh resolution "
+            f"({fresh.resolved_root!r}, {fresh.absolute_path!r})",
+        )
+    return _verify_at(location.artifact, fresh.absolute_path, max_file_bytes, max_decoded_bytes)
+
+
+def _verify_at(artifact: AudioArtifact, location: str, max_file_bytes: int, max_decoded_bytes: int) -> VerifiedAudio:
+    """Shared pipeline: bounded single capture at ``location``, hash check, then decode of the captured bytes."""
     payload = _capture(location, max_file_bytes)
     digest = hashlib.sha256(payload).hexdigest()
     if digest != artifact.content_hash:

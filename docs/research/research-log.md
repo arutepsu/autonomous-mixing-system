@@ -122,3 +122,53 @@
 - Observed checks (Windows, existing uv environment): baseline at 218c3dc with a clean tree, 1,305 passed; after the refactor 1,498 passed, ruff lint passed, scoped formatting check passed (48 files), CLI help and `uv lock --check` passed. A separate signature comparison with the recorded baseline found 0 differences across 120 entries. The fresh-process import checks roughly double the suite's wall time (about 15 s).
 - Limits: no behavior, requirement status or research claim changed. No location resolution, workspace allocation, WAV writing, adapter or orchestration was added. F2 and F4 remain open, and F3 is not closed. The infrastructure rules govern source imports only; they establish no runtime isolation, filesystem protection or adapter. The old modules no longer re-export names they merely imported (domain records, `dataclass`, the `results.T` type variable). Left uncommitted for review.
 - Open: the allowed imports and filesystem dependencies of a future processing adapter, and when the compatibility facades can be removed.
+
+## 2026-11-02 — read-only artifact-location resolution (ADR-023)
+- Implemented the owner-approved design "Read-only artifact-location resolution", proposed as ADR-023. New component `infrastructure.filesystem` with these exports:
+  - `ResolvedArtifactLocation`;
+  - `LocationResolutionFailureCode`, with seven codes;
+  - `LocationResolutionError`;
+  - `resolve_artifact_location(artifact, *, root)`.
+- Resolver behavior:
+  - It resolves an artifact location against an explicit native absolute root without opening content. There is no current-directory fallback, URI decoding, or environment or tilde expansion.
+  - It applies lexical rejections, including any `..` component.
+  - It resolves the root and the candidate strictly, then checks canonical component-wise containment. Root equality is rejected; inside-root links and junctions are allowed and outside targets are rejected.
+  - Failures are typed with a fixed precedence, and only narrow exceptions are mapped.
+- The original `AudioArtifact` object and all its metadata are kept unchanged. A relative location stays relative.
+- `verify_resolved_wav_artifact`:
+  - It re-resolves the original artifact against the recorded `configured_root` and raises `STALE_RESOLUTION` on any exact-string difference before opening content.
+  - It then uses the capture/hash/decode pipeline it shares with `verify_wav_artifact`.
+  - `verify_wav_artifact` is unchanged, and the audio facade now has seven exports.
+  - The earlier open question on relative artifact locations is answered in the overview.
+- Implementation choices observed in code:
+  - The URI pattern is reused from the verifier, so a POSIX relative name like `take:1.wav` is rejected.
+  - Two leading separators are treated as UNC on all platforms.
+  - Containment compares components exactly, so a Windows case-only mismatch would fail closed as `OUTSIDE_ROOT`. No dedicated test covers this.
+  - The stale comparison uses exact strings.
+  - The Windows `..` check matches exact components, with containment as backstop.
+  - Only an exact `RuntimeError` maps to `RESOLUTION_LOOP`.
+- Evidence:
+  - Implementer rerun: full suite 1,870 passed, 1 skipped (POSIX-only permission test in `tests/unit/test_artifact_locations.py`, "POSIX non-root only").
+  - Independent review: 1,866 passed, 5 skipped; four additional junction tests could not run because of sandbox permissions in the review environment. Ruff lint, scoped formatting and CLI help passed.
+  - Implementer real-link evidence on Windows 11 (Developer Mode): symlinks and junctions inside→inside allowed, inside→outside rejected, root aliases, real symlink and junction cycles.
+  - Permission failures, the `ELOOP` branch and unexpected-error propagation were exercised only through test doubles, not as real-platform evidence.
+- Observation: an import-order test failed once in the implementer's baseline full run, before any change, and was not reproduced in later runs. Its cause has not been diagnosed, and no fix is claimed.
+- Limits:
+  - There is no race-free confinement, write or source protection, hard-link uniqueness, exclusive access, workspace allocation, WAV writing or connected execution pipeline.
+  - F2 and F4 remain open, and F3 is unchanged.
+  - No requirement is completed and no requirement status changed.
+  - No perceptual or research-performance result follows.
+  - Left uncommitted for review.
+- Open: who supplies and records the root in a run; workspace allocation; alias and race handling; whether the POSIX name restrictions are intended.
+
+## 2026-11-02 — clarification of the resolver documentation (owner decisions)
+- This entry clarifies the preceding 2026-11-02 resolver entry and does not change it.
+- Windows alternate data streams, and any colon outside the drive prefix, are rejected by intent.
+- The URI-style, Windows-drive and two-leading-separator (UNC) exclusions are intentional supported-input restrictions on all platforms. Valid POSIX names such as `take:1.wav`, `a:b.wav` or `//`-prefixed paths are outside the supported input form. The earlier open item asking whether these POSIX restrictions are intended is closed.
+- Containment is exact path-component comparison after strict canonical resolution. The earlier remark that a Windows case-only mismatch would fail as `OUTSIDE_ROOT` is superseded. The independent reviewer's native Windows casing probe passed: a differently cased but equivalent path resolved within the root. This was a one-off review probe; the suite has no dedicated casing test.
+- Unchanged:
+  - the exact-string `STALE_RESOLUTION` rule;
+  - all verification figures and their attributions;
+  - ADR-023 remains Proposed;
+  - there is still no race-free confinement, write or source protection, workspace allocation, WAV writing or connected pipeline;
+  - F2 and F4 remain open.
