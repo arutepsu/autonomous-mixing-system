@@ -172,3 +172,34 @@
   - ADR-023 remains Proposed;
   - there is still no race-free confinement, write or source protection, workspace allocation, WAV writing or connected pipeline;
   - F2 and F4 remain open.
+
+## 2026-11-02 — fresh output workspace allocation (ADR-024)
+- Implemented the owner-approved design "Fresh output workspace allocation", proposed as ADR-024.
+- New component `infrastructure.workspaces` with six exports: `WorkspaceRoot`, `WorkspaceAllocationRequest`, `AllocatedWorkspace`, `WorkspaceAllocationFailureCode` (nine codes), `WorkspaceAllocationError(code, message, *, created_directory=None)` and `allocate_workspace(request)`.
+- Imports: `allocation` imports only the standard library and the `domain.project`, `application.execution` and `filesystem` public interfaces. This is the first narrowly scoped infrastructure→application dependency. The domain and application still never import infrastructure, and importing `audio` or `filesystem` loads no workspaces or application modules.
+- Allocation steps:
+  - It requires exact root-key agreement and an explicit existing root in the resolver's native absolute syntax.
+  - It uses `directory_token` unchanged as the sole child name, rechecks its ASCII pattern and, on Windows, rejects reserved device names.
+  - It requires the protected locations to cover the union of current audio members and fixed track-gain input baselines with exactly equal metadata. Caller-supplied history entries get the same checks but are not proven exhaustive.
+  - It re-resolves every protected entry freshly, requires exact record equality and a regular-file stat, and opens no content.
+  - It rejects component overlap with the planned child (`PurePath.is_relative_to`, case-insensitive on Windows; per-directory case sensitivity is not handled).
+- Creation and failures:
+  - It creates the child with one exclusive `mkdir(parents=False, exist_ok=False)`. Any existing child is a `COLLISION` and is left untouched, with no reuse, suffix or retry.
+  - After creation it re-resolves the root and child, rechecks the root directory, and requires an exact direct child that is a real directory and empty. Expected failures give `WORKSPACE_CHANGED` with `created_directory`, and the directory is retained with no cleanup.
+  - Narrow mappings: a root `ELOOP` before `mkdir` gives `INVALID_ROOT`; `ELOOP` in root inspection, `lstat` or the listing after creation gives `WORKSPACE_CHANGED`; unrelated errors propagate.
+  - The post-creation root directory recheck was added during the review-driven `ELOOP` correction.
+  - Resolver, verifier and DSP behavior and exports are unchanged (`filesystem` 4, `audio` 7).
+- Evidence:
+  - Coordinator-reported full run: 2,289 passed, 2 platform skips (`tests/unit/test_artifact_locations.py` "POSIX non-root only"; `tests/unit/test_workspace_allocation.py` "POSIX hosts impose no Windows device-name restriction").
+  - Independent correction review: 645 passed, 5 skips; four of these are additional junction skips caused by sandbox restrictions in the review environment. Independent scoped lint and formatting passed.
+  - No fresh lockfile check: uv was unavailable in the environment; `pyproject.toml` and `uv.lock` are unchanged.
+  - Implementer-reported native evidence (Windows 11, Developer Mode): real collisions with file, directory, symlink, dangling-link and junction children; real root aliases via symlink and junction; real post-`mkdir` replacements; concurrent same-assignment allocation over 10 rounds, each giving one success and one `COLLISION`.
+  - Permission errors, reparse attributes, `ELOOP` and unexpected-error propagation were exercised only via injected doubles, not as real-platform evidence.
+- Limits:
+  - There is no complete historical inventory guarantee, durable ownership, execution lock, race-free protection or confinement, or cleanup and recovery.
+  - There is no WAV writing and no connected execution pipeline, and the result is not a security capability.
+  - F4 remains open (reduced, not closed), and F2 is unaffected.
+  - No requirement is completed and no requirement status changed.
+  - No perceptual or research-performance result follows.
+  - Left uncommitted for review.
+- Open: a history and retention registry; durable ownership and cleanup; execution locks; the writer's no-overwrite protocol; per-directory case sensitivity in overlap checks.

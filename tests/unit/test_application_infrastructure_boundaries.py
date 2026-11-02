@@ -14,7 +14,11 @@ matches exact package segments and enforces:
   ``verification`` uses the standard library, NumPy, soundfile, the ``domain.project`` interface and
   the ``filesystem`` interface (never ``filesystem.locations`` directly); the ``filesystem``
   initializer re-exports ``locations`` only; ``locations`` uses the standard library and the
-  ``domain.project`` interface only.
+  ``domain.project`` interface only;
+- the ``workspaces`` initializer re-exports ``allocation`` only; ``allocation`` uses the standard
+  library and the ``domain.project``, ``application.execution`` and ``filesystem`` interfaces only
+  (never its own facade). It is the only production module outside the application that imports an
+  application module; no other infrastructure module imports ``workspaces``.
 
 These are source-import rules. The ``audio`` facade loads both leaves eagerly, so importing it is not
 claimed to avoid loading soundfile.
@@ -36,6 +40,8 @@ DSP = f"{AUDIO}.dsp"
 VERIFICATION = f"{AUDIO}.verification"
 FILESYSTEM = f"{INFRASTRUCTURE}.filesystem"
 LOCATIONS = f"{FILESYSTEM}.locations"
+WORKSPACES = f"{INFRASTRUCTURE}.workspaces"
+ALLOCATION = f"{WORKSPACES}.allocation"
 DOMAIN = f"{PKG}.domain"
 DOMAIN_COMPONENTS = ("shared", "project", "context", "observation", "action", "decision", "validation", "run")
 
@@ -186,6 +192,14 @@ def _infrastructure_rule(source: str, target: str, relative: bool, known_modules
         if target == f"{DOMAIN}.project" and target in known_modules:
             return None
         return "locations may import only the standard library and domain.project"
+    if source == WORKSPACES:
+        return None if target == ALLOCATION else "workspaces initializer may re-export only allocation"
+    if source == ALLOCATION:
+        if _is_stdlib(target, relative):
+            return None
+        if target in {f"{DOMAIN}.project", f"{APPLICATION}.execution", FILESYSTEM} and target in known_modules:
+            return None
+        return "allocation may import only the standard library, domain.project, application.execution and filesystem"
     return "unclassified infrastructure module needs an explicit rule"
 
 
@@ -248,6 +262,9 @@ FIXTURE_MODULES = KNOWN | {
     f"{INFRASTRUCTURE}.filesystem_extra",
     f"{FILESYSTEM}.locations_extra",
     f"{FILESYSTEM}.workspace",
+    f"{INFRASTRUCTURE}.workspaces_extra",
+    f"{WORKSPACES}.allocation_extra",
+    f"{WORKSPACES}.registry",
 }
 PACKAGES = frozenset(name for name, path in ALL_MODULES.items() if path.name == "__init__.py")
 
@@ -445,6 +462,80 @@ FORBIDDEN = [
     ("import math", f"{FILESYSTEM}.workspace", "unclassified infrastructure"),
     ("import math", f"{INFRASTRUCTURE}.filesystem_extra", "unclassified infrastructure"),
     ("import math", f"{AUDIO}.writer", "unclassified infrastructure"),
+    ("import math", f"{WORKSPACES}.registry", "unclassified infrastructure"),
+    ("import math", f"{INFRASTRUCTURE}.workspaces_extra", "unclassified infrastructure"),
+    # workspaces initializer re-exports allocation only
+    ("from autonomous_mixing.application.execution import ExecutionWorkspace", WORKSPACES, "workspaces initializer"),
+    ("from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location", WORKSPACES, "workspaces"),
+    ("import os", WORKSPACES, "workspaces initializer"),
+    ("from .allocation_extra import x", WORKSPACES, "workspaces initializer"),
+    ("from .registry import x", WORKSPACES, "workspaces initializer"),
+    ("from .missing import x", WORKSPACES, "workspaces initializer"),
+    ("from ..audio import verify_wav_artifact", WORKSPACES, "workspaces initializer"),
+    ("from ......... import x", WORKSPACES, "unresolvable"),
+    # allocation -> application internals, facades or other components
+    ("from autonomous_mixing.application.execution.identity import ExecutionWorkspace", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application.execution import identity", ALLOCATION, "allocation"),
+    ("from ...application.execution.identity import ExecutionWorkspace", ALLOCATION, "allocation"),
+    ("import autonomous_mixing.application.execution.preflight as preflight", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application import ExecutionWorkspace", ALLOCATION, "allocation"),
+    ("import autonomous_mixing.application", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application.execution_contracts import ProcessingPlan", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application.execution_preflight import preflight_execution", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application.admission import admit_action", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application.decision import DecisionRequest", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.application.shared import PortResult", ALLOCATION, "allocation"),
+    ("from ...application import observation", ALLOCATION, "allocation"),
+    # allocation -> filesystem internals or look-alikes
+    ("from autonomous_mixing.infrastructure.filesystem.locations import _lexical_problem", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.infrastructure.filesystem import locations", ALLOCATION, "allocation"),
+    ("from ..filesystem.locations import resolve_artifact_location", ALLOCATION, "allocation"),
+    ("from ..filesystem import locations", ALLOCATION, "allocation"),
+    ("import autonomous_mixing.infrastructure.filesystem.locations as locations", ALLOCATION, "allocation"),
+    ("from ..filesystem_extra import x", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.infrastructure.filesystem.locations_extra import x", ALLOCATION, "allocation"),
+    ("from ..filesystem.workspace import allocate", ALLOCATION, "allocation"),
+    # allocation -> audio, DSP, M0, CLI, providers, third-party, domain internals and other components
+    ("from autonomous_mixing.infrastructure.audio import verify_wav_artifact", ALLOCATION, "allocation"),
+    ("from ..audio import dsp", ALLOCATION, "allocation"),
+    ("import autonomous_mixing.infrastructure.audio.dsp as dsp", ALLOCATION, "allocation"),
+    ("from ..audio.verification import verify_resolved_wav_artifact", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.infrastructure import audio", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.audio.io import load_stem", ALLOCATION, "allocation"),
+    ("from ...audio import features", ALLOCATION, "allocation"),
+    ("from autonomous_mixing import cli", ALLOCATION, "allocation"),
+    ("import autonomous_mixing", ALLOCATION, "allocation"),
+    ("import anthropic", ALLOCATION, "allocation"),
+    ("import numpy as np", ALLOCATION, "allocation"),
+    ("import soundfile", ALLOCATION, "allocation"),
+    ("import pathlib_extra", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.domain.project.artifacts import AudioArtifact", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.domain.shared import require_text", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.domain import ProjectState", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.domain.project_extra import x", ALLOCATION, "allocation"),
+    ("from autonomous_mixing.domain.execution import ExecutionStatus", ALLOCATION, "allocation"),
+    # allocation never imports its own facade, unknown workspace modules or look-alikes
+    ("from autonomous_mixing.infrastructure.workspaces import WorkspaceRoot", ALLOCATION, "allocation"),
+    ("from . import WorkspaceRoot", ALLOCATION, "allocation"),
+    ("import autonomous_mixing.infrastructure.workspaces", ALLOCATION, "allocation"),
+    ("from .registry import x", ALLOCATION, "allocation"),
+    ("from .allocation_extra import x", ALLOCATION, "allocation"),
+    ("from ..workspaces_extra import x", ALLOCATION, "allocation"),
+    ("from .missing import x", ALLOCATION, "allocation"),
+    ("from ......... import x", ALLOCATION, "unresolvable"),
+    # filesystem, audio and the descriptive initializer never import workspaces
+    ("from autonomous_mixing.infrastructure.workspaces import allocate_workspace", LOCATIONS, "locations"),
+    ("from ..workspaces import allocation", LOCATIONS, "locations"),
+    ("from ..workspaces import allocate_workspace", FILESYSTEM, "filesystem initializer"),
+    ("import autonomous_mixing.infrastructure.workspaces.allocation", FILESYSTEM, "filesystem initializer"),
+    ("from ..workspaces import WorkspaceRoot", VERIFICATION, "verification"),
+    ("import autonomous_mixing.infrastructure.workspaces as workspaces", VERIFICATION, "verification"),
+    ("from ..workspaces.allocation import allocate_workspace", DSP, "dsp"),
+    ("from ..workspaces import allocate_workspace", AUDIO, "audio facade"),
+    ("from . import workspaces", INFRASTRUCTURE, "descriptive"),
+    # application code never imports workspaces (layer rule unchanged)
+    ("from autonomous_mixing.infrastructure.workspaces import allocate_workspace", EXE_PORTS, "layer"),
+    ("from ...infrastructure import workspaces", EXE_PORTS, "layer"),
 ]
 
 PERMITTED = [
@@ -515,6 +606,29 @@ PERMITTED = [
     ("from autonomous_mixing.domain.project import AudioArtifact", LOCATIONS),
     ("from autonomous_mixing.domain import project", LOCATIONS),
     ("from ...domain.project import AudioArtifact", LOCATIONS),
+    # workspaces: re-export-only initializer and the allocation leaf's approved interfaces
+    ("from .allocation import allocate_workspace, WorkspaceRoot", WORKSPACES),
+    ("from . import allocation", WORKSPACES),
+    ("from autonomous_mixing.infrastructure.workspaces.allocation import AllocatedWorkspace", WORKSPACES),
+    ("import errno", ALLOCATION),
+    ("import os", ALLOCATION),
+    ("import re", ALLOCATION),
+    ("import stat", ALLOCATION),
+    ("from pathlib import Path, PureWindowsPath", ALLOCATION),
+    ("from dataclasses import dataclass", ALLOCATION),
+    ("from enum import Enum", ALLOCATION),
+    ("from autonomous_mixing.application.execution import ExecutionWorkspace", ALLOCATION),
+    ("from autonomous_mixing.application import execution", ALLOCATION),
+    ("import autonomous_mixing.application.execution as execution", ALLOCATION),
+    ("from ...application.execution import ExecutionWorkspace", ALLOCATION),
+    ("from ...application import execution", ALLOCATION),
+    ("from autonomous_mixing.domain.project import AudioArtifact, ProjectState", ALLOCATION),
+    ("from autonomous_mixing.domain import project", ALLOCATION),
+    ("from ...domain.project import ProjectState", ALLOCATION),
+    ("from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location", ALLOCATION),
+    ("from ..filesystem import LocationResolutionError, ResolvedArtifactLocation", ALLOCATION),
+    ("from autonomous_mixing.infrastructure import filesystem", ALLOCATION),
+    ("import autonomous_mixing.infrastructure.filesystem as filesystem", ALLOCATION),
 ]
 
 
@@ -551,7 +665,16 @@ EXPECTED_APPLICATION_MODULES = {
         for suffix in ("", ".identity", ".requests", ".processing", ".validation", ".preflight", ".ports")
     ),
 }
-EXPECTED_INFRASTRUCTURE_MODULES = {INFRASTRUCTURE, AUDIO, DSP, VERIFICATION, FILESYSTEM, LOCATIONS}
+EXPECTED_INFRASTRUCTURE_MODULES = {
+    INFRASTRUCTURE,
+    AUDIO,
+    DSP,
+    VERIFICATION,
+    FILESYSTEM,
+    LOCATIONS,
+    WORKSPACES,
+    ALLOCATION,
+}
 
 
 def _scanned(prefix: str) -> dict[str, Path]:
@@ -646,6 +769,8 @@ def test_infrastructure_initializer_is_descriptive_and_leaves_keep_their_locatio
     assert ALL_MODULES[VERIFICATION] == SRC / PKG / "infrastructure" / "audio" / "verification.py"
     assert ALL_MODULES[FILESYSTEM] == SRC / PKG / "infrastructure" / "filesystem" / "__init__.py"
     assert ALL_MODULES[LOCATIONS] == SRC / PKG / "infrastructure" / "filesystem" / "locations.py"
+    assert ALL_MODULES[WORKSPACES] == SRC / PKG / "infrastructure" / "workspaces" / "__init__.py"
+    assert ALL_MODULES[ALLOCATION] == SRC / PKG / "infrastructure" / "workspaces" / "allocation.py"
 
 
 def _project_imports(name: str) -> set[str]:
@@ -661,6 +786,15 @@ def test_real_filesystem_and_audio_edges_are_exactly_the_permitted_ones():
     assert _project_imports(AUDIO) == {DSP, VERIFICATION}
     for name in _scanned(INFRASTRUCTURE):
         assert LOCATIONS not in _resolved_imports(name) or name == FILESYSTEM, name
+
+
+def test_real_workspace_edges_are_exactly_the_permitted_ones():
+    assert _project_imports(WORKSPACES) == {ALLOCATION}
+    assert _project_imports(ALLOCATION) == {f"{DOMAIN}.project", f"{APPLICATION}.execution", FILESYSTEM}
+    assert {_top(t) for t in _resolved_imports(ALLOCATION)} - {PKG} <= set(sys.stdlib_module_names)
+    for name in ALL_MODULES:
+        if name not in {WORKSPACES, ALLOCATION}:
+            assert not [t for t in _resolved_imports(name) if _within(t, WORKSPACES)], name
 
 
 def _reexports(name: str) -> tuple[list[str], list[str]]:
@@ -699,9 +833,20 @@ AUDIO_EXPORTS = {
     "verify_wav_artifact",
     "verify_resolved_wav_artifact",
 }
+WORKSPACE_EXPORTS = {
+    "WorkspaceRoot",
+    "WorkspaceAllocationRequest",
+    "AllocatedWorkspace",
+    "WorkspaceAllocationFailureCode",
+    "WorkspaceAllocationError",
+    "allocate_workspace",
+}
 
 
-@pytest.mark.parametrize("name, expected", [(FILESYSTEM, FILESYSTEM_EXPORTS), (AUDIO, AUDIO_EXPORTS)])
+@pytest.mark.parametrize(
+    "name, expected",
+    [(FILESYSTEM, FILESYSTEM_EXPORTS), (AUDIO, AUDIO_EXPORTS), (WORKSPACES, WORKSPACE_EXPORTS)],
+)
 def test_infrastructure_component_initializers_only_reexport_their_public_names(name, expected):
     imported, exported = _reexports(name)
     assert sorted(imported) == sorted(exported) and len(exported) == len(set(exported))
@@ -734,10 +879,13 @@ def test_only_the_compatibility_test_imports_application_facades():
 
 
 def test_production_code_outside_the_application_imports_no_application_module():
-    # No adapter or service consumes the application yet; a future one must use component interfaces.
+    # Only workspace allocation realizes an application record (ExecutionWorkspace), through the
+    # execution interface alone; any other consumer needs its own explicit, reviewed exception.
     for name in ALL_MODULES:
         if not _within(name, APPLICATION):
-            assert not [t for t in _resolved_imports(name) if _within(t, APPLICATION)], name
+            imported = {t for t in _resolved_imports(name) if _within(t, APPLICATION)}
+            expected = {f"{APPLICATION}.execution"} if name == ALLOCATION else set()
+            assert imported == expected, name
 
 
 # --- fresh-process imports -------------------------------------------------------------------
@@ -778,6 +926,13 @@ for n in ("ResolvedArtifactLocation", "LocationResolutionFailureCode", "Location
 assert verification.ResolvedArtifactLocation is filesystem.ResolvedArtifactLocation
 assert verification.resolve_artifact_location is locations.resolve_artifact_location
 assert len(filesystem.__all__) == 4
+workspaces = importlib.import_module("autonomous_mixing.infrastructure.workspaces")
+allocation = importlib.import_module("autonomous_mixing.infrastructure.workspaces.allocation")
+assert len(workspaces.__all__) == 6
+for n in workspaces.__all__:
+    assert getattr(workspaces, n) is getattr(allocation, n)
+assert allocation.ExecutionWorkspace is execution.ExecutionWorkspace
+assert allocation.resolve_artifact_location is filesystem.resolve_artifact_location
 print("ok")
 """
 
@@ -801,6 +956,10 @@ def test_fresh_process_imports_succeed_in_every_order_without_partial_initializa
         "audio first": [AUDIO, VERIFICATION, FILESYSTEM, LOCATIONS],
         "verification first": [VERIFICATION, LOCATIONS, FILESYSTEM],
         "execution internals first": [f"{APPLICATION}.execution.{m}" for m in ("ports", "preflight", "processing")],
+        "audio first, then workspaces": [AUDIO, FILESYSTEM, WORKSPACES, ALLOCATION],
+        "workspace leaf first": [ALLOCATION, WORKSPACES, AUDIO, FILESYSTEM] + CANONICAL_ORDER,
+        "workspace facade first": [WORKSPACES, APPLICATION, AUDIO, LOCATIONS],
+        "execution then workspaces": [f"{APPLICATION}.execution", ALLOCATION, WORKSPACES],
     }
     # Every module must also import on its own as the first import of a fresh process.
     for name in sorted(EXPECTED_APPLICATION_MODULES | EXPECTED_INFRASTRUCTURE_MODULES):
@@ -834,6 +993,24 @@ def test_infrastructure_audio_loads_no_application_m0_or_cli_modules_at_runtime(
     loaded = _loaded_after(f"import {AUDIO}")
     assert loaded, "the probe must observe newly loaded modules"
     assert not [n for n in loaded if _within(n, APPLICATION) or _within(n, f"{PKG}.audio") or n == f"{PKG}.cli"]
+    assert not [n for n in loaded if _within(n, WORKSPACES)]
+
+
+def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or_cli_at_runtime():
+    loaded = _loaded_after(f"import {WORKSPACES}")
+    assert {ALLOCATION, f"{APPLICATION}.execution", LOCATIONS} <= set(loaded)
+    forbidden = [
+        n
+        for n in loaded
+        if _within(n, AUDIO)
+        or _within(n, f"{PKG}.audio")
+        or n == f"{PKG}.cli"
+        or _top(n) in {"numpy", "soundfile", "anthropic"}
+    ]
+    assert forbidden == []
+    for name in loaded:
+        layer_ok = name == PKG or any(_within(name, p) for p in (DOMAIN, APPLICATION, INFRASTRUCTURE))
+        assert layer_ok or _top(name) in sys.stdlib_module_names, name
 
 
 def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0_or_cli_modules_at_runtime():
@@ -844,6 +1021,7 @@ def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0
         for n in loaded
         if _within(n, APPLICATION)
         or _within(n, AUDIO)
+        or _within(n, WORKSPACES)
         or _within(n, f"{PKG}.audio")
         or n == f"{PKG}.cli"
         or _top(n) in {"numpy", "soundfile"}
