@@ -1,5 +1,7 @@
+import errno
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -189,5 +191,90 @@ def test_input_validation_precedes_report_alias_check(tmp_path, capsys):
     err = capsys.readouterr().err
     assert code == 2
     assert err.startswith("error: Stems must share a sample rate")
+    for path, digest in protected.items():
+        assert _sha256(path) == digest
+
+
+# --- Report parent directory cannot be created (expected filesystem failures) ---
+
+
+def _assert_parent_rejected(code, capsys, protected, report):
+    _assert_rejected(code, capsys, protected)
+    assert not os.path.lexists(report)
+
+
+def test_existing_file_as_report_parent_is_rejected(tmp_path, capsys):
+    # Windows: stat reports the path missing, so mkdir raises FileExistsError.
+    # POSIX: stat raises NotADirectoryError, so the identity inspection rejects first.
+    kick, bass = _stems(tmp_path)
+    blocker = tmp_path / "plain.txt"
+    blocker.write_text("not a directory", encoding="utf-8")
+    protected = {kick: _sha256(kick), bass: _sha256(bass), blocker: _sha256(blocker)}
+    report = blocker / "report.json"
+    code = main(["analyze", str(kick), str(bass), "--output", str(report)])
+    _assert_parent_rejected(code, capsys, protected, report)
+
+
+@pytest.mark.parametrize("which", ["kick", "bass"])
+def test_input_wav_as_report_parent_is_rejected(tmp_path, capsys, which):
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    report = (kick if which == "kick" else bass) / "report.json"
+    code = main(["analyze", str(kick), str(bass), "--output", str(report)])
+    _assert_parent_rejected(code, capsys, protected, report)
+
+
+def test_nested_report_parent_through_existing_file_is_rejected(tmp_path, capsys):
+    kick, bass = _stems(tmp_path)
+    blocker = tmp_path / "plain.txt"
+    blocker.write_text("not a directory", encoding="utf-8")
+    protected = {kick: _sha256(kick), bass: _sha256(bass), blocker: _sha256(blocker)}
+    report = blocker / "sub" / "report.json"
+    code = main(["analyze", str(kick), str(bass), "--output", str(report)])
+    _assert_parent_rejected(code, capsys, protected, report)
+
+
+def _inject_parent_mkdir_failure(monkeypatch, parent, exc):
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *args, **kwargs):
+        if os.fspath(self) == os.fspath(parent):
+            raise exc
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+
+
+@pytest.mark.parametrize("exc_type", [FileExistsError, NotADirectoryError, PermissionError, FileNotFoundError])
+def test_injected_expected_parent_creation_failure_is_rejected(tmp_path, capsys, monkeypatch, exc_type):
+    # INJECTED: Path.mkdir raises the expected error type for the report parent only.
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    report = tmp_path / "newdir" / "report.json"
+    _inject_parent_mkdir_failure(monkeypatch, report.parent, exc_type("injected mkdir failure"))
+    code = main(["analyze", str(kick), str(bass), "--output", str(report)])
+    monkeypatch.undo()
+    _assert_parent_rejected(code, capsys, protected, report)
+    assert not report.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [RuntimeError("injected unexpected error"), OSError(errno.EIO, "injected I/O error")],
+    ids=["RuntimeError", "OSError-EIO"],
+)
+def test_injected_unexpected_parent_creation_error_propagates(tmp_path, capsys, monkeypatch, exc):
+    # INJECTED: errors outside the expected set must propagate unchanged.
+    assert type(exc) in (RuntimeError, OSError)
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    report = tmp_path / "newdir" / "report.json"
+    _inject_parent_mkdir_failure(monkeypatch, report.parent, exc)
+    with pytest.raises(type(exc)) as excinfo:
+        main(["analyze", str(kick), str(bass), "--output", str(report)])
+    monkeypatch.undo()
+    assert excinfo.value is exc
+    assert SUCCESS_PREFIX not in capsys.readouterr().out
+    assert not report.exists()
     for path, digest in protected.items():
         assert _sha256(path) == digest

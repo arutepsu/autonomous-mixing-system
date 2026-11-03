@@ -255,3 +255,17 @@
 - Correction to the briefed behaviour change for an output whose parent component is an existing file: it was stated as now giving exit 2 with `error: cannot verify …` instead of a traceback. That follows from the code only where `os.stat` raises a non-`FileNotFoundError` error (expected on POSIX, not exercised natively). A documentation probe on Windows 11 (2026-11-03, one-off, not regression coverage) observed `FileNotFoundError` from `os.stat`, so the first check allowed the path and parent creation raised an uncaught `FileExistsError` traceback, as before; no input was written.
 - Limits: not a lock and not race-free; parent directories created before a second-check rejection remain. F4 (future file adapter) is unaffected. No requirement status changed; QR-01 remains untested as recorded.
 - Open: the Windows file-as-parent traceback; native POSIX behaviour of the guard.
+
+## 2026-11-03 — M0 CLI report-parent creation failures (follow-up correction)
+- Supersedes the correction bullet and the open item "the Windows file-as-parent traceback" in the earlier 2026-11-03 entry "M0 CLI report destination guard (defect correction)": that traceback is resolved. The earlier entry is left unchanged. Documented after independent review; the follow-up change to `src/autonomous_mixing/cli.py` and `tests/test_cli.py` is uncommitted.
+- Behaviour: only `path.parent.mkdir(parents=True, exist_ok=True)` is wrapped. On `FileExistsError`, `NotADirectoryError`, `PermissionError` or `FileNotFoundError` the CLI prints `error: cannot create report directory <parent>: <exc>` on stderr and returns 2. No report is written and no `Wrote …` line is printed; inputs and blocking files are unchanged. The order stays check, parent creation, check, write, and both identity checks remain.
+- Evidence (by source):
+  - Implementer full run: 2,801 passed, 3 platform skips.
+  - Independent focused review: 25 CLI tests passed; 2 hard-link skips were caused by sandbox permissions.
+  - Independent scoped lint, formatting and CLI help passed.
+  - No independent full-suite rerun for this small follow-up.
+  - Native Windows file-as-parent cases passed; there was no native POSIX run. On POSIX the identity check is expected to reject these cases first with `error: cannot verify …`; this is untested.
+  - uv was unavailable; dependency files are unchanged.
+  - No real `PermissionError` from parent creation was produced; that type is covered only by an injected test.
+- Limits: unexpected errors from parent creation still propagate, and report-writing errors are not covered by this change; not every CLI filesystem error is handled. Parent directories created before a failure are not cleaned up. No locking or race-free guarantee is added. No requirement status changed.
+- Open: native POSIX behaviour of the guard and of these cases.

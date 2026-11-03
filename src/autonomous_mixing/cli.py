@@ -52,8 +52,14 @@ def main(argv: list[str] | None = None) -> int:
         # as "missing/../input.wav" only resolves to the input once "missing" exists.
         conflict = _report_conflict(path, inputs)
         if conflict is None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            conflict = _report_conflict(path, inputs)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except (FileExistsError, NotADirectoryError, PermissionError, FileNotFoundError) as exc:
+                # E.g. a parent component is an existing file. Directories created
+                # before the failure are left in place.
+                conflict = f"cannot create report directory {path.parent}: {exc}"
+            else:
+                conflict = _report_conflict(path, inputs)
         if conflict is not None:
             print(f"error: {conflict}", file=sys.stderr)
             return 2
