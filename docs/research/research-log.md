@@ -309,3 +309,12 @@
 - Superseded: the first plan version's "every step is behavior-preserving", "same behavior-test count" as sole exit evidence, budgets and run records in `core.loop`, and the 3-to-4-day estimate as a planning fact. Those entries above are left unchanged.
 - Not resolved: the review names an ADR-026 "processor location-contract gap" that is not documented under that name (new owner decision MD-6). One candidate is that `AudioArtifact.location` does not record which root it is relative to.
 - Evidence: documentation only; no code moved, no tests run.
+
+## 2026-11-03 — second Codex review of ADR-027 (targeted revisions)
+- Codex's second review kept the direction and asked for four targeted revisions before authorizing migration; each was checked and applied:
+  1. "Every data type in `core.records`" was too broad: adapter-local data such as `VerifiedAudio` (holds a NumPy array), `AllocatedWorkspace`, `WrittenWav` and resource limits is not core vocabulary. The rule now covers core-facing business and port records only; immutability rules and test G11 apply to core records only.
+  2. Confirmed module cycle in the record mapping: `DecisionRequest` needs the budget records, which were mapped into `records.run`, whose `RunConfiguration` needs `ControllerIdentity` from `records.decision`. Budgets now get their own module (`decision → budgets`, `run → budgets, decision`). The plan lists the full acyclic module graph of `core.records`, derived from the current imports, for the M1 pilot to check.
+  3. MD-6 corrected. The gap is not root-less locations in general but a reproduced integration case from Codex's architecture audit: equal relative input and output location strings under different roots make the processor succeed and `validate_processed_candidate` then reject the result lexically. Options and the recommended bounded guard (before M1, as its own behavior change with ADR-026 re-review) are recorded in the plan. The earlier candidate explanation in the previous entry is superseded.
+  4. ADR-027 point 2 contradicted itself about where port request/response types belong; it now says ports exchange them and their definitions live in `core.records`.
+- Process note: the audit recommended re-reviewing the location-gap fix before committing the ADR-026 adapter. The adapter was committed earlier today (`a13d196`, owner decision MD-1) without that fix; ADR-026 stays Proposed until the MD-6 disposition is implemented and re-reviewed.
+- Evidence: documentation only; no code changed, no tests run.

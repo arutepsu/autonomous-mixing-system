@@ -2,7 +2,7 @@
 
 Status: **Planned**, revised 2026-11-03 after an independent Codex review. Depends on [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Proposed) and on the owner decisions in section 2. Rules for the target are in [`engineering-conventions.md`](../project/engineering-conventions.md).
 
-Superseded from the first version of this plan: the claim that every step is behavior-preserving, the exit criterion "same behavior-test count" as sole evidence, the mapping that put budgets and run records in `core.loop` (it created a forbidden ports → loop dependency), and the 3-to-4-day estimate as a planning fact.
+Revised again after Codex's second review (2026-11-03): data scope narrowed to core-facing records, `budgets` split out to avoid a module cycle, MD-6 replaced with the exact reproduced case. Superseded from the first version of this plan: the claim that every step is behavior-preserving, the exit criterion "same behavior-test count" as sole evidence, the mapping that put budgets and run records in `core.loop` (it created a forbidden ports → loop dependency), and the 3-to-4-day estimate as a planning fact.
 
 ## 1. Principles
 1. **Classified steps.** Each step belongs to exactly one class, named in its commit:
@@ -28,15 +28,22 @@ Superseded from the first version of this plan: the claim that every step is beh
 | MD-3 | No `core.measurement` or `core.decision` packages. | Adopted 2026-11-03; narrowed by the review: request/response types are records, ports own protocols and response checks. |
 | MD-4 | Move code first, build the loop afterwards. | Adopted 2026-11-03. |
 | MD-5 | Vocabulary renames as optional class (c) step. | Open. |
-| MD-6 | Identify the ADR-026 "processor location-contract gap" named in the Codex review, and decide whether it is fixed before M1, between the moves and the loop, or as the first loop task. | Open. The gap is not documented under that name; one candidate is that `AudioArtifact.location` does not record which root it is relative to (inputs: input root; outputs: output root, ADR-026 D3), so a `ProcessedCandidate` cannot be resolved again without root knowledge kept elsewhere. Fixing it changes behavior and is not part of a class (a) step. |
+| MD-6 | Disposition of the ADR-026 processor/caller location gap (below). | Open. Recommendation: option 1, as its own behavior-change commit with ADR-026 re-review, **before M1**, so that the class (a) moves carry no pending behavior change. |
+
+**MD-6 case (from the Codex architecture audit of 2026-11-03, reproduced there against real temporary files).** A relative input location can equal the processor's planned relative output location while resolving under a different configured root; for example, a fixed input recorded as `<directory_token>/target.wav` under the source root, with a separately allocated output root. Resolver, bound inventory and processor support this layout, the files are physically distinct and no source bytes are overwritten. The processor renders and returns a `ProcessedCandidate`, but the caller's `validate_processed_candidate` then rejects it, because it compares output and input location strings lexically without root context ("output locations must differ … (lexical check)", `application/execution/validation.py`). It is an integration-contract gap, not a DSP failure or an unsafe overwrite. Options:
+1. Bounded guard (audit recommendation): during the processor's no-I/O binding, compute the two prospective output location strings and reject equality with any location the caller validator checks, before verification, DSP or writing; add a regression with equal relative strings under different physical roots; document the conservative supported-layout restriction. Keeps the current API and the fail-closed lexical contract.
+2. Root-aware location identity: support such cross-root layouts through a separately designed location/context abstraction. Larger; no path resolution may be imported into core validation to work around it.
+
+The adapter was committed in `a13d196` (MD-1) before this re-review; ADR-026 remains Proposed until the disposition is implemented and re-reviewed.
 
 ## 3. Target layout
 ```
 autonomous_mixing/
   core/
-    records/        all core data types and the invariant checks records call in __post_init__
-      identifiers, invariants, project, artifacts, mix, context, observation,
-      actions, decision, analysis, admission, rendering, verification, run, results
+    records/        core-facing business and port records, and the invariant checks records call
+                    in __post_init__ (adapter-local data stays in its adapter)
+      identifiers, invariants, artifacts, project, mix, context, observation, actions,
+      budgets, results, decision, analysis, verification, rendering, admission, run
     ports/          protocols and response checks: analysis, decision, rendering
     admission/      admit_action, preflight_execution
     verification/   reference consistency checks (the verifier itself is loop work)
@@ -48,6 +55,30 @@ autonomous_mixing/
     cli.py
 ```
 Placement rule for functions: a check that a record calls in its `__post_init__` stays with the records (records may not import ports, stages or the loop). Everything else that is behavior moves out.
+
+Scope rule for data: only core-facing business and port records move to `core/records`. Adapter-local implementation data stays in its adapter, for example `VerifiedAudio` (holds a NumPy array), `ResolvedArtifactLocation`, `WorkspaceRoot`, `WorkspaceAllocationRequest`, `AllocatedWorkspace`, `WrittenWav` and `ProcessingLimits`.
+
+Module graph inside `core/records`, derived from the current imports (each module imports only modules listed before it; the M1 pilot checks it with the architecture test):
+
+| Module | Imports from records |
+| --- | --- |
+| `identifiers`, `invariants` | — |
+| `artifacts` | identifiers, invariants |
+| `project` | artifacts |
+| `mix` | identifiers |
+| `context` | project |
+| `observation` | artifacts, project |
+| `actions` | artifacts, project |
+| `budgets` | identifiers, invariants |
+| `results` | identifiers, invariants |
+| `decision` | actions, budgets, context, observation, project |
+| `analysis` | observation, project |
+| `verification` | observation, project |
+| `rendering` | actions, artifacts, mix, observation, project |
+| `admission` | decision, mix, observation, rendering |
+| `run` | actions, budgets, context, decision, observation, project, verification |
+
+`budgets` is a module of its own because `decision` (`DecisionRequest`) needs it and `run` (`RunConfiguration`, which needs `ControllerIdentity` from `decision`) needs it too; putting budgets into `run` would create the cycle decision → run → decision.
 
 ## 4. Module mapping
 
@@ -63,7 +94,8 @@ Placement rule for functions: a check that a record calls in its `__post_init__`
 | `domain/action/rollback.py`: `RollbackStatus`, `RollbackReceipt`, `validate_rollback_references` (called by `CorrectionAttempt.__post_init__`) | `actions` |
 | `domain/decision/decision.py` | `decision` |
 | `domain/validation/criteria.py`, `result.py` | `verification` |
-| `domain/run/budgets.py`, `configuration.py`, `run.py`, `attempt.py` | `run` |
+| `domain/run/budgets.py` | `budgets` |
+| `domain/run/configuration.py`, `run.py`, `attempt.py` | `run` |
 | `application/shared/results.py` | `results` |
 | `application/observation/contracts.py` | `analysis` |
 | `application/decision/contracts.py` | `decision` |
@@ -133,14 +165,14 @@ Maintained in this section during the migration. Every assertion of the four old
 | G8 | Constructor, function and protocol signatures equal the 218c3dc baseline | Kept through class (a) moves as move-equivalence evidence (old name → new path); retired or rebased in class (c) | planned |
 | G9 | Every public definition defined exactly once, inventory complete | Kept | planned |
 | G10 | Exact permitted edges of filesystem, audio, workspaces, wav_output, processing | Decided in M4: kept as internal rules of `adapters/rendering`, or dropped with reason | planned |
-| G11 | (new) Records are frozen dataclasses with only immutable field types; no dataclass defined outside `core/records` | New in M1 | planned |
+| G11 | (new) Core records are frozen dataclasses with only immutable field types and no arrays; no dataclass is defined in `core` outside `core/records`; the `core/records` module graph is acyclic. Adapter-local dataclasses are out of scope | New in M1 | planned |
 | G12 | (gap) SR-10 runtime inputs and configuration contain no hidden-data fields | No test exists today. Not created by the migration; required separately (ADR-027 point 4) | open |
 
 ## 7. Steps
 
 | Step | Class | Content | Exit criteria |
 | --- | --- | --- | --- |
-| M0 | — | MD-2, MD-5, MD-6 decided; baseline recorded (2,893 passed, 3 skipped on 2026-11-03, `.venv`, full suite). | Clean tree; baseline in the research log. |
+| M0 | — | MD-2, MD-5, MD-6 decided; MD-6 disposition implemented and re-reviewed if option 1 is chosen; baseline recorded (2,893 passed, 3 skipped on 2026-11-03, `.venv`, full suite). | Clean tree; baseline in the research log. |
 | **M1 pilot** | (a) | Create `tests/architecture/` (checker moved, rules for `core.records`, G11). Move all data types and record invariants into `core/records` per section 4; old `domain` and `application` package paths re-export from the new locations. Update the old architecture tests for the moved modules in the same commit. | Behavior tests: same count. Ledger rows G1, G3, G6, G8, G9, G11 updated. Effort measured and recorded; go/no-go decision by the owner. |
 | M2 | (a) | Move behavior into `core/ports`, `core/admission`, `core/verification`, `core/loop`. | As M1; ledger updated. |
 | M3 | (a) | Move `infrastructure/*`, `audio/*`, `cli.py` into `adapters` and `drivers`; entry point and `uv sync`; decide G4 and G10. | As M1; `autonomous-mixing --help` works. |
