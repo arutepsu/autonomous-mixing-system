@@ -20,17 +20,17 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [014](0014-run-lifecycle-and-budget-records.md) | Run lifecycle and budget records without a state machine | 2026-10-19 | Proposed |
 | [015](0015-correction-attempt-and-artifact-checkpoint-records.md) | Correction-attempt and artifact-checkpoint records | 2026-10-19 | Proposed |
 | [016](0016-application-observation-and-decision-contracts.md) | Application observation and decision contracts | 2026-10-20 | Proposed |
-| [017](0017-domain-component-packages.md) | Domain organized into component packages with enforced dependencies | 2026-10-20 | Proposed; superseded by ADR-027 on acceptance |
+| [017](0017-domain-component-packages.md) | Domain organized into component packages with enforced dependencies | 2026-10-20 | Proposed; superseded by ADR-027 |
 | [018](0018-explicit-gain-action-admission-policy.md) | Explicit gain-action admission policy | 2026-10-20 | Proposed |
 | [019](0019-fixed-input-gain-and-composite-project-state.md) | Fixed-input gain semantics and composite project state | 2026-10-21 | Proposed |
 | [020](0020-execution-contracts-and-metadata-preflight.md) | Offline execution contracts and deterministic metadata preflight | 2026-10-21 | Proposed |
 | [021](0021-processing-spec.md) | Explicit processing specification carried through execution contracts | 2026-10-21 | Proposed |
-| [022](0022-application-component-packages-and-infrastructure-boundaries.md) | Application component packages and enforced application/infrastructure import boundaries | 2026-10-22 | Proposed; superseded by ADR-027 on acceptance |
+| [022](0022-application-component-packages-and-infrastructure-boundaries.md) | Application component packages and enforced application/infrastructure import boundaries | 2026-10-22 | Proposed; superseded by ADR-027 |
 | [023](0023-explicit-root-artifact-location-resolution.md) | Explicit-root, read-only artifact-location resolution with a separate provenance record | 2026-11-02 | Proposed |
 | [024](0024-fresh-output-workspace-allocation.md) | Fresh output workspace allocation in a separate infrastructure component | 2026-11-02 | Proposed |
 | [025](0025-exclusive-wav-output.md) | Exclusive WAV/DOUBLE output in a separate infrastructure component, with read-only workspace revalidation | 2026-11-03 | Proposed |
-| [026](0026-gain-mix-processor-adapter.md) | Gain/full-mix processor adapter bound to a pre-allocated workspace | 2026-11-03 | Proposed |
-| [027](0027-hexagonal-control-loop-architecture.md) | Hexagonal architecture around a MAPE-K control loop, with immutable records | 2026-11-03 | Proposed |
+| [026](0026-gain-mix-processor-adapter.md) | Gain/full-mix processor adapter bound to a pre-allocated workspace | 2026-11-03 | Accepted |
+| [027](0027-hexagonal-control-loop-architecture.md) | Hexagonal architecture around a MAPE-K control loop, with immutable records | 2026-11-03 | Accepted; supersedes ADR-017 and ADR-022 |
 
 ## Template
 

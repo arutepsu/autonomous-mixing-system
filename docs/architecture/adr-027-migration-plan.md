@@ -24,10 +24,10 @@ Revised again after Codex's second review (2026-11-03): data scope narrowed to c
 | ID | Decision | Status |
 | --- | --- | --- |
 | MD-1 | Commit the ADR-026 processor work before migrating. | Done 2026-11-03 (`a13d196`). |
-| MD-2 | Accept ADR-027. | Open. Codex review: approve the direction conditionally; this plan makes approval of the remaining steps depend on the M1 pilot. |
+| MD-2 | Accept ADR-027. | Accepted by the owner 2026-11-03 after two Codex reviews; the M1 pilot still decides whether the remaining steps proceed as planned. |
 | MD-3 | No `core.measurement` or `core.decision` packages. | Adopted 2026-11-03; narrowed by the review: request/response types are records, ports own protocols and response checks. |
 | MD-4 | Move code first, build the loop afterwards. | Adopted 2026-11-03. |
-| MD-5 | Vocabulary renames as optional class (c) step. | Open. |
+| MD-5 | Vocabulary renames as optional class (c) step. | Decided 2026-11-03: renames are done, in step M5 after the moves and the API break, using the rename table in section 7a. |
 | MD-6 | Disposition of the ADR-026 processor/caller location gap (below). | Decided 2026-11-03: option 1, implemented before M1 as its own behavior change (ADR-026 amended). Independent re-review pending. |
 
 **MD-6 case (from the Codex architecture audit of 2026-11-03, reproduced there against real temporary files).** A relative input location can equal the processor's planned relative output location while resolving under a different configured root; for example, a fixed input recorded as `<directory_token>/target.wav` under the source root, with a separately allocated output root. Resolver, bound inventory and processor support this layout, the files are physically distinct and no source bytes are overwritten. The processor renders and returns a `ProcessedCandidate`, but the caller's `validate_processed_candidate` then rejects it, because it compares output and input location strings lexically without root context ("output locations must differ … (lexical check)", `application/execution/validation.py`). It is an integration-contract gap, not a DSP failure or an unsafe overwrite. Options:
@@ -182,6 +182,34 @@ Maintained in this section during the migration. Every assertion of the four old
 | M7 | — | Documentation: `overview.md` implemented sections, `CLAUDE.md` State, ADR index, research log with evidence per step. | Docs name new paths only; superseded statements marked. |
 
 After M4 (or M7 if run), the control loop (roadmap M4 vertical slice; FR-06, FR-07, FR-09, FR-12) starts in `core/loop` with test stand-ins for the three ports, and answers the questions in section 5.
+
+## 7a. Rename table (step M5, MD-5)
+Only Python identifiers are renamed. String values that can appear in records, evidence or reports stay unchanged: enum values, failure-code strings such as `input_verification_failed`, error messages and `VersionRef` names such as `autonomous_mixing.gain_mix_processor`. Each rename is a plain identifier change with no alias left behind; G8 is rebased in the same commit. Renames are applied symbol-aware (AST or IDE refactoring), not by text replacement: `Run` also occurs as an ordinary word, for example in `cli.py`. All new names were checked to be unused in `src` and `tests` on 2026-11-03.
+
+| Current | New | Reason |
+| --- | --- | --- |
+| `AudioProcessor` | `Renderer` | port name (ADR-027 point 3) |
+| `ProcessingPlan` | `RenderPlan` | "processing" names four different things today |
+| `ProcessedCandidate` | `RenderedCandidate` | as above |
+| `ProcessingFailure` | `RenderFailure` | as above |
+| `ProcessingOutcome` | `RenderOutcome` | as above |
+| `ArtifactProcessingEvidence` | `RenderEvidence` | as above |
+| `validate_processed_candidate` | `validate_rendered_candidate` | as above |
+| `DecisionController` | `DecisionMaker` | port name (ADR-027 point 3) |
+| `DecisionRequest` | `Situation` | what the decision maker sees |
+| `ValidationCriteria` | `AcceptanceCriteria` | "validation" means well-formedness only |
+| `ValidationResult` | `VerificationResult` | runtime accept or roll back is verification |
+| `ValidationResultId` | `VerificationResultId` | as above |
+| `ValidationVerdict` | `Verdict` | as above |
+| `validate_validation_references` | `validate_verification_references` | as above |
+| `Run` | `RunRecord` | a record, not an active run |
+| `ArtifactVerificationError` | `IntegrityError` | "verification" is reserved for the loop |
+| `VerificationFailureCode` | `IntegrityFailureCode` | as above |
+| `VerifiedAudio` | `CheckedAudio` | as above |
+| `verify_wav_artifact` | `check_wav_integrity` | as above |
+| `verify_resolved_wav_artifact` | `check_resolved_wav_integrity` | as above |
+
+Not renamed: `AudioAnalyzer`, `ProcessingSpec` (a configuration record that names processing semantics, not the render step), `ExecutionReceipt`, `ExecutionStatus`, `ExecutionIssue`, `DecisionResponse` and `RollbackReceipt`; the loop work in section 5 may merge or remove several of them, so renaming them first would be wasted churn. Admission names (`ActionAdmissionPolicy`, `AdmittedAction`, `RejectedAction`) already fit the vocabulary.
 
 ## 8. Effort and schedule
 - No estimate is treated as established until the M1 pilot has been measured. The earlier 3-to-4-day guess is withdrawn as a planning fact.

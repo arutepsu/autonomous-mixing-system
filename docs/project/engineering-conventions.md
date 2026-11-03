@@ -1,6 +1,6 @@
 # Engineering Conventions
 
-Shared code-structure and coding rules for every contributor, human or AI assistant (Claude Code and Codex read this file through `CLAUDE.md`). The architecture these rules serve is decided in [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Proposed). Research and documentation rules stay in `CLAUDE.md`, [`documentation-policy.md`](documentation-policy.md) and [ADR-006](../decisions/0006-research-first-development-policy.md).
+Shared code-structure and coding rules for every contributor, human or AI assistant (Claude Code and Codex read this file through `CLAUDE.md`). The architecture these rules serve is decided in [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Accepted 2026-11-03). Research and documentation rules stay in `CLAUDE.md`, [`documentation-policy.md`](documentation-policy.md) and [ADR-006](../decisions/0006-research-first-development-policy.md).
 
 Status: the rules below are the **target**. The current source tree still uses the domain/application/infrastructure layout (ADR-017, ADR-022) until the migration steps in ADR-027 land. During migration, do not add new modules to the old layout's compatibility facades or shims, and do not extend the old dependency matrices.
 

@@ -329,3 +329,10 @@
   - `ruff check` passed; `ruff format --check` passed on the changed files after formatting.
   - No independent review yet.
 - Limits: equal strings under different roots stay unsupported; the gain-scalar limitation from the same audit (a NumPy float64 gain passes record construction but is rejected by the kernel) is unchanged. No requirement status changed.
+
+## 2026-11-03 — ADR-026 and ADR-027 accepted; MD-5 decided; M0 baseline
+- ADR-026 accepted by the owner after Codex's independent re-review of the MD-6 output-location guard (`56da4ab`).
+- ADR-027 accepted by the owner after two Codex reviews. It supersedes ADR-017 and ADR-022; their rules stay enforced by the existing architecture tests until each migration step retires them through the guarantee ledger. The M1 pilot still decides whether the remaining steps proceed as planned. ADR index, `CLAUDE.md`, `engineering-conventions.md` and `overview.md` updated to the accepted status.
+- MD-5 decided: vocabulary renames are done in step M5, after the moves and the API break. The migration plan now has a rename table (section 7a, 20 identifiers). Only Python identifiers change; enum values, failure-code strings, messages and `VersionRef` names stay, because they can appear in recorded data. Contracts that the loop work may merge or remove (`ExecutionReceipt`, `ExecutionStatus`, `ExecutionIssue`, `DecisionResponse`, `RollbackReceipt`) are not renamed.
+- M0 baseline for the migration: commit `56da4ab`, full suite 2,899 passed, 3 skipped (Windows 11, repository `.venv`, `uv` not on PATH). One intermittent failure of the fresh-process import test was seen once in the run before and is unexplained.
+- All owner decisions MD-1 to MD-6 are now closed; M0 is complete. Next: M1 pilot.

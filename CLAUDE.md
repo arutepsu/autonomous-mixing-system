@@ -20,7 +20,7 @@ This repository is a bachelor-thesis research prototype, not a production DAW. R
 - If documents conflict, point out the conflict; do not silently select one.
 - Never regenerate all Markdown files as a side effect of implementing a feature.
 
-## Architecture and code conventions ([ADR-027](docs/decisions/0027-hexagonal-control-loop-architecture.md), Proposed)
+## Architecture and code conventions ([ADR-027](docs/decisions/0027-hexagonal-control-loop-architecture.md), Accepted)
 @docs/project/engineering-conventions.md
 
 That file is the single source for package layout, import rules, immutability rules and vocabulary, shared with Codex. In short: hexagonal modular monolith; `core` holds the control loop, pure stage rules and immutable records; DSP, files and Claude are `adapters` behind `core.ports`; `drivers` start runs; only the experiment runner imports `evaluation`. Keep "validation", "verification" and "evaluation" distinct. Until the migration lands, do not extend the old layout's compatibility facades or dependency matrices.
