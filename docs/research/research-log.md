@@ -269,3 +269,10 @@
   - No real `PermissionError` from parent creation was produced; that type is covered only by an injected test.
 - Limits: unexpected errors from parent creation still propagate, and report-writing errors are not covered by this change; not every CLI filesystem error is handled. Parent directories created before a failure are not cleaned up. No locking or race-free guarantee is added. No requirement status changed.
 - Open: native POSIX behaviour of the guard and of these cases.
+
+## 2026-11-03 — architecture review and proposed restructure (ADR-027)
+- Review of `src/` against the thesis proposal's loop (observe, diagnose, decide, act, evaluate, iterate/rollback). Findings: the layer direction is clean and test-enforced, but each concept is split across domain, application and infrastructure; no component composes the stages, so no end-to-end control flow is visible; nine compatibility facades and shims are imported only by tests; `execution`, `processing`, `validation` and `audio` each name several different things; M0 `audio/` and the CLI do not use the domain or application code.
+- Proposed ADR-027: hexagonal modular monolith with the control loop in `core` (MAPE-K-style), stage rules as pure functions over immutable records, DSP, rendering and the Claude `decision_agent` as adapters, and `evaluation` reachable only from the experiment runner. Four import rules replace the ADR-017/ADR-022 matrices on acceptance. Rules for contributors are in `docs/project/engineering-conventions.md`, which `CLAUDE.md` now imports so that Claude Code and Codex read the same text.
+- Naming conflict recorded, not silently resolved: the proposal treats the whole loop as "the agent", ADR-005 reserves "agent" for the decision component. ADR-027 keeps ADR-005 for code names and allows the broader definition in thesis text.
+- Evidence: documentation only. No code moved, no tests run, no requirement status changed. The uncommitted ADR-026 processor work is untouched.
+- Open: the questions listed in ADR-027 (scope of `core.records`, `Situation` versus `DecisionRequest`, run-record persistence, optional type checker).
