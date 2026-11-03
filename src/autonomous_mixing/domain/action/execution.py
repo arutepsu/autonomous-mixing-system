@@ -9,12 +9,15 @@ they do not prove that files exist, match their hashes, or were cleaned up.
 from collections import Counter
 from datetime import datetime
 
+# Moved definitions stay reachable at this legacy path until migration step M4 (explicit aliases).
+from autonomous_mixing.core.records.actions import ExecutionIssue as ExecutionIssue
+from autonomous_mixing.core.records.actions import ExecutionReceipt as ExecutionReceipt
+from autonomous_mixing.core.records.actions import ExecutionStatus as ExecutionStatus
+from autonomous_mixing.core.records.actions import derive_candidate_checkpoint as derive_candidate_checkpoint
 from autonomous_mixing.core.records.actions import (
-    ExecutionReceipt,
-    ExecutionStatus,
-    derive_candidate_checkpoint,
-    validate_receipt_against_checkpoint,
+    validate_receipt_against_checkpoint as validate_receipt_against_checkpoint,
 )
+from autonomous_mixing.core.records.project import _require_unique_artifacts as _require_unique_artifacts
 from autonomous_mixing.domain.action.proposal import Action
 from autonomous_mixing.domain.project import (
     ArtifactKind,

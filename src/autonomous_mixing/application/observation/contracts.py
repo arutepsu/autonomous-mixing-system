@@ -5,4 +5,7 @@ Removed in the class (b) step of the migration; contains no definitions of its o
 
 from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
 
+# Private helper re-exported only to keep the legacy path complete until migration step M4.
+from autonomous_mixing.core.records.analysis import _require_unique_observations as _require_unique_observations
+
 __all__ = ["AnalysisRequest", "AnalysisResponse"]

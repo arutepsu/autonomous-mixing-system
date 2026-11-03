@@ -10,7 +10,12 @@ service must establish those immediately before processing and recheck state bef
 from autonomous_mixing.application.admission import ActionAdmissionRequest, RejectedAction, admit_action
 from autonomous_mixing.application.execution.processing import ProcessingPlan
 from autonomous_mixing.application.execution.requests import ExecutionRequest
-from autonomous_mixing.core.records.admission import MetadataReady, PreflightCode, PreflightRejected, PreflightResult
+
+# Moved definitions stay reachable at this legacy path until migration step M4 (explicit aliases).
+from autonomous_mixing.core.records.admission import MetadataReady as MetadataReady
+from autonomous_mixing.core.records.admission import PreflightCode as PreflightCode
+from autonomous_mixing.core.records.admission import PreflightRejected as PreflightRejected
+from autonomous_mixing.core.records.admission import PreflightResult as PreflightResult
 from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
 from autonomous_mixing.domain.shared import require_instance
 

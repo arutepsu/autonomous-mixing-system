@@ -15,6 +15,9 @@ from autonomous_mixing.core.records.verification import (
     ValidationCriteria,
 )
 
+# Private helper re-exported only to keep the legacy path complete until migration step M4.
+from autonomous_mixing.core.records.verification import _require_condition_fields as _require_condition_fields
+
 __all__ = [
     "MetricSelector",
     "ComparisonOperator",

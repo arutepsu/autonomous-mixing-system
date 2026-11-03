@@ -284,6 +284,12 @@ def test_every_public_record_is_defined_exactly_once_in_its_listed_module():
             assert getattr(records, name) is getattr(module, name), name
 
 
+# Inherited exception to G11 (Codex review of M1): ``Success[T]`` is a generic container whose payload
+# type is unconstrained, so a frozen ``Success`` can still hold a mutable payload. Its constructor is not
+# changed during the move; port responses wrapped in it are records and checked here themselves.
+UNCONSTRAINED_PAYLOAD_FIELDS = {("Success", "value")}
+
+
 def _annotation_text(annotation: object) -> str:
     return annotation if isinstance(annotation, str) else repr(annotation)
 
@@ -306,6 +312,21 @@ def test_core_records_are_frozen_dataclasses_with_immutable_field_types():
             assert not tokens & MUTABLE_TYPES, f"{name}.{field.name}: {text}"
             assert not any(prefix in text for prefix in ARRAY_PREFIXES), f"{name}.{field.name}: {text}"
     assert checked > 50, "the probe must see the record classes"
+
+
+def test_only_the_documented_record_fields_have_an_unconstrained_payload_type():
+    records = importlib.import_module(RECORDS)
+    unconstrained = set()
+    for name in records.__all__:
+        obj = getattr(records, name)
+        if not (isinstance(obj, type) and dataclasses.is_dataclass(obj)):
+            continue
+        hints = typing.get_type_hints(obj)
+        for field in dataclasses.fields(obj):
+            hint = hints.get(field.name, field.type)
+            if isinstance(hint, typing.TypeVar) or hint in (typing.Any, object):
+                unconstrained.add((name, field.name))
+    assert unconstrained == UNCONSTRAINED_PAYLOAD_FIELDS
 
 
 def test_no_dataclass_is_defined_in_core_outside_the_records_package():

@@ -99,8 +99,9 @@ def _check_component(component: str, owners: dict[str, tuple[str, ...]]) -> None
             obj = getattr(package, name)
             if obj.__module__.startswith(RECORDS + "."):
                 assert getattr(importlib.import_module(obj.__module__), name) is obj
-                # A partially moved legacy module keeps only the names its remaining code uses.
-                assert getattr(module, name, obj) is obj
+                # The legacy module path must still export the moved object (until migration step M4).
+                assert hasattr(module, name), f"{module.__name__} lost {name}"
+                assert getattr(module, name) is obj
             else:
                 assert obj.__module__ == module.__name__, f"{component}.{name} defined in {obj.__module__}"
                 assert getattr(module, name) is obj
@@ -296,3 +297,24 @@ def test_shared_objects_are_defined_once_in_their_owner_modules():
         obj = getattr(shared, name)
         assert obj.__module__ == module, name
         assert getattr(importlib.import_module(module), name) is obj
+
+
+# ADR-027 migration step M1 moved these private helpers; their legacy paths stay complete until step M4.
+MOVED_PRIVATE_HELPERS = {
+    "autonomous_mixing.domain.shared.identifiers": ("_Identifier", "identifiers"),
+    "autonomous_mixing.domain.project.artifacts": ("_SHA256_HEX", "artifacts"),
+    "autonomous_mixing.domain.project.checkpoint": ("_require_unique_artifacts", "project"),
+    "autonomous_mixing.domain.action.execution": ("_require_unique_artifacts", "project"),
+    "autonomous_mixing.domain.run.attempt": ("_check_candidate_state", "run"),
+    "autonomous_mixing.domain.validation.criteria": ("_require_condition_fields", "verification"),
+    "autonomous_mixing.application.execution.identity": ("_DIRECTORY_TOKEN", "rendering"),
+    "autonomous_mixing.application.observation.contracts": ("_require_unique_observations", "analysis"),
+    "autonomous_mixing.application.decision.contracts": ("_require_unique_observations", "decision"),
+}
+
+
+def test_moved_private_helpers_stay_reachable_at_their_legacy_paths():
+    for legacy, (name, owner) in MOVED_PRIVATE_HELPERS.items():
+        module = importlib.import_module(legacy)
+        assert hasattr(module, name), f"{legacy} lost {name}"
+        assert getattr(module, name) is getattr(importlib.import_module(f"{RECORDS}.{owner}"), name), legacy

@@ -45,7 +45,7 @@ One boundary test enforces these rules. Do not add finer-grained matrices unless
 These rules apply to core records. Adapter-local data follows its adapter's needs (it may hold NumPy arrays) but must not leak into core records.
 
 1. Every core record is `@dataclass(frozen=True)` and validates itself in `__post_init__`; an invalid record cannot be constructed. `slots=True` is the target, added in a separate optional migration step; new records may use it already.
-2. Record fields hold only immutable values: scalars, enums, other records, `tuple`, `frozenset`. No `list`, `dict`, `set` or NumPy arrays.
+2. Record fields hold only immutable values: scalars, enums, other records, `tuple`, `frozenset`. No `list`, `dict`, `set` or NumPy arrays. Known exception: the generic `Success[T]` port result has an unconstrained payload type; a frozen `Success` does not make its payload immutable. New records must not add such fields.
 3. Audio samples never enter records. Records carry artifact references, metadata and checksums; sample arrays stay inside adapters. An array that must cross a port is marked read-only (`array.flags.writeable = False`).
 4. New versions are derived with `dataclasses.replace(...)`, never by mutation. `object.__setattr__` is used only inside `__post_init__`.
 5. Stage outcomes are union types (for example `Admitted | Rejected`) handled with `match` and `typing.assert_never` in the fallback branch.

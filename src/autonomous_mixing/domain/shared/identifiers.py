@@ -21,6 +21,9 @@ from autonomous_mixing.core.records.identifiers import (
     ValidationResultId,
 )
 
+# Private helper re-exported only to keep the legacy path complete until migration step M4.
+from autonomous_mixing.core.records.identifiers import _Identifier as _Identifier
+
 __all__ = [
     "ProjectId",
     "TrackId",
