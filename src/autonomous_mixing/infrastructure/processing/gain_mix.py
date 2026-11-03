@@ -12,7 +12,8 @@ describes both as a ``ProcessedCandidate``. It composes existing components and 
 behaviour. The obsolete current target stem and the current mix are never opened.
 
 Wiring errors (types, a plan that does not belong to the bound workspace or state, missing or
-differing input locations, inputs incompatible with the render settings) raise plain ``ValueError``
+differing input locations, inputs incompatible with the render settings, an input location string equal
+to a planned output location) raise plain ``ValueError``
 before any file access. Expected failures return ``ProcessingFailure(FAILED, ...)``; files already
 created are retained and named in the message. Unexpected exceptions propagate unchanged, and the
 caller records the outcome as uncertain. Nothing is deleted, renamed, retried, normalized, clipped or
@@ -132,6 +133,7 @@ class GainMixProcessor:
         if (snapshot.project_id, snapshot.revision) != (plan.project_id, plan.before_revision):
             raise ValueError("bound workspace state is not the plan's project and before revision")
         _require_compatible(plan)
+        _require_distinct_output_locations(plan, request.workspace.directory_token)
 
         locations: dict[tuple[ProjectId, ArtifactId], ResolvedArtifactLocation] = {
             (record.artifact.project_id, record.artifact.artifact_id): record for record in request.protected_locations
@@ -192,6 +194,29 @@ def _require_compatible(plan: ProcessingPlan) -> None:
         raise ValueError("plan inputs must contain at least one frame")
 
 
+def _output_location(token: str, filename: str) -> str:
+    # Relative to the output root, so an output resolves like any other input.
+    return f"{token}/{filename}"
+
+
+def _require_distinct_output_locations(plan: ProcessingPlan, token: str) -> None:
+    """Rejects a layout the caller's lexical ``validate_processed_candidate`` check would reject after rendering.
+
+    Location strings carry no root, so an input recorded as ``<token>/target.wav`` under its source root
+    equals the planned output string although the files are distinct. This mirrors exactly the input
+    locations that check compares (fixed target input and every current stem; not the current mix) and
+    is a conservative supported-layout restriction, not root-aware location identity.
+    """
+    inputs = {plan.fixed_target_input.location} | {stem.location for stem in plan.current_stems}
+    for filename in (TARGET_FILENAME, MIX_FILENAME):
+        location = _output_location(token, filename)
+        if location in inputs:
+            raise ValueError(
+                f"planned output location {location!r} equals an input location; unsupported layout "
+                "because candidate validation compares locations lexically"
+            )
+
+
 def _render(
     plan: ProcessingPlan, fixed: VerifiedAudio, others: dict[Any, VerifiedAudio]
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -222,7 +247,7 @@ def _candidate(
             candidate.revision,
             tracks,
             kind,
-            f"{token}/{filename}",  # relative to the output root, so it resolves like any other input
+            _output_location(token, filename),
             fixed.timeline_start_seconds,
             written.sample_rate_hz,
             written.channel_count,

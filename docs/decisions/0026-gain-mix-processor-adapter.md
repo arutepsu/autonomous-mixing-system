@@ -1,10 +1,10 @@
 # ADR-026 — gain/full-mix processor adapter bound to a pre-allocated workspace (2026-11-03)
-- Status: Proposed; awaiting owner review of the implementing stage.
+- Status: Proposed; awaiting owner review of the implementing stage. Amended on 2026-11-03 (owner decision MD-6, option 1, in [`adr-027-migration-plan.md`](../architecture/adr-027-migration-plan.md)): point 3.1 adds a lexical output-location guard; awaiting independent re-review of that change.
 - Decision: implement the first `AudioProcessor` (ADR-020 §5) as a separate infrastructure component that composes the existing verifier, numerical kernels and exclusive WAV writer, bound per execution to a workspace allocated by the caller.
   1. Separate component: `autonomous_mixing.infrastructure.processing` (initializer re-exporting `gain_mix` only) exports exactly `GAIN_MIX_PROCESSOR`, `ProcessingLimits` and `GainMixProcessor`. Nothing imports it yet.
   2. Binding (D1): `GainMixProcessor(workspace: AllocatedWorkspace, limits: ProcessingLimits)`. Allocation stays with the caller, which holds the state and the protected-location inventory. The plan's inputs are looked up in `workspace.request.protected_locations` by `(project_id, artifact_id)`, and each record's artifact must equal the plan's record. The port and `ProcessingPlan` are unchanged.
   3. Order of `process(plan)`; the first failure wins:
-     1. wiring checks without file access: the plan type; `plan.workspace` equals the bound assignment; the bound state's snapshot has the plan's project and before revision; inputs match the render settings, frame count and timeline start (normally guaranteed by preflight); input location lookup;
+     1. wiring checks without file access: the plan type; `plan.workspace` equals the bound assignment; the bound state's snapshot has the plan's project and before revision; inputs match the render settings, frame count and timeline start (normally guaranteed by preflight); neither planned output location string (`"<directory_token>/target.wav"`, `"<directory_token>/mix.wav"`) equals the location string of the fixed target input or of any current stem, the same set `validate_processed_candidate` compares lexically (the current mix is not compared); input location lookup;
      2. verification of the fixed target input, then of each non-target current stem in recipe order, through `verify_resolved_wav_artifact`; the obsolete current target stem and the current mix are never opened;
      3. `apply_absolute_gain` on the fixed input, then `sum_stems` in recipe order with the new target in place of the obsolete one;
      4. `write_wav_output` of `target.wav`, then `mix.wav`;
@@ -22,4 +22,5 @@
   - Input bytes are verified at capture time only. Output hashes are not reproducible across runs (PEAK chunk, ADR-025), though samples are.
   - There is no two-output transaction: a mix-write failure leaves a verified `target.wav`. Nothing is cleaned up.
   - Peak memory grows with the number of stems held at once and is not bounded by the limits.
+  - Supported-layout restriction (MD-6): location strings carry no root, so an input recorded as `<directory_token>/target.wav` or `<directory_token>/mix.wav` under its own root is rejected as a wiring error although the files are physically distinct. Without this guard the processor rendered and wrote both outputs, and the caller's lexical validation then rejected the result (reproduced in the Codex architecture audit, 2026-11-03). Supporting such layouts would need root-aware location identity, which is not designed.
   - No execution service, receipt or candidate-state assembly is added; a connected loop still needs that service, M1 detection and the M3 decision adapter. No perceptual or research-performance result follows.

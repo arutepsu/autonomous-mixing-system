@@ -28,13 +28,13 @@ Revised again after Codex's second review (2026-11-03): data scope narrowed to c
 | MD-3 | No `core.measurement` or `core.decision` packages. | Adopted 2026-11-03; narrowed by the review: request/response types are records, ports own protocols and response checks. |
 | MD-4 | Move code first, build the loop afterwards. | Adopted 2026-11-03. |
 | MD-5 | Vocabulary renames as optional class (c) step. | Open. |
-| MD-6 | Disposition of the ADR-026 processor/caller location gap (below). | Open. Recommendation: option 1, as its own behavior-change commit with ADR-026 re-review, **before M1**, so that the class (a) moves carry no pending behavior change. |
+| MD-6 | Disposition of the ADR-026 processor/caller location gap (below). | Decided 2026-11-03: option 1, implemented before M1 as its own behavior change (ADR-026 amended). Independent re-review pending. |
 
 **MD-6 case (from the Codex architecture audit of 2026-11-03, reproduced there against real temporary files).** A relative input location can equal the processor's planned relative output location while resolving under a different configured root; for example, a fixed input recorded as `<directory_token>/target.wav` under the source root, with a separately allocated output root. Resolver, bound inventory and processor support this layout, the files are physically distinct and no source bytes are overwritten. The processor renders and returns a `ProcessedCandidate`, but the caller's `validate_processed_candidate` then rejects it, because it compares output and input location strings lexically without root context ("output locations must differ … (lexical check)", `application/execution/validation.py`). It is an integration-contract gap, not a DSP failure or an unsafe overwrite. Options:
 1. Bounded guard (audit recommendation): during the processor's no-I/O binding, compute the two prospective output location strings and reject equality with any location the caller validator checks, before verification, DSP or writing; add a regression with equal relative strings under different physical roots; document the conservative supported-layout restriction. Keeps the current API and the fail-closed lexical contract.
 2. Root-aware location identity: support such cross-root layouts through a separately designed location/context abstraction. Larger; no path resolution may be imported into core validation to work around it.
 
-The adapter was committed in `a13d196` (MD-1) before this re-review; ADR-026 remains Proposed until the disposition is implemented and re-reviewed.
+The adapter was committed in `a13d196` (MD-1) before this re-review. Option 1 is implemented as `_require_distinct_output_locations` in `infrastructure/processing/gain_mix.py`, called during binding before input lookup; ADR-026 remains Proposed until that change is re-reviewed.
 
 ## 3. Target layout
 ```

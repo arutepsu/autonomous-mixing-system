@@ -118,14 +118,16 @@ def _write_source(path: Path, samples: np.ndarray) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _build(tmp_path: Path, samples=None, *, gain_db=GAIN_DB, token=TOKEN) -> Setup:
+def _build(tmp_path: Path, samples=None, *, gain_db=GAIN_DB, token=TOKEN, locations=None) -> Setup:
     samples = {k: np.asarray(v, dtype=np.float64) for k, v in (samples or STEREO).items()}
     source, output = tmp_path / "source", tmp_path / "output"
     source.mkdir(exist_ok=True)
     output.mkdir(exist_ok=True)
     artifacts = {}
     for aid, data in samples.items():
-        path = source / f"{aid}.wav"
+        location = (locations or {}).get(aid, f"{aid}.wav")
+        path = source / location
+        path.parent.mkdir(parents=True, exist_ok=True)
         digest = _write_source(path, data) if not path.exists() else hashlib.sha256(path.read_bytes()).hexdigest()
         tracks = RECIPE if aid == "c-mix" else (TRACK_OF[aid],)
         artifacts[aid] = AudioArtifact(
@@ -134,7 +136,7 @@ def _build(tmp_path: Path, samples=None, *, gain_db=GAIN_DB, token=TOKEN) -> Set
             Revision(REVISION_OF[aid]),
             tuple(TrackId(t) for t in tracks),
             ArtifactKind.MIX if aid == "c-mix" else ArtifactKind.STEM,
-            f"{aid}.wav",
+            location,
             0.0,
             RATE,
             data.shape[1],
@@ -368,6 +370,32 @@ def test_inputs_incompatible_with_render_settings_are_rejected(tmp_path):
     setup = _build(tmp_path)
     plan = dataclasses.replace(setup.plan, render_spec=RenderSpec(RENDER_REF, 44100, 2))
     _assert_rejected_without_output(setup, setup.processor(), plan, "incompatible")
+
+
+# Equal relative strings under different roots: the files are distinct, but the caller's lexical
+# validate_processed_candidate would reject the rendered result (MD-6, Codex architecture audit 2026-11-03).
+@pytest.mark.parametrize(
+    "aid, filename",
+    [("a-t2", "target.wav"), ("a-t1", "mix.wav"), ("c-t2", "target.wav")],
+    ids=["fixed-target-input", "non-target-stem", "obsolete-target-stem"],
+)
+def test_input_location_equal_to_a_planned_output_location_is_rejected_before_any_file_access(tmp_path, aid, filename):
+    setup = _build(tmp_path, locations={aid: f"{TOKEN}/{filename}"})
+    # Any read would fail its hash check, so a rejection here cannot come from verification.
+    (setup.source / TOKEN / filename).write_bytes(b"not a wav")
+    _assert_rejected_without_output(setup, setup.processor(), setup.plan, "equals an input location")
+
+
+@pytest.mark.parametrize(
+    "aid, location",
+    [("a-t2", "other/target.wav"), ("a-t1", f"{TOKEN}/target.WAV"), ("c-mix", f"{TOKEN}/mix.wav")],
+    ids=["other-directory", "different-spelling", "current-mix-not-compared"],
+)
+def test_layouts_the_lexical_check_accepts_still_process_and_validate(tmp_path, aid, location):
+    setup = _build(tmp_path, locations={aid: location})
+    outcome = setup.processor().process(setup.plan)
+    assert isinstance(outcome, ProcessedCandidate)
+    validate_processed_candidate(setup.plan, outcome)
 
 
 # --- expected failures ---------------------------------------------------------------------------------
