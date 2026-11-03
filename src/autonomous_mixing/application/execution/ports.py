@@ -1,16 +1,8 @@
-"""Port for bounded offline gain/full-mix processing."""
+"""Compatibility shim (ADR-027 migration step M2): definitions moved to ``autonomous_mixing.core.ports.rendering``.
 
-from typing import Protocol
+Removed in the class (b) step of the migration; contains no definitions of its own.
+"""
 
-from autonomous_mixing.application.execution.processing import ProcessingOutcome, ProcessingPlan
+from autonomous_mixing.core.ports.rendering import AudioProcessor
 
-
-class AudioProcessor(Protocol):
-    """Renders a plan's fixed target input at the requested gain and the full mix from current stems.
-
-    Returns a ``ProcessedCandidate`` or a typed ``ProcessingFailure``; callers check candidates with
-    ``validate_processed_candidate``. It must not choose actions, read hidden evaluation data, accept
-    audio or change policy. No implementation exists in the application layer.
-    """
-
-    def process(self, plan: ProcessingPlan) -> ProcessingOutcome: ...
+__all__ = ["AudioProcessor"]

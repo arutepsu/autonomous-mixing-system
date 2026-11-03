@@ -1,16 +1,8 @@
-"""Port for obtaining observations of a project state."""
+"""Compatibility shim (ADR-027 migration step M2): definitions moved to ``autonomous_mixing.core.ports.analysis``.
 
-from typing import Protocol
+Removed in the class (b) step of the migration; contains no definitions of its own.
+"""
 
-from autonomous_mixing.application.observation.contracts import AnalysisRequest, AnalysisResponse
-from autonomous_mixing.application.shared import PortResult
+from autonomous_mixing.core.ports.analysis import AudioAnalyzer
 
-
-class AudioAnalyzer(Protocol):
-    """Analyzes artifacts under a versioned specification into typed observations.
-
-    Implementations return expected failures as ``PortFailure``; callers validate successful
-    responses with ``validate_analysis_response``.
-    """
-
-    def analyze(self, request: AnalysisRequest) -> PortResult[AnalysisResponse]: ...
+__all__ = ["AudioAnalyzer"]

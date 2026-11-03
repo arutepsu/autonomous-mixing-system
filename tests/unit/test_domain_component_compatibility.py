@@ -85,7 +85,7 @@ COMPONENT_PUBLIC = {
 # ADR-027 migration step M1: records moved to ``autonomous_mixing.core.records``. Their exact owner
 # module is asserted by tests/architecture/test_core_records.py (guarantee ledger G9); here the legacy
 # paths must still name the same object.
-RECORDS = "autonomous_mixing.core.records"
+RECORDS = "autonomous_mixing.core"  # ADR-027 M1 records, M2 behavior
 
 
 def _check_component(component: str, owners: dict[str, tuple[str, ...]]) -> None:
@@ -291,25 +291,31 @@ def test_checkpoint_moved_to_project_keeps_identity_with_legacy_execution():
 
 
 def test_shared_objects_are_defined_once_in_their_owner_modules():
-    owners = {name: f"{RECORDS}.identifiers" for name in (*IDENTIFIERS, "VersionRef")}
-    owners.update({name: f"{RECORDS}.invariants" for name in INVARIANT_HELPERS})
+    owners = {name: f"{RECORDS}.records.identifiers" for name in (*IDENTIFIERS, "VersionRef")}
+    owners.update({name: f"{RECORDS}.records.invariants" for name in INVARIANT_HELPERS})
     for name, module in owners.items():
         obj = getattr(shared, name)
         assert obj.__module__ == module, name
         assert getattr(importlib.import_module(module), name) is obj
 
 
-# ADR-027 migration step M1 moved these private helpers; their legacy paths stay complete until step M4.
+# ADR-027 migration steps M1 and M2 moved these private helpers; their legacy paths stay complete until step M4.
 MOVED_PRIVATE_HELPERS = {
-    "autonomous_mixing.domain.shared.identifiers": ("_Identifier", "identifiers"),
-    "autonomous_mixing.domain.project.artifacts": ("_SHA256_HEX", "artifacts"),
-    "autonomous_mixing.domain.project.checkpoint": ("_require_unique_artifacts", "project"),
-    "autonomous_mixing.domain.action.execution": ("_require_unique_artifacts", "project"),
-    "autonomous_mixing.domain.run.attempt": ("_check_candidate_state", "run"),
-    "autonomous_mixing.domain.validation.criteria": ("_require_condition_fields", "verification"),
-    "autonomous_mixing.application.execution.identity": ("_DIRECTORY_TOKEN", "rendering"),
-    "autonomous_mixing.application.observation.contracts": ("_require_unique_observations", "analysis"),
-    "autonomous_mixing.application.decision.contracts": ("_require_unique_observations", "decision"),
+    "autonomous_mixing.domain.shared.identifiers": ("_Identifier", "records.identifiers"),
+    "autonomous_mixing.domain.project.artifacts": ("_SHA256_HEX", "records.artifacts"),
+    "autonomous_mixing.domain.project.checkpoint": ("_require_unique_artifacts", "records.project"),
+    "autonomous_mixing.domain.action.execution": ("_require_unique_artifacts", "records.project"),
+    "autonomous_mixing.domain.run.attempt": ("_check_candidate_state", "records.run"),
+    "autonomous_mixing.domain.validation.criteria": ("_require_condition_fields", "records.verification"),
+    "autonomous_mixing.application.execution.identity": ("_DIRECTORY_TOKEN", "records.rendering"),
+    "autonomous_mixing.application.observation.contracts": ("_require_unique_observations", "records.analysis"),
+    "autonomous_mixing.application.decision.contracts": ("_require_unique_observations", "records.decision"),
+    # Moved in step M2.
+    "autonomous_mixing.application.observation.validation": ("_require_scope_within", "ports.analysis"),
+    "autonomous_mixing.application.execution.validation": ("_check_output", "ports.rendering"),
+    "autonomous_mixing.application.admission.admission": ("_gain_permission_for", "admission.admission"),
+    "autonomous_mixing.application.execution.preflight": ("_dimensions", "admission.preflight"),
+    "autonomous_mixing.domain.run.references": ("_validate_candidate_gain_change", "loop.references"),
 }
 
 

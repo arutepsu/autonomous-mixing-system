@@ -315,7 +315,7 @@ def test_admission_does_not_mutate_request_or_action():
 
 def test_programming_errors_are_not_converted_into_rejections(monkeypatch):
     # Patch the global that admit_action actually resolves: its implementation module, not the interface.
-    import autonomous_mixing.application.admission.admission as admission
+    import autonomous_mixing.core.admission.admission as admission  # behavior moved in ADR-027 step M2
 
     def broken(request, response):
         raise TypeError("programming error")
@@ -435,6 +435,6 @@ def test_admission_module_imports_only_stdlib_application_and_component_interfac
             or (parts[:2] == ["autonomous_mixing", "application"])
             or (len(parts) == 3 and parts[:2] == ["autonomous_mixing", "domain"] and parts[2] in components)
             # ADR-027 migration step M1: records moved to the core records package.
-            or (len(parts) == 4 and parts[:3] == ["autonomous_mixing", "core", "records"])
+            or (len(parts) == 4 and parts[:2] == ["autonomous_mixing", "core"])  # M2: behavior moved to core
         )
         assert allowed, name

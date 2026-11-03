@@ -63,6 +63,7 @@ DOMAIN = f"{PKG}.domain"
 # ADR-027 migration step M1: domain and application records moved here; the new rules for this
 # package are enforced by tests/architecture/test_core_records.py.
 RECORDS = f"{PKG}.core.records"
+CORE = f"{PKG}.core"  # ADR-027 step M2: behavior moved to core packages
 DOMAIN_COMPONENTS = ("shared", "project", "context", "observation", "action", "decision", "validation", "run")
 
 COMPONENTS = ("shared", "observation", "decision", "admission", "execution")
@@ -164,7 +165,7 @@ def _application_rule(source: str, target: str, relative: bool, known_modules: f
         return "unresolved import"
     if _within(target, DOMAIN):
         return _domain_rule(target)
-    if _within(target, RECORDS):
+    if _within(target, CORE):
         return None if source not in FACADES else "compatibility facades re-export component interfaces only"
     if not _within(target, APPLICATION):
         return "foreign layer import"  # infrastructure, M0 audio, CLI, package root, look-alike packages
@@ -998,8 +999,8 @@ def test_processing_records_depend_on_identities_but_not_on_requests_or_prefligh
     # depend on admission records, and admission records depend on rendering identities.
     assert f"{RECORDS}.admission" not in _resolved_imports(f"{RECORDS}.rendering")
     assert f"{RECORDS}.rendering" in _resolved_imports(f"{RECORDS}.admission")
-    execution = f"{APPLICATION}.execution"
-    assert {f"{execution}.requests", f"{execution}.processing"} <= _resolved_imports(f"{execution}.preflight")
+    # ADR-027 step M2: preflight moved to core.admission.preflight and reads both records modules.
+    assert {f"{RECORDS}.admission", f"{RECORDS}.rendering"} <= _resolved_imports(f"{CORE}.admission.preflight")
 
 
 def test_facades_only_reexport_component_interfaces_without_definitions():
@@ -1334,7 +1335,7 @@ def test_application_components_and_facades_load_only_stdlib_domain_and_applicat
     modules = ", ".join(sorted(EXPECTED_APPLICATION_MODULES))
     for name in _loaded_after(f"import {modules}"):
         layer_ok = name == PKG or _within(name, DOMAIN) or _within(name, APPLICATION)
-        layer_ok = layer_ok or name == f"{PKG}.core" or _within(name, RECORDS)  # ADR-027 step M1
+        layer_ok = layer_ok or _within(name, CORE)  # ADR-027 steps M1/M2
         assert layer_ok or _top(name) in sys.stdlib_module_names, name
 
 
@@ -1363,7 +1364,7 @@ def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or
     for name in loaded:
         layer_ok = name in (PKG, f"{PKG}.core") or any(
             _within(name, p)
-            for p in (DOMAIN, APPLICATION, INFRASTRUCTURE, RECORDS)  # RECORDS: ADR-027 step M1
+            for p in (DOMAIN, APPLICATION, INFRASTRUCTURE, CORE)  # CORE: ADR-027 steps M1/M2
         )
         assert layer_ok or _top(name) in sys.stdlib_module_names, name
 

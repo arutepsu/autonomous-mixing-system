@@ -518,7 +518,7 @@ def test_valid_artifact_derived_values_still_work():
 DOMAIN_PACKAGE = "autonomous_mixing.domain"
 
 
-RECORDS_PACKAGE = "autonomous_mixing.core.records"
+RECORDS_PACKAGE = "autonomous_mixing.core"  # ADR-027 M1/M2: records and behavior
 
 
 def _boundary_violations(source: str, module_name: str, *, is_package: bool = False) -> list[str]:

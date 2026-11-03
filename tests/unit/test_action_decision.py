@@ -339,9 +339,9 @@ def test_new_modules_load_only_standard_library_and_domain_modules():
         "    top = name.split('.')[0]\n"
         "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
         "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.') \\\n"
-        # ADR-027 migration step M1: domain records moved to the core records package.
-        "        or name in ('autonomous_mixing.core', 'autonomous_mixing.core.records') \\\n"
-        "        or name.startswith('autonomous_mixing.core.records.')\n"
+        # ADR-027 migration steps M1/M2: domain records and behavior moved to the core package.
+        "        or name == 'autonomous_mixing.core' \\\n"
+        "        or name.startswith('autonomous_mixing.core.')\n"
         "    if not ok: print(name)\n"
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)

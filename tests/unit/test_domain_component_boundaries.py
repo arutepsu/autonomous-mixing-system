@@ -28,7 +28,7 @@ ALLOWED = {
 }
 # ADR-027 migration step M1: domain and application records moved here; the new rules for this
 # package are enforced by tests/architecture/test_core_records.py.
-RECORDS = "autonomous_mixing.core.records"
+RECORDS = "autonomous_mixing.core"  # ADR-027 M1 records, M2 behavior
 COMPATIBILITY_SURFACES = frozenset({DOMAIN, f"{DOMAIN}.values", f"{DOMAIN}.execution"})
 
 

@@ -67,7 +67,7 @@ def _canonical_owner(name: str):
 # ADR-027 migration step M1: records moved to ``autonomous_mixing.core.records``. Their exact owner
 # module is asserted by tests/architecture/test_core_records.py (guarantee ledger G9); here the legacy
 # paths must still name the same object.
-RECORDS = "autonomous_mixing.core.records"
+RECORDS = "autonomous_mixing.core"  # ADR-027 M1 records, M2 behavior
 
 
 def _check_component(component: str) -> None:

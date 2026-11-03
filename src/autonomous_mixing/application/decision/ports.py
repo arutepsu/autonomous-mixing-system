@@ -1,17 +1,8 @@
-"""Port for requesting a decision from a controller."""
+"""Compatibility shim (ADR-027 migration step M2): definitions moved to ``autonomous_mixing.core.ports.decision``.
 
-from typing import Protocol
+Removed in the class (b) step of the migration; contains no definitions of its own.
+"""
 
-from autonomous_mixing.application.decision.contracts import DecisionRequest, DecisionResponse
-from autonomous_mixing.application.shared import PortResult
+from autonomous_mixing.core.ports.decision import DecisionController
 
-
-class DecisionController(Protocol):
-    """Proposes one action or an abstention for a decision request.
-
-    Implementations return expected failures as ``PortFailure``; callers validate successful
-    responses with ``validate_decision_response``. A response is a proposal, not permission to
-    execute.
-    """
-
-    def decide(self, request: DecisionRequest) -> PortResult[DecisionResponse]: ...
+__all__ = ["DecisionController"]

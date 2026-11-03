@@ -524,7 +524,11 @@ def test_retryable_failure_is_advisory_and_triggers_no_retry():
 
 APPLICATION_PACKAGE = "autonomous_mixing.application"
 # ADR-027 migration step M1: records moved to the core records package.
-ALLOWED_INTERNAL = ("autonomous_mixing.application", "autonomous_mixing.domain", "autonomous_mixing.core.records")
+ALLOWED_INTERNAL = (
+    "autonomous_mixing.application",
+    "autonomous_mixing.domain",
+    "autonomous_mixing.core",
+)  # ADR-027 M1/M2
 
 
 def _application_boundary_violations(source: str, module_name: str, *, is_package: bool = False) -> list[str]:
