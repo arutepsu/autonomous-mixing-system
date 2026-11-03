@@ -13,6 +13,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from import_resolver import module_files, resolve_imports
+
 PKG = "autonomous_mixing"
 CORE = f"{PKG}.core"
 SRC = Path(__file__).resolve().parents[2] / "src"
@@ -42,37 +45,31 @@ BEHAVIOR_INVENTORY = {
 }
 
 
-def _modules() -> dict[str, Path]:
-    files = {}
-    for path in sorted(CORE_DIR.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        parts = path.relative_to(SRC).with_suffix("").parts
-        files[".".join(parts[:-1] if parts[-1] == "__init__" else parts)] = path
-    return files
-
-
-MODULES = _modules()
-
-
-def _imports(name: str, path: Path) -> set[str]:
-    package = name.split(".") if path.name == "__init__.py" else name.split(".")[:-1]
-    found = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            found |= {alias.name for alias in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                base = package[: len(package) - (node.level - 1)]
-                found.add(".".join(base + ([node.module] if node.module else [])))
-            else:
-                found.add(node.module or "")
-    return found
+MODULES = module_files(SRC, CORE_DIR)
+KNOWN = frozenset(module_files(SRC, SRC / PKG))
 
 
 def _package(name: str) -> str | None:
     parts = name.split(".")
-    return parts[2] if len(parts) > 2 else None
+    return parts[2] if len(parts) > 2 and parts[:2] == [PKG, "core"] else None
+
+
+def core_violations(source: str, module: str, is_package: bool, known: frozenset[str] = KNOWN) -> list[str]:
+    """Rule (a) and rule (b) violations of one core module's source."""
+    violations = []
+    source_package = _package(module)
+    for target in resolve_imports(source, module, is_package, known):
+        if target is None:
+            violations.append("relative import escapes the package")
+        elif target.split(".")[0] in sys.stdlib_module_names:
+            continue
+        elif not (target == CORE or target.startswith(CORE + ".")):
+            violations.append(f"rule (a): {target}")
+        elif source_package is not None and (
+            target == CORE or _package(target) not in ALLOWED_PACKAGES[source_package]
+        ):
+            violations.append(f"rule (b): {target}")
+    return violations
 
 
 def test_the_core_packages_are_the_planned_ones():
@@ -83,22 +80,54 @@ def test_the_core_packages_are_the_planned_ones():
     assert behavior == set(BEHAVIOR_INVENTORY)
 
 
-def test_core_imports_only_the_standard_library_and_core():  # rule (a)
+def test_core_modules_follow_rules_a_and_b():
     for name, path in MODULES.items():
-        for target in _imports(name, path):
-            if target.split(".")[0] in sys.stdlib_module_names:
-                continue
-            assert target == CORE or target.startswith(CORE + "."), f"{name} imports {target}"
+        source = path.read_text(encoding="utf-8")
+        assert core_violations(source, name, path.name == "__init__.py") == [], name
 
 
-def test_core_packages_import_only_their_allowed_core_packages():  # rule (b)
-    for name, path in MODULES.items():
-        source = _package(name)
-        if source is None:
-            continue
-        for target in _imports(name, path):
-            if target.startswith(CORE + "."):
-                assert _package(target) in ALLOWED_PACKAGES[source], f"{name} imports {target}"
+PORTS_ANALYSIS = f"{CORE}.ports.analysis"
+LOOP_REFERENCES = f"{CORE}.loop.references"
+
+
+@pytest.mark.parametrize(
+    "source, module",
+    [
+        # Package-form imports must not hide a forbidden dependency behind their package (Codex review of M2).
+        ("from autonomous_mixing.core import loop", PORTS_ANALYSIS),
+        ("from .. import loop", PORTS_ANALYSIS),
+        ("from .. import admission", PORTS_ANALYSIS),
+        ("import autonomous_mixing.core.loop", PORTS_ANALYSIS),
+        ("from autonomous_mixing.core.loop import transitions", PORTS_ANALYSIS),
+        ("from autonomous_mixing.core.loop.transitions import validate_gain_execution", PORTS_ANALYSIS),
+        ("from autonomous_mixing import core", PORTS_ANALYSIS),
+        ("import autonomous_mixing.core", PORTS_ANALYSIS),
+        ("from autonomous_mixing.core import verification", f"{CORE}.admission.admission"),
+        ("import numpy", PORTS_ANALYSIS),
+        ("from autonomous_mixing.domain import project", LOOP_REFERENCES),
+        ("from .... import cli", PORTS_ANALYSIS),
+        ("from ..... import anything", PORTS_ANALYSIS),
+    ],
+)
+def test_checker_rejects_forbidden_core_imports(source, module):
+    assert core_violations(source, module, False), source
+
+
+@pytest.mark.parametrize(
+    "source, module",
+    [
+        ("import dataclasses", PORTS_ANALYSIS),
+        ("from autonomous_mixing.core.records import decision", PORTS_ANALYSIS),
+        ("from autonomous_mixing.core.records.decision import Decision", PORTS_ANALYSIS),
+        ("from ..records import decision", PORTS_ANALYSIS),
+        ("from . import decision", PORTS_ANALYSIS),
+        ("from autonomous_mixing.core import admission", LOOP_REFERENCES),
+        ("from .. import verification, ports", LOOP_REFERENCES),
+        ("from autonomous_mixing.core.ports import decision", f"{CORE}.admission.admission"),
+    ],
+)
+def test_checker_allows_permitted_core_imports(source, module):
+    assert core_violations(source, module, False) == [], source
 
 
 def test_behavior_package_initializers_re_export_nothing():

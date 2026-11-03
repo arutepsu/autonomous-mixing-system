@@ -16,6 +16,9 @@ import sys
 import typing
 from pathlib import Path
 
+import pytest
+from import_resolver import module_files, resolve_imports
+
 PKG = "autonomous_mixing"
 CORE = f"{PKG}.core"
 RECORDS = f"{CORE}.records"
@@ -194,32 +197,6 @@ MUTABLE_TYPES = {"list", "dict", "set", "bytearray", "List", "Dict", "Set", "Mut
 ARRAY_PREFIXES = ("numpy", "np.", "ndarray")
 
 
-def _module_files(root: Path) -> dict[str, Path]:
-    files = {}
-    for path in sorted(root.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        parts = path.relative_to(SRC).with_suffix("").parts
-        files[".".join(parts[:-1] if parts[-1] == "__init__" else parts)] = path
-    return files
-
-
-def _imports(name: str, path: Path) -> set[str]:
-    """Absolute module names imported by one module; relative imports are resolved."""
-    package = name.split(".") if path.name == "__init__.py" else name.split(".")[:-1]
-    found = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            found |= {alias.name for alias in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                base = package[: len(package) - (node.level - 1)]
-                found.add(".".join(base + ([node.module] if node.module else [])))
-            else:
-                found.add(node.module or "")
-    return found
-
-
 def _top_level_definitions(path: Path) -> set[str]:
     names = set()
     for node in ast.parse(path.read_text(encoding="utf-8")).body:
@@ -232,7 +209,24 @@ def _top_level_definitions(path: Path) -> set[str]:
     return names
 
 
-RECORD_FILES = {name: path for name, path in _module_files(RECORDS_DIR).items() if name != RECORDS}
+RECORD_FILES = {name: path for name, path in module_files(SRC, RECORDS_DIR).items() if name != RECORDS}
+KNOWN = frozenset(module_files(SRC, SRC / PKG))
+
+
+def records_violations(source: str, module: str) -> list[str]:
+    """Import violations of one records module: only the standard library and its planned siblings."""
+    short = module.rsplit(".", 1)[1]
+    violations = []
+    for target in resolve_imports(source, module, False, KNOWN):
+        if target is None:
+            violations.append("relative import escapes the package")
+        elif target.split(".")[0] in sys.stdlib_module_names:
+            continue
+        elif not target.startswith(RECORDS + "."):
+            violations.append(f"outside the records modules: {target}")
+        elif target.rsplit(".", 1)[1] not in ALLOWED_RECORD_IMPORTS[short]:
+            violations.append(f"not a planned records dependency: {target}")
+    return violations
 
 
 def test_the_records_modules_are_exactly_the_planned_ones():
@@ -241,17 +235,48 @@ def test_the_records_modules_are_exactly_the_planned_ones():
 
 def test_records_import_only_the_standard_library_and_their_planned_records_modules():
     for name, path in RECORD_FILES.items():
-        short = name.rsplit(".", 1)[1]
-        for target in _imports(name, path):
-            if target.split(".")[0] in sys.stdlib_module_names:
-                continue
-            assert target.startswith(RECORDS + "."), f"{name} imports {target}"
-            assert target.rsplit(".", 1)[1] in ALLOWED_RECORD_IMPORTS[short], f"{name} imports {target}"
+        assert records_violations(path.read_text(encoding="utf-8"), name) == [], name
+
+
+DECISION = f"{RECORDS}.decision"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Package-form imports must resolve to the child module (Codex review of M2).
+        "from autonomous_mixing.core.records import run",
+        "from . import run",
+        "from autonomous_mixing.core import records",
+        "from autonomous_mixing.core.records import Decision",
+        "from .. import ports",
+        "from ..loop import transitions",
+        "import autonomous_mixing.core.records.run",
+        "import numpy",
+    ],
+)
+def test_records_checker_rejects_forbidden_imports(source):
+    assert records_violations(source, DECISION), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from . import budgets",
+        "from .budgets import BudgetLimits",
+        "from autonomous_mixing.core.records.project import ProjectState",
+        "from autonomous_mixing.core.records import observation, context",
+        "from dataclasses import dataclass",
+    ],
+)
+def test_records_checker_allows_planned_imports(source):
+    assert records_violations(source, DECISION) == [], source
 
 
 def test_the_records_interface_imports_only_records_modules():
-    for target in _imports(RECORDS, RECORDS_DIR / "__init__.py"):
-        assert target.startswith(RECORDS + ".") and target in RECORD_FILES, target
+    source = (RECORDS_DIR / "__init__.py").read_text(encoding="utf-8")
+    for target in resolve_imports(source, RECORDS, True, KNOWN):
+        assert target in RECORD_FILES, target
 
 
 def test_the_planned_records_graph_is_acyclic():
@@ -314,23 +339,61 @@ def test_core_records_are_frozen_dataclasses_with_immutable_field_types():
     assert checked > 50, "the probe must see the record classes"
 
 
+def _is_unconstrained(hint: object) -> bool:
+    """True if ``hint`` or any type argument nested in it is a TypeVar, ``Any`` or ``object``."""
+    if isinstance(hint, typing.TypeVar) or hint is typing.Any or hint is object:
+        return True
+    return any(_is_unconstrained(argument) for argument in typing.get_args(hint))
+
+
+def unconstrained_fields(cls: type) -> set[str]:
+    hints = typing.get_type_hints(cls)
+    return {field.name for field in dataclasses.fields(cls) if _is_unconstrained(hints.get(field.name, field.type))}
+
+
 def test_only_the_documented_record_fields_have_an_unconstrained_payload_type():
     records = importlib.import_module(RECORDS)
-    unconstrained = set()
+    found = set()
     for name in records.__all__:
         obj = getattr(records, name)
-        if not (isinstance(obj, type) and dataclasses.is_dataclass(obj)):
-            continue
-        hints = typing.get_type_hints(obj)
-        for field in dataclasses.fields(obj):
-            hint = hints.get(field.name, field.type)
-            if isinstance(hint, typing.TypeVar) or hint in (typing.Any, object):
-                unconstrained.add((name, field.name))
-    assert unconstrained == UNCONSTRAINED_PAYLOAD_FIELDS
+        if isinstance(obj, type) and dataclasses.is_dataclass(obj):
+            found |= {(name, field) for field in unconstrained_fields(obj)}
+    assert found == UNCONSTRAINED_PAYLOAD_FIELDS
+
+
+_T = typing.TypeVar("_T")
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        typing.Any,
+        object,
+        _T,
+        tuple[typing.Any, ...],  # nested cases missed before the Codex review of M2
+        tuple[object, ...],
+        tuple[_T, ...],
+        frozenset[object],
+        typing.Any | None,
+        tuple[tuple[int, typing.Any], ...],
+    ],
+    ids=repr,
+)
+def test_unconstrained_check_finds_direct_and_nested_payloads(annotation):
+    probe = dataclasses.make_dataclass("Probe", [("payload", annotation)], frozen=True)
+    assert unconstrained_fields(probe) == {"payload"}
+
+
+@pytest.mark.parametrize(
+    "annotation", [int, str | None, tuple[int, ...], frozenset[str], tuple[tuple[int, str], ...]], ids=repr
+)
+def test_unconstrained_check_accepts_concrete_types(annotation):
+    probe = dataclasses.make_dataclass("Probe", [("payload", annotation)], frozen=True)
+    assert unconstrained_fields(probe) == set()
 
 
 def test_no_dataclass_is_defined_in_core_outside_the_records_package():
-    for name, path in _module_files(CORE_DIR).items():
+    for name, path in module_files(SRC, CORE_DIR).items():
         if name == RECORDS or name.startswith(RECORDS + "."):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
