@@ -11,14 +11,14 @@ A modular monolith in hexagonal (ports-and-adapters) style. The `core` contains 
 ```
 autonomous_mixing/
   core/
-    records/        shared immutable vocabulary (project state, artifacts, context, actions, run records)
-    ports.py        AudioAnalyzer, DecisionMaker, Renderer
-    measurement/    observation records and analysis specifications
-    diagnosis/      problem candidates (only from its roadmap phase on)
-    decision/       Situation (what the decision maker sees), Proposal = ProposeAction | Abstain
-    admission/      is a proposal allowed: AdmissionPolicy, Admitted | Rejected
+    records/        shared immutable vocabulary (ids, project state, artifacts, mix, context,
+                    observations, actions, decisions)
+    ports/          AudioAnalyzer, DecisionMaker, Renderer, each with its request/response types
+                    and response checks (e.g. Situation = what the decision maker sees)
+    admission/      is a proposal allowed: AdmissionPolicy, Admitted | Rejected, metadata preflight
     verification/   did the change help without regressions: AcceptanceCriteria, Verdict
-    loop/           run(): stage order, budgets, history, RunRecord
+    diagnosis/      problem candidates (only from its roadmap phase on)
+    loop/           run(): stage order, budgets, history, state transitions, rollback, RunRecord
   adapters/
     dsp_analysis/   implements AudioAnalyzer (deterministic DSP)
     rendering/      implements Renderer (gain/mix, WAV I/O, workspaces, file integrity)
@@ -32,7 +32,7 @@ autonomous_mixing/
 
 ## Import rules
 1. `core` imports nothing outside `core`: no NumPy, soundfile, provider SDK or filesystem access.
-2. Inside `core`, stage packages import only `core.records` (and the standard library). Only `core.loop` composes stages and ports.
+2. Inside `core`, `core.ports` imports only `core.records`; stage packages (`admission`, `verification`, `diagnosis`) import only `core.records` and `core.ports` (and the standard library). Only `core.loop` composes stages and ports.
 3. `adapters` import only `core.records`, `core.ports`, third-party libraries and their own internals; never another adapter's internals and never `core.loop`.
 4. Only `drivers.experiments` imports `evaluation` (SR-10, ADR-010).
 
@@ -57,9 +57,9 @@ Each term has exactly one meaning in code and documents.
 | validation | Is an input or record well-formed? Structural checks. | everywhere (`__post_init__`, input checks) |
 | verification | At runtime: did the change improve the target without making other measurements worse? Decides accept or roll back. | `core.verification` |
 | evaluation | After a run: how does the result compare with hidden ground truth? Never at runtime. | `evaluation` |
-| measurement / observation | Deterministic description of what is happening in the audio. | `core.measurement`, `adapters.dsp_analysis` |
+| measurement / observation | Deterministic description of what is happening in the audio. | `core.records` (observations), `core.ports` (`AudioAnalyzer`), `adapters.dsp_analysis` |
 | diagnosis | Which problems are plausible, with evidence strength (FR-05). | `core.diagnosis` |
-| proposal | What the decision maker suggests; not permission to act. | `core.decision` |
+| proposal | What the decision maker suggests; not permission to act. | `core.records` (decisions), `core.ports` (`DecisionMaker`) |
 | admitted action | A proposal that passed admission and may be rendered. | `core.admission` |
 | rendering | Producing candidate audio from an admitted action. | `adapters.rendering` |
 | integrity check | Verifying that a WAV file matches its record (hash, size, format). | inside `adapters.rendering` |
