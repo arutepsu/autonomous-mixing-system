@@ -1,4 +1,5 @@
-"""Output workspace allocation: one fresh directory per execution below an explicit output root."""
+"""Output workspace allocation: one fresh directory per execution below an explicit output root, and
+read-only revalidation of an allocated workspace record."""
 
 from .allocation import (
     AllocatedWorkspace,
@@ -8,6 +9,7 @@ from .allocation import (
     WorkspaceRoot,
     allocate_workspace,
 )
+from .validation import validate_allocated_workspace
 
 __all__ = [
     "WorkspaceRoot",
@@ -16,4 +18,5 @@ __all__ = [
     "WorkspaceAllocationFailureCode",
     "WorkspaceAllocationError",
     "allocate_workspace",
+    "validate_allocated_workspace",
 ]

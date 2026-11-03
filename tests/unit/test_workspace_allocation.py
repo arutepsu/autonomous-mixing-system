@@ -495,7 +495,7 @@ UNEXPECTED = [
 # --- public surface ---------------------------------------------------------------------------
 
 
-def test_public_interface_exports_exactly_the_six_definitions():
+def test_public_interface_exports_the_six_allocation_definitions_plus_the_validator():
     expected = {
         "WorkspaceRoot",
         "WorkspaceAllocationRequest",
@@ -504,7 +504,7 @@ def test_public_interface_exports_exactly_the_six_definitions():
         "WorkspaceAllocationError",
         "allocate_workspace",
     }
-    assert set(workspaces.__all__) == expected and len(workspaces.__all__) == 6
+    assert set(workspaces.__all__) == expected | {"validate_allocated_workspace"} and len(workspaces.__all__) == 7
     for name in expected:
         assert getattr(workspaces, name) is getattr(allocation, name)
 

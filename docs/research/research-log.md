@@ -203,3 +203,40 @@
   - No perceptual or research-performance result follows.
   - Left uncommitted for review.
 - Open: a history and retention registry; durable ownership and cleanup; execution locks; the writer's no-overwrite protocol; per-directory case sensitivity in overlap checks.
+
+## 2026-11-03 — exclusive WAV output and workspace revalidation (ADR-025)
+- Implemented the owner-approved design "Exclusive WAV output", proposed as ADR-025. Documented after independent review; the code is uncommitted.
+- New public workspace revalidation `validate_allocated_workspace(workspace: AllocatedWorkspace) -> None` in `workspaces.validation`. It is read-only, does not allocate and does not require an empty directory. The `workspaces` facade now has seven exports; `allocation` is unchanged.
+- New component `infrastructure.wav_output` with four exports: `WrittenWav` (frozen, 11 fields), `WavOutputFailureCode` (8 members), `WavOutputError(code, message, *, created_file=None)` and `write_wav_output(workspace, filename, samples, *, render_spec, processing_spec, max_file_bytes, max_decoded_bytes) -> WrittenWav`.
+- Imports: `writing` imports only the standard library, NumPy, soundfile, `domain.project`, `domain.observation` and the `workspaces` interface. `audio` and `filesystem` imports load neither `workspaces` nor `wav_output`. Nothing imports `wav_output` yet.
+- Protocol:
+  - In-memory WAV/DOUBLE encoding, validated before the destination is created, with exact sample preservation including signed zeros, subnormals and finite overrange values.
+  - Explicit size limits; bounded chunked I/O of at most 1 MiB per read or write, so huge limits are supported.
+  - Revalidation immediately before creation, then one `open(path, "x+b", buffering=0, opener=...)`; soundfile never opens the destination path.
+  - On Windows the opener calls `CreateFileW` with `CREATE_NEW | FILE_FLAG_OPEN_REPARSE_POINT` through ctypes, then `msvcrt.open_osfhandle`. Reason: plain `x+b` followed a dangling file symbolic link and created its target outside the workspace. This was found during implementation, and the owner approved this opener (Option A). POSIX uses the default exclusive opener.
+  - Readback and SHA-256 through the created handle (captured bytes, not the encoding buffer), covering metadata, subtype and exact samples; a second revalidation; a successful close before success is reported.
+  - Collision rejection for every existing form (file, directory, symbolic links, dangling links, junctions), with no overwrite or truncation.
+  - Failures after creation keep the file and set `created_file`; there is no deletion, retry or cleanup.
+  - Close-error priority: the primary failure is kept when an ordinary secondary close error occurs, with a note on `WavOutputError` only; foreign exceptions propagate unchanged. Correction: if descriptor attachment fails and the raw-handle close also fails, the original attachment exception is re-raised as the same object.
+- Implementation deviations from the written design:
+  - Sample rates above `2**31 - 1` are rejected with plain `ValueError` before encoding, because soundfile raises `OverflowError`.
+  - `WrittenWav` also cross-checks sample rate and channel count against `render_spec`.
+- Evidence:
+  - Coordinator-reported full run: 2,778 passed, 3 platform skips: `tests/unit/test_artifact_locations.py:730` ("POSIX non-root only"), `tests/unit/test_wav_output.py:1181` ("POSIX keeps the default O_CREAT | O_EXCL opener") and `tests/unit/test_workspace_allocation.py:610` (POSIX device-name test).
+  - Independent correction review: all 12 new regressions passed.
+  - Independent writer-focused run: 275 passed, 4 skips. Three were junction skips caused by sandbox restrictions; one was POSIX-only.
+  - Independent scoped lint and formatting passed.
+  - No fresh lockfile check: uv was unavailable; `pyproject.toml` and `uv.lock` are unchanged.
+  - Implementer-reported real Windows 11 evidence, not rerun by the coordinator except through the full suite: collision forms including dangling links with the target not created; same-name concurrency over 10 rounds, each giving one success and one `COLLISION`; the bit-exact roundtrip; a real protected-file deletion giving `WORKSPACE_CHANGED` with the file retained.
+  - Implementer-reported injected-only evidence (controlled doubles, not real-platform behaviour): short, zero and invalid writes; flush, seek, read and close failures; corrupted readback; attachment and close failures.
+  - Documentation probe (2026-11-03, one-off, not regression coverage), using the repository's existing environment (soundfile 0.14.0, libsndfile 1.2.2): two in-memory encodings of identical samples about one second apart contained a PEAK chunk and differed in bytes. Python 3.11 maps Win32 error 1921 to a plain `OSError` with errno 22, not `ELOOP`.
+- Limits:
+  - Exact sample preservation does not imply reproducible WAV bytes or hashes; libsndfile 1.2.2 writes a PEAK chunk with a timestamp, so bytes and hashes can differ between encodings of identical samples.
+  - An unexpected descriptor-attachment failure may leave an empty file without `created_file`.
+  - Ordinary secondary close errors preserve the primary failure, but a secondary `KeyboardInterrupt` or `SystemExit` may supersede it.
+  - Parent paths are not pinned. There is no race-free confinement, fsync durability, atomic publication, two-output transaction, lock or complete history guarantee.
+  - No connected DSP processing adapter or execution pipeline exists.
+  - F2 is unaffected and F4 stays open. Subtype mapping is implemented at this writer boundary only.
+  - No requirement is completed and no requirement status changed. No perceptual or research-performance result follows.
+  - Left uncommitted for review.
+- Open: hash reproducibility policy; Windows error 1921 propagating as unexpected; the empty-file-on-attachment-failure limit; whether the Windows opener should deny concurrent writers.

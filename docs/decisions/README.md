@@ -28,6 +28,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [022](0022-application-component-packages-and-infrastructure-boundaries.md) | Application component packages and enforced application/infrastructure import boundaries | 2026-10-22 | Proposed |
 | [023](0023-explicit-root-artifact-location-resolution.md) | Explicit-root, read-only artifact-location resolution with a separate provenance record | 2026-11-02 | Proposed |
 | [024](0024-fresh-output-workspace-allocation.md) | Fresh output workspace allocation in a separate infrastructure component | 2026-11-02 | Proposed |
+| [025](0025-exclusive-wav-output.md) | Exclusive WAV/DOUBLE output in a separate infrastructure component, with read-only workspace revalidation | 2026-11-03 | Proposed |
 
 ## Template
 

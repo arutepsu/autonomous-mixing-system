@@ -15,10 +15,17 @@ matches exact package segments and enforces:
   the ``filesystem`` interface (never ``filesystem.locations`` directly); the ``filesystem``
   initializer re-exports ``locations`` only; ``locations`` uses the standard library and the
   ``domain.project`` interface only;
-- the ``workspaces`` initializer re-exports ``allocation`` only; ``allocation`` uses the standard
-  library and the ``domain.project``, ``application.execution`` and ``filesystem`` interfaces only
-  (never its own facade). It is the only production module outside the application that imports an
-  application module; no other infrastructure module imports ``workspaces``.
+- the ``workspaces`` initializer re-exports ``allocation`` and ``validation`` only; ``allocation`` uses
+  the standard library and the ``domain.project``, ``application.execution`` and ``filesystem``
+  interfaces only (never its own facade or ``validation``). ``validation`` may use the standard
+  library, its ``allocation`` sibling (records and private policy helpers) and the same existing
+  interfaces, never its own facade, audio or ``wav_output``; in fact it uses only ``allocation``.
+  ``allocation`` is the only production module outside the application that imports an application
+  module;
+- the ``wav_output`` initializer re-exports ``writing`` only; ``writing`` uses the standard library,
+  NumPy, soundfile and the ``domain.project``, ``domain.observation`` and ``workspaces`` public
+  interfaces only (never application, audio, filesystem or workspace internals). ``writing`` is the
+  only module outside ``workspaces`` that imports it, and nothing imports ``wav_output``.
 
 These are source-import rules. The ``audio`` facade loads both leaves eagerly, so importing it is not
 claimed to avoid loading soundfile.
@@ -42,6 +49,9 @@ FILESYSTEM = f"{INFRASTRUCTURE}.filesystem"
 LOCATIONS = f"{FILESYSTEM}.locations"
 WORKSPACES = f"{INFRASTRUCTURE}.workspaces"
 ALLOCATION = f"{WORKSPACES}.allocation"
+VALIDATION = f"{WORKSPACES}.validation"
+WAV_OUTPUT = f"{INFRASTRUCTURE}.wav_output"
+WRITING = f"{WAV_OUTPUT}.writing"
 DOMAIN = f"{PKG}.domain"
 DOMAIN_COMPONENTS = ("shared", "project", "context", "observation", "action", "decision", "validation", "run")
 
@@ -193,13 +203,36 @@ def _infrastructure_rule(source: str, target: str, relative: bool, known_modules
             return None
         return "locations may import only the standard library and domain.project"
     if source == WORKSPACES:
-        return None if target == ALLOCATION else "workspaces initializer may re-export only allocation"
+        if target in {ALLOCATION, VALIDATION}:
+            return None
+        return "workspaces initializer may re-export only allocation and validation"
     if source == ALLOCATION:
         if _is_stdlib(target, relative):
             return None
         if target in {f"{DOMAIN}.project", f"{APPLICATION}.execution", FILESYSTEM} and target in known_modules:
             return None
         return "allocation may import only the standard library, domain.project, application.execution and filesystem"
+    if source == VALIDATION:
+        if _is_stdlib(target, relative):
+            return None
+        allowed = {ALLOCATION, f"{DOMAIN}.project", f"{APPLICATION}.execution", FILESYSTEM}
+        if target in allowed and target in known_modules:
+            return None
+        return (
+            "validation may import only the standard library, its allocation sibling, domain.project, "
+            "application.execution and filesystem"
+        )
+    if source == WAV_OUTPUT:
+        return None if target == WRITING else "wav_output initializer may re-export only writing"
+    if source == WRITING:
+        if _is_stdlib(target, relative) or _top(target) in {"numpy", "soundfile"}:
+            return None
+        if target in {f"{DOMAIN}.project", f"{DOMAIN}.observation", WORKSPACES} and target in known_modules:
+            return None
+        return (
+            "writing may import only the standard library, NumPy, soundfile, domain.project, "
+            "domain.observation and the workspaces interface"
+        )
     return "unclassified infrastructure module needs an explicit rule"
 
 
@@ -265,6 +298,10 @@ FIXTURE_MODULES = KNOWN | {
     f"{INFRASTRUCTURE}.workspaces_extra",
     f"{WORKSPACES}.allocation_extra",
     f"{WORKSPACES}.registry",
+    f"{WORKSPACES}.validation_extra",
+    f"{INFRASTRUCTURE}.wav_output_extra",
+    f"{WAV_OUTPUT}.writing_extra",
+    f"{WAV_OUTPUT}.publication",
 }
 PACKAGES = frozenset(name for name, path in ALL_MODULES.items() if path.name == "__init__.py")
 
@@ -536,6 +573,97 @@ FORBIDDEN = [
     # application code never imports workspaces (layer rule unchanged)
     ("from autonomous_mixing.infrastructure.workspaces import allocate_workspace", EXE_PORTS, "layer"),
     ("from ...infrastructure import workspaces", EXE_PORTS, "layer"),
+    # workspaces initializer re-exports allocation and validation only
+    ("from .validation_extra import x", WORKSPACES, "workspaces initializer"),
+    ("from ..wav_output import write_wav_output", WORKSPACES, "workspaces initializer"),
+    # allocation never imports the validation sibling
+    ("from .validation import validate_allocated_workspace", ALLOCATION, "allocation"),
+    ("from . import validation", ALLOCATION, "allocation"),
+    ("import autonomous_mixing.infrastructure.workspaces.validation as validation", ALLOCATION, "allocation"),
+    ("from ..wav_output import write_wav_output", ALLOCATION, "allocation"),
+    # validation: standard library, its allocation sibling and the existing workspace policy interfaces
+    ("from autonomous_mixing.infrastructure.workspaces import allocate_workspace", VALIDATION, "validation"),
+    ("from . import allocate_workspace", VALIDATION, "validation"),
+    ("import autonomous_mixing.infrastructure.workspaces", VALIDATION, "validation"),
+    ("from .registry import x", VALIDATION, "validation"),
+    ("from .validation_extra import x", VALIDATION, "validation"),
+    ("from .missing import x", VALIDATION, "validation"),
+    ("from ..wav_output import write_wav_output", VALIDATION, "validation"),
+    ("from ..wav_output.writing import WrittenWav", VALIDATION, "validation"),
+    ("from ..audio import verify_wav_artifact", VALIDATION, "validation"),
+    ("import autonomous_mixing.infrastructure.audio.dsp as dsp", VALIDATION, "validation"),
+    ("from ..filesystem.locations import _lexical_problem", VALIDATION, "validation"),
+    ("from autonomous_mixing.application.execution.identity import ExecutionWorkspace", VALIDATION, "validation"),
+    ("from autonomous_mixing.application import ExecutionWorkspace", VALIDATION, "validation"),
+    ("from autonomous_mixing.application.decision import DecisionRequest", VALIDATION, "validation"),
+    ("from autonomous_mixing.domain.project.state import ProjectState", VALIDATION, "validation"),
+    ("from autonomous_mixing.audio.io import load_stem", VALIDATION, "validation"),
+    ("from autonomous_mixing import cli", VALIDATION, "validation"),
+    ("import numpy as np", VALIDATION, "validation"),
+    ("import soundfile", VALIDATION, "validation"),
+    ("from ......... import x", VALIDATION, "unresolvable"),
+    # wav_output initializer re-exports writing only
+    ("import os", WAV_OUTPUT, "wav_output initializer"),
+    ("from .publication import x", WAV_OUTPUT, "wav_output initializer"),
+    ("from .writing_extra import x", WAV_OUTPUT, "wav_output initializer"),
+    ("from .missing import x", WAV_OUTPUT, "wav_output initializer"),
+    ("from ..workspaces import validate_allocated_workspace", WAV_OUTPUT, "wav_output initializer"),
+    ("from ..audio import sum_stems", WAV_OUTPUT, "wav_output initializer"),
+    ("from autonomous_mixing.domain.project import ProcessingSpec", WAV_OUTPUT, "wav_output initializer"),
+    ("from ......... import x", WAV_OUTPUT, "unresolvable"),
+    # writing: standard library, NumPy, soundfile, domain.project/observation and the workspaces interface
+    ("from autonomous_mixing.application.execution import ExecutionWorkspace", WRITING, "writing"),
+    ("from ...application import execution", WRITING, "writing"),
+    ("import autonomous_mixing.application as application", WRITING, "writing"),
+    ("from autonomous_mixing.application.shared import PortResult", WRITING, "writing"),
+    ("from autonomous_mixing.infrastructure.audio import sum_stems", WRITING, "writing"),
+    ("from ..audio.dsp import apply_absolute_gain", WRITING, "writing"),
+    ("from ..audio import verification", WRITING, "writing"),
+    ("import autonomous_mixing.infrastructure.audio.verification as verification", WRITING, "writing"),
+    ("from autonomous_mixing.infrastructure import audio", WRITING, "writing"),
+    ("from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location", WRITING, "writing"),
+    ("from ..filesystem.locations import ResolvedArtifactLocation", WRITING, "writing"),
+    ("from ..filesystem import locations", WRITING, "writing"),
+    ("from autonomous_mixing.infrastructure.workspaces.allocation import AllocatedWorkspace", WRITING, "writing"),
+    ("from ..workspaces.validation import validate_allocated_workspace", WRITING, "writing"),
+    ("from ..workspaces import allocation", WRITING, "writing"),
+    ("from ..workspaces import validation", WRITING, "writing"),
+    ("import autonomous_mixing.infrastructure.workspaces.allocation as allocation", WRITING, "writing"),
+    ("from ..workspaces_extra import x", WRITING, "writing"),
+    ("from ..workspaces.registry import x", WRITING, "writing"),
+    ("from . import WrittenWav", WRITING, "writing"),
+    ("import autonomous_mixing.infrastructure.wav_output", WRITING, "writing"),
+    ("from autonomous_mixing.infrastructure.wav_output import WavOutputError", WRITING, "writing"),
+    ("from .publication import x", WRITING, "writing"),
+    ("from .writing_extra import x", WRITING, "writing"),
+    ("from autonomous_mixing.audio.io import load_stem", WRITING, "writing"),
+    ("from ...audio import features", WRITING, "writing"),
+    ("from autonomous_mixing import cli", WRITING, "writing"),
+    ("import autonomous_mixing", WRITING, "writing"),
+    ("from autonomous_mixing.domain.project.processing_spec import ProcessingSpec", WRITING, "writing"),
+    ("from autonomous_mixing.domain.observation.specifications import RenderSpec", WRITING, "writing"),
+    ("from autonomous_mixing.domain import RenderSpec", WRITING, "writing"),
+    ("from autonomous_mixing.domain.decision import Decision", WRITING, "writing"),
+    ("from autonomous_mixing.domain.execution import ExecutionStatus", WRITING, "writing"),
+    ("from autonomous_mixing.domain.project_extra import x", WRITING, "writing"),
+    ("import scipy", WRITING, "writing"),
+    ("import soundfile_extra", WRITING, "writing"),
+    ("import anthropic", WRITING, "writing"),
+    ("from ......... import x", WRITING, "unresolvable"),
+    # no other module imports wav_output
+    ("from ..wav_output import write_wav_output", VERIFICATION, "verification"),
+    ("from ..wav_output import write_wav_output", DSP, "dsp"),
+    ("from ..wav_output import write_wav_output", AUDIO, "audio facade"),
+    ("from ..wav_output import write_wav_output", LOCATIONS, "locations"),
+    ("from ..wav_output import write_wav_output", FILESYSTEM, "filesystem initializer"),
+    ("from . import wav_output", INFRASTRUCTURE, "descriptive"),
+    ("from autonomous_mixing.infrastructure.wav_output import write_wav_output", EXE_PORTS, "layer"),
+    ("from ...infrastructure import wav_output", EXE_PROCESSING, "layer"),
+    # unclassified look-alikes need an explicit rule first
+    ("import math", f"{WAV_OUTPUT}.publication", "unclassified infrastructure"),
+    ("import math", f"{WAV_OUTPUT}.writing_extra", "unclassified infrastructure"),
+    ("import math", f"{INFRASTRUCTURE}.wav_output_extra", "unclassified infrastructure"),
+    ("import math", f"{WORKSPACES}.validation_extra", "unclassified infrastructure"),
 ]
 
 PERMITTED = [
@@ -629,6 +757,41 @@ PERMITTED = [
     ("from ..filesystem import LocationResolutionError, ResolvedArtifactLocation", ALLOCATION),
     ("from autonomous_mixing.infrastructure import filesystem", ALLOCATION),
     ("import autonomous_mixing.infrastructure.filesystem as filesystem", ALLOCATION),
+    # workspaces initializer re-exports the validation leaf too
+    ("from .validation import validate_allocated_workspace", WORKSPACES),
+    ("from . import validation", WORKSPACES),
+    # validation: standard library, allocation sibling (records and private policy helpers)
+    ("import errno", VALIDATION),
+    ("import os", VALIDATION),
+    ("import stat", VALIDATION),
+    ("from pathlib import Path", VALIDATION),
+    ("from .allocation import AllocatedWorkspace, _strict_resolve", VALIDATION),
+    ("from . import allocation", VALIDATION),
+    ("from autonomous_mixing.infrastructure.workspaces.allocation import _check_protected", VALIDATION),
+    ("from autonomous_mixing.domain.project import ProjectState", VALIDATION),
+    ("from autonomous_mixing.application.execution import ExecutionWorkspace", VALIDATION),
+    ("from ..filesystem import resolve_artifact_location", VALIDATION),
+    # wav_output initializer re-exports writing
+    ("from .writing import WavOutputError, write_wav_output", WAV_OUTPUT),
+    ("from . import writing", WAV_OUTPUT),
+    ("from autonomous_mixing.infrastructure.wav_output.writing import WrittenWav", WAV_OUTPUT),
+    # writing
+    ("import ctypes", WRITING),
+    ("from ctypes import wintypes", WRITING),
+    ("import msvcrt", WRITING),
+    ("import errno", WRITING),
+    ("import hashlib", WRITING),
+    ("from pathlib import Path, PureWindowsPath", WRITING),
+    ("import numpy as np", WRITING),
+    ("import soundfile as sf", WRITING),
+    ("from autonomous_mixing.domain.observation import RenderSpec", WRITING),
+    ("from autonomous_mixing.domain.project import OutputContainer, ProcessingSpec", WRITING),
+    ("from ...domain.project import SampleEncoding", WRITING),
+    ("from autonomous_mixing.domain import observation", WRITING),
+    ("from autonomous_mixing.infrastructure.workspaces import AllocatedWorkspace", WRITING),
+    ("from ..workspaces import WorkspaceAllocationError, validate_allocated_workspace", WRITING),
+    ("from autonomous_mixing.infrastructure import workspaces", WRITING),
+    ("import autonomous_mixing.infrastructure.workspaces as workspaces", WRITING),
 ]
 
 
@@ -674,6 +837,9 @@ EXPECTED_INFRASTRUCTURE_MODULES = {
     LOCATIONS,
     WORKSPACES,
     ALLOCATION,
+    VALIDATION,
+    WAV_OUTPUT,
+    WRITING,
 }
 
 
@@ -771,6 +937,9 @@ def test_infrastructure_initializer_is_descriptive_and_leaves_keep_their_locatio
     assert ALL_MODULES[LOCATIONS] == SRC / PKG / "infrastructure" / "filesystem" / "locations.py"
     assert ALL_MODULES[WORKSPACES] == SRC / PKG / "infrastructure" / "workspaces" / "__init__.py"
     assert ALL_MODULES[ALLOCATION] == SRC / PKG / "infrastructure" / "workspaces" / "allocation.py"
+    assert ALL_MODULES[VALIDATION] == SRC / PKG / "infrastructure" / "workspaces" / "validation.py"
+    assert ALL_MODULES[WAV_OUTPUT] == SRC / PKG / "infrastructure" / "wav_output" / "__init__.py"
+    assert ALL_MODULES[WRITING] == SRC / PKG / "infrastructure" / "wav_output" / "writing.py"
 
 
 def _project_imports(name: str) -> set[str]:
@@ -789,12 +958,28 @@ def test_real_filesystem_and_audio_edges_are_exactly_the_permitted_ones():
 
 
 def test_real_workspace_edges_are_exactly_the_permitted_ones():
-    assert _project_imports(WORKSPACES) == {ALLOCATION}
+    assert _project_imports(WORKSPACES) == {ALLOCATION, VALIDATION}
     assert _project_imports(ALLOCATION) == {f"{DOMAIN}.project", f"{APPLICATION}.execution", FILESYSTEM}
     assert {_top(t) for t in _resolved_imports(ALLOCATION)} - {PKG} <= set(sys.stdlib_module_names)
+    # validation uses only its allocation sibling; allocation never imports validation (no cycle)
+    assert _project_imports(VALIDATION) == {ALLOCATION}
+    assert {_top(t) for t in _resolved_imports(VALIDATION)} - {PKG} <= set(sys.stdlib_module_names)
     for name in ALL_MODULES:
-        if name not in {WORKSPACES, ALLOCATION}:
-            assert not [t for t in _resolved_imports(name) if _within(t, WORKSPACES)], name
+        if name in {WORKSPACES, ALLOCATION, VALIDATION}:
+            continue
+        workspace_targets = {t for t in _resolved_imports(name) if _within(t, WORKSPACES)}
+        # the writer is the only outside consumer, and only through the public workspaces interface
+        assert workspace_targets == ({WORKSPACES} if name == WRITING else set()), name
+
+
+def test_real_wav_output_edges_are_exactly_the_permitted_ones():
+    assert _project_imports(WAV_OUTPUT) == {WRITING}
+    assert _project_imports(WRITING) == {f"{DOMAIN}.project", f"{DOMAIN}.observation", WORKSPACES}
+    third_party = {_top(t) for t in _resolved_imports(WRITING)} - {PKG} - set(sys.stdlib_module_names)
+    assert third_party == {"numpy", "soundfile"}
+    for name in ALL_MODULES:
+        if name not in {WAV_OUTPUT, WRITING}:
+            assert not [t for t in _resolved_imports(name) if _within(t, WAV_OUTPUT)], name
 
 
 def _reexports(name: str) -> tuple[list[str], list[str]]:
@@ -840,12 +1025,19 @@ WORKSPACE_EXPORTS = {
     "WorkspaceAllocationFailureCode",
     "WorkspaceAllocationError",
     "allocate_workspace",
+    "validate_allocated_workspace",
 }
+WAV_OUTPUT_EXPORTS = {"WrittenWav", "WavOutputFailureCode", "WavOutputError", "write_wav_output"}
 
 
 @pytest.mark.parametrize(
     "name, expected",
-    [(FILESYSTEM, FILESYSTEM_EXPORTS), (AUDIO, AUDIO_EXPORTS), (WORKSPACES, WORKSPACE_EXPORTS)],
+    [
+        (FILESYSTEM, FILESYSTEM_EXPORTS),
+        (AUDIO, AUDIO_EXPORTS),
+        (WORKSPACES, WORKSPACE_EXPORTS),
+        (WAV_OUTPUT, WAV_OUTPUT_EXPORTS),
+    ],
 )
 def test_infrastructure_component_initializers_only_reexport_their_public_names(name, expected):
     imported, exported = _reexports(name)
@@ -928,11 +1120,23 @@ assert verification.resolve_artifact_location is locations.resolve_artifact_loca
 assert len(filesystem.__all__) == 4
 workspaces = importlib.import_module("autonomous_mixing.infrastructure.workspaces")
 allocation = importlib.import_module("autonomous_mixing.infrastructure.workspaces.allocation")
-assert len(workspaces.__all__) == 6
+validation = importlib.import_module("autonomous_mixing.infrastructure.workspaces.validation")
+assert len(workspaces.__all__) == 7
 for n in workspaces.__all__:
-    assert getattr(workspaces, n) is getattr(allocation, n)
+    owner = validation if n == "validate_allocated_workspace" else allocation
+    assert getattr(workspaces, n) is getattr(owner, n)
+assert validation.AllocatedWorkspace is allocation.AllocatedWorkspace
+assert validation._check_protected is allocation._check_protected
 assert allocation.ExecutionWorkspace is execution.ExecutionWorkspace
 assert allocation.resolve_artifact_location is filesystem.resolve_artifact_location
+wav_output = importlib.import_module("autonomous_mixing.infrastructure.wav_output")
+writing = importlib.import_module("autonomous_mixing.infrastructure.wav_output.writing")
+assert len(wav_output.__all__) == 4
+for n in wav_output.__all__:
+    assert getattr(wav_output, n) is getattr(writing, n)
+assert writing.validate_allocated_workspace is workspaces.validate_allocated_workspace
+assert writing.AllocatedWorkspace is workspaces.AllocatedWorkspace
+assert writing.WorkspaceAllocationError is allocation.WorkspaceAllocationError
 print("ok")
 """
 
@@ -960,6 +1164,13 @@ def test_fresh_process_imports_succeed_in_every_order_without_partial_initializa
         "workspace leaf first": [ALLOCATION, WORKSPACES, AUDIO, FILESYSTEM] + CANONICAL_ORDER,
         "workspace facade first": [WORKSPACES, APPLICATION, AUDIO, LOCATIONS],
         "execution then workspaces": [f"{APPLICATION}.execution", ALLOCATION, WORKSPACES],
+        "validation leaf first": [VALIDATION, ALLOCATION, WORKSPACES],
+        "validation before allocation facade": [VALIDATION, WORKSPACES, WRITING],
+        "wav_output facade first": [WAV_OUTPUT, WORKSPACES, AUDIO, FILESYSTEM],
+        "writing leaf first": [WRITING, WAV_OUTPUT, VALIDATION, ALLOCATION],
+        "audio then wav_output": [AUDIO, DSP, WAV_OUTPUT, WRITING],
+        "workspaces then wav_output": [WORKSPACES, ALLOCATION, WRITING, WAV_OUTPUT] + CANONICAL_ORDER,
+        "execution then wav_output": [f"{APPLICATION}.execution", WRITING, WORKSPACES],
     }
     # Every module must also import on its own as the first import of a fresh process.
     for name in sorted(EXPECTED_APPLICATION_MODULES | EXPECTED_INFRASTRUCTURE_MODULES):
@@ -993,16 +1204,17 @@ def test_infrastructure_audio_loads_no_application_m0_or_cli_modules_at_runtime(
     loaded = _loaded_after(f"import {AUDIO}")
     assert loaded, "the probe must observe newly loaded modules"
     assert not [n for n in loaded if _within(n, APPLICATION) or _within(n, f"{PKG}.audio") or n == f"{PKG}.cli"]
-    assert not [n for n in loaded if _within(n, WORKSPACES)]
+    assert not [n for n in loaded if _within(n, WORKSPACES) or _within(n, WAV_OUTPUT)]
 
 
 def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or_cli_at_runtime():
     loaded = _loaded_after(f"import {WORKSPACES}")
-    assert {ALLOCATION, f"{APPLICATION}.execution", LOCATIONS} <= set(loaded)
+    assert {ALLOCATION, VALIDATION, f"{APPLICATION}.execution", LOCATIONS} <= set(loaded)
     forbidden = [
         n
         for n in loaded
         if _within(n, AUDIO)
+        or _within(n, WAV_OUTPUT)
         or _within(n, f"{PKG}.audio")
         or n == f"{PKG}.cli"
         or _top(n) in {"numpy", "soundfile", "anthropic"}
@@ -1022,8 +1234,24 @@ def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0
         if _within(n, APPLICATION)
         or _within(n, AUDIO)
         or _within(n, WORKSPACES)
+        or _within(n, WAV_OUTPUT)
         or _within(n, f"{PKG}.audio")
         or n == f"{PKG}.cli"
         or _top(n) in {"numpy", "soundfile"}
     ]
     assert forbidden == []
+
+
+def test_infrastructure_wav_output_loads_workspaces_and_execution_but_no_audio_m0_or_cli_at_runtime():
+    # Explicit wav_output imports may load workspaces and, transitively, application.execution.
+    loaded = _loaded_after(f"import {WAV_OUTPUT}")
+    assert {WRITING, WORKSPACES, VALIDATION, ALLOCATION, f"{APPLICATION}.execution"} <= set(loaded)
+    forbidden = [
+        n
+        for n in loaded
+        if _within(n, AUDIO) or _within(n, f"{PKG}.audio") or n == f"{PKG}.cli" or _top(n) == "anthropic"
+    ]
+    assert forbidden == []
+    # Like the audio facade, the writer loads NumPy and soundfile (and their dependencies); only layer
+    # independence is asserted. Loading application.execution runs the application package initializer,
+    # exactly as importing the workspaces facade already does.
