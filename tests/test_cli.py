@@ -1,6 +1,8 @@
 import json
+import os
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from autonomous_mixing.cli import main
@@ -54,3 +56,138 @@ def test_missing_input_reported(tmp_path, capsys):
     kick, _ = _stems(tmp_path)
     assert main(["analyze", str(kick), str(tmp_path / "nope.wav"), "--output", str(tmp_path / "x.json")]) == 2
     assert "not found" in capsys.readouterr().err
+
+
+# --- Report destination must not alias an input (pre-write identity guard) ---
+
+SUCCESS_PREFIX = "Wrote "
+
+
+def _sha256(path):
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _assert_rejected(code, capsys, protected):
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.err.startswith("error:")
+    assert "Traceback" not in captured.err
+    assert SUCCESS_PREFIX not in captured.out
+    for path, digest in protected.items():
+        assert _sha256(path) == digest, path
+
+
+@pytest.mark.parametrize("which", ["kick", "bass"])
+def test_output_equal_to_input_is_rejected(tmp_path, capsys, which):
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    target = kick if which == "kick" else bass
+    code = main(["analyze", str(kick), str(bass), "--output", str(target)])
+    _assert_rejected(code, capsys, protected)
+
+
+@pytest.mark.parametrize("create_intermediate", [True, False])
+def test_relative_output_aliasing_absolute_input_is_rejected(tmp_path, capsys, monkeypatch, create_intermediate):
+    # Without the intermediate directory, POSIX resolves "sub/.." only after the
+    # CLI creates the report parent; Windows normalizes it lexically.
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    if create_intermediate:
+        (tmp_path / "sub").mkdir()
+    monkeypatch.chdir(tmp_path)
+    code = main(["analyze", str(kick.resolve()), str(bass.resolve()), "--output", "./sub/../bass.wav"])
+    _assert_rejected(code, capsys, protected)
+
+
+def test_absolute_output_aliasing_relative_input_is_rejected(tmp_path, capsys, monkeypatch):
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    monkeypatch.chdir(tmp_path)
+    code = main(["analyze", "kick.wav", "bass.wav", "--output", str(kick.resolve())])
+    _assert_rejected(code, capsys, protected)
+
+
+@pytest.mark.parametrize("which", ["kick", "bass"])
+def test_symlink_output_to_input_is_rejected(tmp_path, capsys, which):
+    kick, bass = _stems(tmp_path)
+    target = kick if which == "kick" else bass
+    alias = tmp_path / "alias.json"
+    try:
+        os.symlink(target, alias)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable on this platform: {exc!r}")
+    protected = {kick: _sha256(kick), bass: _sha256(bass), alias: _sha256(alias)}
+    code = main(["analyze", str(kick), str(bass), "--output", str(alias)])
+    _assert_rejected(code, capsys, protected)
+    assert alias.is_symlink()
+
+
+@pytest.mark.parametrize("which", ["kick", "bass"])
+def test_hardlink_output_to_input_is_rejected(tmp_path, capsys, which):
+    kick, bass = _stems(tmp_path)
+    target = kick if which == "kick" else bass
+    alias = tmp_path / "hardlink.json"
+    try:
+        os.link(target, alias)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"hard link creation unavailable on this platform: {exc!r}")
+    protected = {kick: _sha256(kick), bass: _sha256(bass), alias: _sha256(alias)}
+    code = main(["analyze", str(kick), str(bass), "--output", str(alias)])
+    _assert_rejected(code, capsys, protected)
+
+
+def test_unrelated_new_report_without_json_extension_succeeds(tmp_path, capsys):
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    out = tmp_path / "new" / "nested" / "report.txt"
+    assert main(["analyze", str(kick), str(bass), "--output", str(out)]) == 0
+    assert SUCCESS_PREFIX in capsys.readouterr().out
+    assert json.loads(out.read_text(encoding="utf-8"))["schema_version"] == "m0.1"
+    for path, digest in protected.items():
+        assert _sha256(path) == digest
+
+
+def test_unrelated_existing_report_is_replaced(tmp_path, capsys):
+    kick, bass = _stems(tmp_path)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    out = tmp_path / "analysis.json"
+    out.write_text("stale", encoding="utf-8")
+    assert main(["analyze", str(kick), str(bass), "--output", str(out)]) == 0
+    assert SUCCESS_PREFIX in capsys.readouterr().out
+    assert json.loads(out.read_text(encoding="utf-8"))["schema_version"] == "m0.1"
+    for path, digest in protected.items():
+        assert _sha256(path) == digest
+
+
+def test_injected_destination_stat_failure_prevents_writing(tmp_path, capsys, monkeypatch):
+    # INJECTED failure: os.stat raises PermissionError only for the existing report
+    # destination, simulating an inspection failure that real permissions could cause.
+    kick, bass = _stems(tmp_path)
+    out = tmp_path / "existing.json"
+    out.write_text("previous report", encoding="utf-8")
+    protected = {kick: _sha256(kick), bass: _sha256(bass), out: _sha256(out)}
+    real_stat = os.stat
+
+    def failing_stat(path, *args, **kwargs):
+        if os.fspath(path) == os.fspath(out):
+            raise PermissionError(13, "injected permission denied", os.fspath(path))
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", failing_stat)
+    code = main(["analyze", str(kick), str(bass), "--output", str(out)])
+    monkeypatch.undo()
+    _assert_rejected(code, capsys, protected)
+    assert out.read_text(encoding="utf-8") == "previous report"
+
+
+def test_input_validation_precedes_report_alias_check(tmp_path, capsys):
+    kick, bass = _stems(tmp_path, bass_sr=48000)
+    protected = {kick: _sha256(kick), bass: _sha256(bass)}
+    code = main(["analyze", str(kick), str(bass), "--output", str(kick)])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert err.startswith("error: Stems must share a sample rate")
+    for path, digest in protected.items():
+        assert _sha256(path) == digest

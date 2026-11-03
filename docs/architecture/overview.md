@@ -20,12 +20,29 @@ M0 implements only Audio I/O -> features -> descriptive JSON report. Do not clai
 | `autonomous_mixing.audio.io` | Load WAV stems as float64 `(frames, channels)`; reject non-WAV, unreadable, too-short (< 2048 frames), > 2-channel and non-finite input; require equal sample rate and frame count for a pair. |
 | `autonomous_mixing.audio.features` | Mono fold-down, RMS/peak dBFS, STFT magnitudes, band-power and temporal-coactivity proxies. |
 | `autonomous_mixing.audio.analysis` | `analyze_pair`: combines the above into the `m0.1` report dict, including input SHA-256 hashes. |
-| `autonomous_mixing.cli` | `autonomous-mixing analyze`: writes the JSON report; validation errors exit with code 2 and a one-line message. |
+| `autonomous_mixing.cli` | `autonomous-mixing analyze`: writes the JSON report; validation errors exit with code 2 and a one-line message. *(2026-11-03: also rejects a report destination that refers to either input; see "Report destination guard" below.)* |
 | `scripts/generate_test_audio.py` | Deterministic synthetic kick/bass stems, formerly used for manual smoke runs (not perceptual ground truth). No test depends on it; under review per ADR-006. |
 
 Analysis parameters (STFT 2048/512, 30–200 Hz band, 10 % coactivity threshold) are fixed in code. `configs/analysis.yaml` documents them as a proposed manifest but is **not read** by the code yet.
 
 **Known deviations from ADR-006 (M0):** the two inputs are named `kick`/`bass` in the CLI, `analyze_pair` and the report keys, and the parameters above are hardcoded. Retained unchanged until reviewed; do not extend this pattern.
+
+**Report destination guard (2026-11-03, bounded defect correction; no ADR).** Before this correction the CLI wrote the report to `--output` without comparing it with the inputs, so a destination naming an input stem replaced that source file with the JSON report. This is corrected; no requirement status changed and QR-01 remains untested as recorded in the requirements.
+- `cli._report_conflict` compares filesystem identity: `os.stat` (following symbolic links) of the destination and of each input, then `os.path.samestat`. No path strings are compared. Direct paths and relative/absolute, symbolic-link and hard-link aliases of either input are therefore rejected where the platform supports them.
+- Order: analysis and input validation run first, so their errors are reported unchanged. The check then runs before the parent directory is created and again after it, immediately before writing; the second check covers paths such as `missing/../input.wav`, which on POSIX resolve to an input only once `missing` exists.
+- Rejection exits with code 2 and a one-line `error: …` message on stderr, with no traceback and no `Wrote …` line; the input bytes are preserved.
+- A nonexistent destination is allowed. Any other `OSError` while inspecting an existing destination or an input rejects with `error: cannot verify …` and nothing is written.
+- New reports and replacement of an unrelated existing report still work. Arguments, the `m0.1` report schema and extension handling (any extension is accepted) are unchanged.
+- Destinations whose parent component is an existing file: on POSIX the destination `stat` is expected to fail with a non-`FileNotFoundError` error, so the CLI now reports `error: cannot verify …` with exit 2 instead of a traceback (implementer-stated; not exercised on native POSIX). On Windows 11 a documentation probe (2026-11-03, one-off, not regression coverage) observed that `os.stat` reports `FileNotFoundError` for such a path, the first check allows it, and parent creation then raises an uncaught `FileExistsError` (traceback), as before the correction. The source files are not written in this case.
+- Limits: a pre-write check, not a lock; there is no race-free protection between the check and the write. Parent directories created before a second-check rejection are left in place. Identity checks were exercised on Windows 11 NTFS only. This guard concerns the M0 report output; it does not address F4, which concerns the future file adapter and execution service.
+- Evidence (kept by source):
+  - Implementer full run: 2,791 passed, 3 skips.
+  - Independent full run: 2,777 passed, 17 platform/sandbox skips.
+  - Both original source-overwrite audit probes now pass.
+  - An independent controlled second-check probe passed; it is not native POSIX evidence or permanent regression coverage.
+  - Lint, formatting and CLI help passed.
+  - No fresh lockfile check: uv was unavailable; dependency files are unchanged.
+  - Regression tests: `tests/test_cli.py` (direct, relative/absolute, symbolic-link and hard-link aliases with platform skips, an injected destination `stat` failure, unrelated new and existing reports, and input validation preceding the check).
 
 ## Domain foundation (implemented records; not integrated)
 Proposed in [ADR-011](../decisions/0011-domain-foundation-boundary.md), [ADR-012](../decisions/0012-typed-action-proposals-and-decisions.md), [ADR-013](../decisions/0013-validation-criteria-and-result-records.md), [ADR-014](../decisions/0014-run-lifecycle-and-budget-records.md) and [ADR-015](../decisions/0015-correction-attempt-and-artifact-checkpoint-records.md), [ADR-019](../decisions/0019-fixed-input-gain-and-composite-project-state.md); organized into component packages by [ADR-017](../decisions/0017-domain-component-packages.md). `autonomous_mixing.domain` holds immutable, standard-library-only records with construction-time invariants. Evidence: `tests/unit/test_domain_foundation.py`, which also enforces the import boundary, `tests/unit/test_action_decision.py`, `tests/unit/test_validation_records.py`, `tests/unit/test_run_records.py` `tests/unit/test_execution_records.py`, `tests/unit/test_domain_component_compatibility.py` and `tests/unit/test_domain_component_boundaries.py` (component dependency matrix and public interfaces). M0 does not use these records yet; no requirement is met by them alone.
@@ -321,6 +338,7 @@ Neither leaf imports the M0 audio package, the CLI, presentation or provider cod
   - Empty file on descriptor-attachment failure: an unexpected `open_osfhandle` failure after `CreateFileW` succeeded leaves an empty file without `created_file`. How should a future execution service detect or report such files, given that no cleanup is allowed?
   - Whether the Windows opener should deny concurrent writers (share mode) during write and readback.
 - Import-order test observation (2026-11-02): one import-order test failed once in the implementer's baseline full run, before any change. It was not reproduced in later runs. Its cause has not been diagnosed, and no fix is claimed.
+- M0 report destination guard (2026-11-03): should a Windows destination whose parent component is an existing file be reported as `error: …` with exit 2 instead of the current `FileExistsError` traceback (observed in a one-off documentation probe; not covered by a test)? Native POSIX behaviour of the guard, including the `missing/../input.wav` case, has not been exercised.
 - How should the M0 two-stem interface generalize to role-declared stems (e.g. via the `track_roles` manifest field in [`dataset-plan.md`](../research/dataset-plan.md)), and which report-schema version change does that imply?
 - Should `scripts/generate_test_audio.py` be removed or retained (and if retained, for which documented purpose)? Requires owner approval.
 - Domain records (ADR-011): how will units be checked against a future metric catalog? Should artifact time coverage allow a tolerance (tied to D3)? Is any zero-offset timezone acceptable as UTC, as currently implemented?

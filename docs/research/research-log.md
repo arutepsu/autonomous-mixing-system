@@ -240,3 +240,18 @@
   - No requirement is completed and no requirement status changed. No perceptual or research-performance result follows.
   - Left uncommitted for review.
 - Open: hash reproducibility policy; Windows error 1921 propagating as unexpected; the empty-file-on-attachment-failure limit; whether the Windows opener should deny concurrent writers.
+
+## 2026-11-03 — M0 CLI report destination guard (defect correction)
+- Bounded defect correction, no ADR. Before it, `autonomous-mixing analyze` wrote the report to `--output` without comparing it with the inputs, so a destination naming an input stem replaced that source file with JSON. Documented after independent review; the change to `src/autonomous_mixing/cli.py` and `tests/test_cli.py` is uncommitted.
+- Behaviour: after successful analysis and input validation, the CLI compares filesystem identity (`os.stat`, following symbolic links, plus `os.path.samestat`; no string comparison) of the destination with each input, before creating the parent directory and again after, immediately before writing. Direct paths and relative/absolute, symbolic-link and hard-link aliases are covered where the platform supports them. Rejection: exit code 2, one-line `error: …` on stderr, no traceback, source bytes preserved. A nonexistent destination is allowed; any other `OSError` while inspecting an existing destination or an input rejects without writing. New reports and replacement of unrelated existing reports still work; arguments, report schema and extension handling are unchanged.
+- Evidence (by source):
+  - Implementer full run: 2,791 passed, 3 skips.
+  - Independent full run: 2,777 passed, 17 platform/sandbox skips.
+  - Both original source-overwrite audit probes now pass.
+  - An independent controlled second-check probe passed; it is not native POSIX evidence or permanent regression coverage.
+  - Lint, formatting and CLI help passed.
+  - No fresh lockfile check: uv was unavailable; dependency files are unchanged.
+  - Identity was exercised on Windows 11 NTFS only.
+- Correction to the briefed behaviour change for an output whose parent component is an existing file: it was stated as now giving exit 2 with `error: cannot verify …` instead of a traceback. That follows from the code only where `os.stat` raises a non-`FileNotFoundError` error (expected on POSIX, not exercised natively). A documentation probe on Windows 11 (2026-11-03, one-off, not regression coverage) observed `FileNotFoundError` from `os.stat`, so the first check allowed the path and parent creation raised an uncaught `FileExistsError` traceback, as before; no input was written.
+- Limits: not a lock and not race-free; parent directories created before a second-check rejection remain. F4 (future file adapter) is unaffected. No requirement status changed; QR-01 remains untested as recorded.
+- Open: the Windows file-as-parent traceback; native POSIX behaviour of the guard.
