@@ -363,3 +363,6 @@
 - Intermittent failure explained: the failure detail of `test_fresh_process_imports_succeed_in_every_order_without_partial_initialization` was "OpenBLAS error: Memory allocation still failed after 10 retries, giving up". The test starts about 150 probe processes in parallel and each loads NumPy through the infrastructure audio package, so each OpenBLAS starts a full thread pool. The probes now run with `OPENBLAS_NUM_THREADS=1` (test harness only; no product code changed). Before: the failure occurred in 3 of about 7 full runs since M0. After: 5 of 5 consecutive full runs passed. This is evidence, not proof, that the cause is removed.
 - Evidence (Claude Code, Windows 11, repository `.venv`; `uv` not on PATH): full suite 2,909 passed, 3 skipped (M1 2,907 + 2 new); `ruff check` and `ruff format --check` pass.
 - M2 is not started; the correction awaits Codex re-review.
+
+## 2026-11-03 — correction to the preceding entry (failure frequency)
+- The preceding entry says the fresh-process failure occurred "in 3 of about 7 full runs since M0". Recounted from this session's runs, it failed in at least 5 of about 11 full runs (roughly half) before the OpenBLAS limit. The other statements of that entry are unchanged.
