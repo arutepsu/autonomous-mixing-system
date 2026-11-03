@@ -30,8 +30,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+import autonomous_mixing.adapters.rendering.wav_output as writing  # moved in ADR-027 step M3; tests patch or inspect its internals
 import autonomous_mixing.infrastructure.wav_output as wav_output
-import autonomous_mixing.infrastructure.wav_output.writing as writing
 from autonomous_mixing.application.execution import ExecutionWorkspace
 from autonomous_mixing.domain.observation import RenderSpec
 from autonomous_mixing.domain.project import (

@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.infrastructure.audio.verification as verification
+import autonomous_mixing.adapters.rendering.integrity as verification  # moved in ADR-027 step M3; tests patch or inspect its internals
 from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
 from autonomous_mixing.domain.shared import ArtifactId, ProjectId, Revision, TrackId, VersionRef
 from autonomous_mixing.infrastructure.audio import (

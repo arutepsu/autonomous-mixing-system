@@ -22,9 +22,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import autonomous_mixing.adapters.rendering.revalidation as validation  # moved in ADR-027 step M3; tests patch or inspect its internals
+import autonomous_mixing.adapters.rendering.workspaces as allocation  # moved in ADR-027 step M3; tests patch or inspect its internals
 import autonomous_mixing.infrastructure.workspaces as workspaces
-import autonomous_mixing.infrastructure.workspaces.allocation as allocation
-import autonomous_mixing.infrastructure.workspaces.validation as validation
 from autonomous_mixing.application.execution import ExecutionWorkspace
 from autonomous_mixing.domain.project import (
     ArtifactCheckpoint,

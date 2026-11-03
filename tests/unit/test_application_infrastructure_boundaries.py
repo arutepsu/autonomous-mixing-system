@@ -192,6 +192,19 @@ def _application_rule(source: str, target: str, relative: bool, known_modules: f
     return None if target_component in ALLOWED[source_component] else "dependency matrix"
 
 
+# ADR-027 step M3: infrastructure leaves moved to adapters.rendering; their exact edges are now enforced by
+# tests/architecture/test_adapters.py (ledger G10).
+LEGACY_LEAF_ADAPTERS = {
+    "autonomous_mixing.infrastructure.audio.dsp": "autonomous_mixing.adapters.rendering.dsp",
+    "autonomous_mixing.infrastructure.audio.verification": "autonomous_mixing.adapters.rendering.integrity",
+    "autonomous_mixing.infrastructure.filesystem.locations": "autonomous_mixing.adapters.rendering.locations",
+    "autonomous_mixing.infrastructure.workspaces.allocation": "autonomous_mixing.adapters.rendering.workspaces",
+    "autonomous_mixing.infrastructure.workspaces.validation": "autonomous_mixing.adapters.rendering.revalidation",
+    "autonomous_mixing.infrastructure.wav_output.writing": "autonomous_mixing.adapters.rendering.wav_output",
+    "autonomous_mixing.infrastructure.processing.gain_mix": "autonomous_mixing.adapters.rendering.gain_mix",
+}
+
+
 GAIN_MIX_TARGETS = frozenset(
     {
         f"{DOMAIN}.project",
@@ -960,6 +973,8 @@ def test_recursive_discovery_covers_every_component_facade_and_infrastructure_mo
 def test_real_modules_have_no_import_violations(prefix):
     problems = []
     for name, path in _scanned(prefix).items():
+        if name in LEGACY_LEAF_ADAPTERS:
+            continue  # ADR-027 step M3: shims, checked by the legacy-leaf shim test
         problems += find_import_violations(path.read_text(encoding="utf-8"), name, path.name == "__init__.py", KNOWN)
     assert problems == []
 
@@ -1052,52 +1067,15 @@ def _project_imports(name: str) -> set[str]:
     return {t for t in _resolved_imports(name) if _top(t) == PKG}
 
 
-def test_real_filesystem_and_audio_edges_are_exactly_the_permitted_ones():
-    assert _project_imports(FILESYSTEM) == {LOCATIONS}
-    assert _project_imports(LOCATIONS) == {f"{DOMAIN}.project"}
-    assert {_top(t) for t in _resolved_imports(LOCATIONS)} - {PKG} <= set(sys.stdlib_module_names)
-    assert _project_imports(VERIFICATION) == {f"{DOMAIN}.project", FILESYSTEM}
-    assert _project_imports(DSP) == set()
-    assert _project_imports(AUDIO) == {DSP, VERIFICATION}
-    for name in _scanned(INFRASTRUCTURE):
-        assert LOCATIONS not in _resolved_imports(name) or name == FILESYSTEM, name
-
-
-def test_real_workspace_edges_are_exactly_the_permitted_ones():
-    assert _project_imports(WORKSPACES) == {ALLOCATION, VALIDATION}
-    assert _project_imports(ALLOCATION) == {f"{DOMAIN}.project", f"{APPLICATION}.execution", FILESYSTEM}
-    assert {_top(t) for t in _resolved_imports(ALLOCATION)} - {PKG} <= set(sys.stdlib_module_names)
-    # validation uses only its allocation sibling; allocation never imports validation (no cycle)
-    assert _project_imports(VALIDATION) == {ALLOCATION}
-    assert {_top(t) for t in _resolved_imports(VALIDATION)} - {PKG} <= set(sys.stdlib_module_names)
+def test_legacy_infrastructure_leaves_are_shims_of_exactly_their_adapter_module():
+    # ADR-027 step M3. Replaces the former exact-edge and runtime-load tests of the moved leaves; their
+    # guarantees are enforced on the adapter modules by tests/architecture/test_adapters.py (ledger G4, G10).
+    for legacy, adapter in LEGACY_LEAF_ADAPTERS.items():
+        assert _project_imports(legacy) == {adapter}, legacy
+        assert {_top(t) for t in _resolved_imports(legacy)} - {PKG} <= set(sys.stdlib_module_names), legacy
     for name in ALL_MODULES:
-        if name in {WORKSPACES, ALLOCATION, VALIDATION}:
-            continue
-        workspace_targets = {t for t in _resolved_imports(name) if _within(t, WORKSPACES)}
-        # the writer and the processor are the only outside consumers, through the public interface only
-        assert workspace_targets == ({WORKSPACES} if name in {WRITING, GAIN_MIX} else set()), name
-
-
-def test_real_wav_output_edges_are_exactly_the_permitted_ones():
-    assert _project_imports(WAV_OUTPUT) == {WRITING}
-    assert _project_imports(WRITING) == {f"{DOMAIN}.project", f"{DOMAIN}.observation", WORKSPACES}
-    third_party = {_top(t) for t in _resolved_imports(WRITING)} - {PKG} - set(sys.stdlib_module_names)
-    assert third_party == {"numpy", "soundfile"}
-    for name in ALL_MODULES:
-        if name not in {WAV_OUTPUT, WRITING}:
-            wav_targets = {t for t in _resolved_imports(name) if _within(t, WAV_OUTPUT)}
-            # the processor is the only consumer, through the public interface only
-            assert wav_targets == ({WAV_OUTPUT} if name == GAIN_MIX else set()), name
-
-
-def test_real_processing_edges_are_exactly_the_permitted_ones():
-    assert _project_imports(PROCESSING) == {GAIN_MIX}
-    assert _project_imports(GAIN_MIX) == GAIN_MIX_TARGETS
-    third_party = {_top(t) for t in _resolved_imports(GAIN_MIX)} - {PKG} - set(sys.stdlib_module_names)
-    assert third_party == {"numpy"}
-    for name in ALL_MODULES:
-        if name not in {PROCESSING, GAIN_MIX}:
-            assert not [t for t in _resolved_imports(name) if _within(t, PROCESSING)], name
+        if name not in LEGACY_LEAF_ADAPTERS and not _within(name, INFRASTRUCTURE):
+            assert not [t for t in _resolved_imports(name) if _within(t, INFRASTRUCTURE)], name
 
 
 def _reexports(name: str) -> tuple[list[str], list[str]]:
@@ -1197,8 +1175,8 @@ def test_production_code_outside_the_application_imports_no_application_module()
     for name in ALL_MODULES:
         if not _within(name, APPLICATION):
             imported = {t for t in _resolved_imports(name) if _within(t, APPLICATION)}
-            expected = {f"{APPLICATION}.execution"} if name in {ALLOCATION, GAIN_MIX} else set()
-            assert imported == expected, name
+            # ADR-027 step M3: allocation and the processor now import core.records; no exception remains.
+            assert imported == set(), name
 
 
 # --- fresh-process imports -------------------------------------------------------------------
@@ -1206,6 +1184,8 @@ def test_production_code_outside_the_application_imports_no_application_module()
 CANONICAL_ORDER = [f"{APPLICATION}.{component}" for component in COMPONENTS]
 LEGACY_ORDER = sorted(LEGACY_FACADES)
 INFRA_ORDER = [DSP, VERIFICATION, AUDIO]
+# ADR-027 step M3: the leaf lookups below use the adapter modules; the legacy package interfaces must still
+# export the same objects. The legacy leaves themselves are shims (see the shim test).
 IDENTITY_PROBE = """
 import importlib
 A = "autonomous_mixing.application"
@@ -1218,10 +1198,10 @@ contracts, results, execution_contracts, execution_preflight, ports = (
     for m in ("contracts", "results", "execution_contracts", "execution_preflight", "ports")
 )
 audio = importlib.import_module("autonomous_mixing.infrastructure.audio")
-dsp = importlib.import_module("autonomous_mixing.infrastructure.audio.dsp")
-verification = importlib.import_module("autonomous_mixing.infrastructure.audio.verification")
+dsp = importlib.import_module("autonomous_mixing.adapters.rendering.dsp")
+verification = importlib.import_module("autonomous_mixing.adapters.rendering.integrity")
 filesystem = importlib.import_module("autonomous_mixing.infrastructure.filesystem")
-locations = importlib.import_module("autonomous_mixing.infrastructure.filesystem.locations")
+locations = importlib.import_module("autonomous_mixing.adapters.rendering.locations")
 assert app.PortResult is results.PortResult is shared.PortResult
 assert app.DecisionRequest is contracts.DecisionRequest is decision.DecisionRequest
 assert app.AnalysisResponse is contracts.AnalysisResponse is observation.AnalysisResponse
@@ -1240,8 +1220,8 @@ assert verification.ResolvedArtifactLocation is filesystem.ResolvedArtifactLocat
 assert verification.resolve_artifact_location is locations.resolve_artifact_location
 assert len(filesystem.__all__) == 4
 workspaces = importlib.import_module("autonomous_mixing.infrastructure.workspaces")
-allocation = importlib.import_module("autonomous_mixing.infrastructure.workspaces.allocation")
-validation = importlib.import_module("autonomous_mixing.infrastructure.workspaces.validation")
+allocation = importlib.import_module("autonomous_mixing.adapters.rendering.workspaces")
+validation = importlib.import_module("autonomous_mixing.adapters.rendering.revalidation")
 assert len(workspaces.__all__) == 7
 for n in workspaces.__all__:
     owner = validation if n == "validate_allocated_workspace" else allocation
@@ -1251,7 +1231,7 @@ assert validation._check_protected is allocation._check_protected
 assert allocation.ExecutionWorkspace is execution.ExecutionWorkspace
 assert allocation.resolve_artifact_location is filesystem.resolve_artifact_location
 wav_output = importlib.import_module("autonomous_mixing.infrastructure.wav_output")
-writing = importlib.import_module("autonomous_mixing.infrastructure.wav_output.writing")
+writing = importlib.import_module("autonomous_mixing.adapters.rendering.wav_output")
 assert len(wav_output.__all__) == 4
 for n in wav_output.__all__:
     assert getattr(wav_output, n) is getattr(writing, n)
@@ -1259,7 +1239,7 @@ assert writing.validate_allocated_workspace is workspaces.validate_allocated_wor
 assert writing.AllocatedWorkspace is workspaces.AllocatedWorkspace
 assert writing.WorkspaceAllocationError is allocation.WorkspaceAllocationError
 processing = importlib.import_module("autonomous_mixing.infrastructure.processing")
-gain_mix = importlib.import_module("autonomous_mixing.infrastructure.processing.gain_mix")
+gain_mix = importlib.import_module("autonomous_mixing.adapters.rendering.gain_mix")
 assert len(processing.__all__) == 3
 for n in processing.__all__:
     assert getattr(processing, n) is getattr(gain_mix, n)
@@ -1347,28 +1327,6 @@ def test_infrastructure_audio_loads_no_application_m0_or_cli_modules_at_runtime(
     assert not [n for n in loaded if _within(n, WORKSPACES) or _within(n, WAV_OUTPUT) or _within(n, PROCESSING)]
 
 
-def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or_cli_at_runtime():
-    loaded = _loaded_after(f"import {WORKSPACES}")
-    assert {ALLOCATION, VALIDATION, f"{APPLICATION}.execution", LOCATIONS} <= set(loaded)
-    forbidden = [
-        n
-        for n in loaded
-        if _within(n, AUDIO)
-        or _within(n, WAV_OUTPUT)
-        or _within(n, PROCESSING)
-        or _within(n, f"{PKG}.audio")
-        or n == f"{PKG}.cli"
-        or _top(n) in {"numpy", "soundfile", "anthropic"}
-    ]
-    assert forbidden == []
-    for name in loaded:
-        layer_ok = name in (PKG, f"{PKG}.core") or any(
-            _within(name, p)
-            for p in (DOMAIN, APPLICATION, INFRASTRUCTURE, CORE)  # CORE: ADR-027 steps M1/M2
-        )
-        assert layer_ok or _top(name) in sys.stdlib_module_names, name
-
-
 def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0_or_cli_modules_at_runtime():
     loaded = _loaded_after(f"import {FILESYSTEM}")
     assert LOCATIONS in loaded, "the probe must observe the filesystem component loading"
@@ -1386,30 +1344,6 @@ def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0
     ]
     assert forbidden == []
 
-
-def test_infrastructure_wav_output_loads_workspaces_and_execution_but_no_audio_m0_or_cli_at_runtime():
-    # Explicit wav_output imports may load workspaces and, transitively, application.execution.
-    loaded = _loaded_after(f"import {WAV_OUTPUT}")
-    assert {WRITING, WORKSPACES, VALIDATION, ALLOCATION, f"{APPLICATION}.execution"} <= set(loaded)
-    forbidden = [
-        n
-        for n in loaded
-        if _within(n, AUDIO)
-        or _within(n, PROCESSING)
-        or _within(n, f"{PKG}.audio")
-        or n == f"{PKG}.cli"
-        or _top(n) == "anthropic"
-    ]
-    assert forbidden == []
     # Like the audio facade, the writer loads NumPy and soundfile (and their dependencies); only layer
     # independence is asserted. Loading application.execution runs the application package initializer,
     # exactly as importing the workspaces facade already does.
-
-
-def test_infrastructure_processing_loads_its_components_but_no_m0_cli_or_provider_at_runtime():
-    # The processor loads the components it composes (and so NumPy and soundfile); only layer
-    # independence from M0, the CLI and providers is asserted.
-    loaded = _loaded_after(f"import {PROCESSING}")
-    assert {GAIN_MIX, AUDIO, FILESYSTEM, WORKSPACES, WAV_OUTPUT, f"{APPLICATION}.execution"} <= set(loaded)
-    forbidden = [n for n in loaded if _within(n, f"{PKG}.audio") or n == f"{PKG}.cli" or _top(n) == "anthropic"]
-    assert forbidden == []

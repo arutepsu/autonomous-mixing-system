@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import autonomous_mixing.infrastructure.filesystem.locations as locations
+import autonomous_mixing.adapters.rendering.locations as locations  # moved in ADR-027 step M3; tests patch or inspect its internals
 from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
 from autonomous_mixing.domain.shared import ArtifactId, ProjectId, Revision, TrackId, VersionRef
 from autonomous_mixing.infrastructure.filesystem import (

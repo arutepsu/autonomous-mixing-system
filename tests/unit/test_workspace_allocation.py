@@ -24,10 +24,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import autonomous_mixing.adapters.rendering.locations as locations  # moved in ADR-027 step M3; tests patch or inspect its internals
+import autonomous_mixing.adapters.rendering.workspaces as allocation  # moved in ADR-027 step M3; tests patch or inspect its internals
 import autonomous_mixing.core.records.rendering as identity  # ExecutionWorkspace moved here in ADR-027 step M1
-import autonomous_mixing.infrastructure.filesystem.locations as locations
 import autonomous_mixing.infrastructure.workspaces as workspaces
-import autonomous_mixing.infrastructure.workspaces.allocation as allocation
 from autonomous_mixing.application.execution import ExecutionWorkspace
 from autonomous_mixing.domain.project import (
     ArtifactCheckpoint,

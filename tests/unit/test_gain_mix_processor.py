@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.infrastructure.processing.gain_mix as gain_mix
+import autonomous_mixing.adapters.rendering.gain_mix as gain_mix  # moved in ADR-027 step M3; patched below
 from autonomous_mixing.application.execution import (
     AudioProcessor,
     CandidateIdentity,
