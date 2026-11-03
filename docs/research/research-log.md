@@ -297,3 +297,15 @@
 - Walkthrough findings, to be settled during the loop work and not during the move: `DecisionResponse` only wraps one `Decision`; `ExecutionRequest` partly duplicates `ActionAdmissionRequest`; `ExecutionReceipt` overlaps `ProcessedCandidate`; `RollbackReceipt` may reduce to a recorded disposition under immutable states; `DecisionRequest` lacks iteration history and problem candidates required by FR-06.
 - Evidence: documentation only; no code moved, no tests run, no requirement or roadmap status changed.
 - Open: MD-1 (commit the ADR-026 work first), MD-2 (accept ADR-027), MD-5 (vocabulary renames in M6); whether the roadmap dates for M3/M4 shift.
+
+## 2026-11-03 — Codex review of ADR-027 and revised migration plan
+- An independent Codex review approved the ADR-027 direction conditionally and raised five issues. All five were checked against the code and confirmed:
+  1. Ports → loop dependency: `application/decision/contracts.py` imports `BudgetLimits` and `BudgetUsage` from `domain.run`, which the plan mapped to `core.loop`. A further check found that records call cross-record checks in `__post_init__` (`CorrectionAttempt` calls `validate_receipt_against_checkpoint` and `validate_rollback_references`; `DecisionRequest` calls `validate_observation_sources`), so those checks must stay with the records.
+  2. The plan's intermediate steps could not pass the existing architecture and compatibility tests unchanged.
+  3. "Behavior-preserving" covered deliberate API changes (import-path deletion, renames, `slots=True`).
+  4. The ADR overstated immutability as establishing rollback and complete history.
+  5. The import rule for `evaluation` does not by itself satisfy SR-10. No SR-10 acceptance test exists in the suite today (no test mentions hidden data).
+- Revisions: ADR-027 amended again while Proposed. Every core data type, including port requests and responses, lives in `core.records` (narrowing the earlier MD-3 amendment); ports, stages and the loop hold behavior only. Steps are classified as move, API break, rename (optional) or slots (optional); only moves and the API break precede the loop. A guarantee ledger (G1–G12) in the migration plan maps every old architectural assertion to a replacement or a recorded drop. M1 is a pilot whose measured effort decides the rest. The immutability rationale and the SR-10 statement were narrowed. `engineering-conventions.md` updated to match.
+- Superseded: the first plan version's "every step is behavior-preserving", "same behavior-test count" as sole exit evidence, budgets and run records in `core.loop`, and the 3-to-4-day estimate as a planning fact. Those entries above are left unchanged.
+- Not resolved: the review names an ADR-026 "processor location-contract gap" that is not documented under that name (new owner decision MD-6). One candidate is that `AudioArtifact.location` does not record which root it is relative to.
+- Evidence: documentation only; no code moved, no tests run.

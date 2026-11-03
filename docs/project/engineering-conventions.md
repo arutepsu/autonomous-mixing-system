@@ -11,14 +11,15 @@ A modular monolith in hexagonal (ports-and-adapters) style. The `core` contains 
 ```
 autonomous_mixing/
   core/
-    records/        shared immutable vocabulary (ids, project state, artifacts, mix, context,
-                    observations, actions, decisions)
-    ports/          AudioAnalyzer, DecisionMaker, Renderer, each with its request/response types
-                    and response checks (e.g. Situation = what the decision maker sees)
-    admission/      is a proposal allowed: AdmissionPolicy, Admitted | Rejected, metadata preflight
-    verification/   did the change help without regressions: AcceptanceCriteria, Verdict
+    records/        ALL core data types, in modules named after the stage or port they serve
+                    (ids, project, artifacts, mix, context, observation, actions, decision,
+                    analysis, admission, rendering, verification, run, results), plus the
+                    invariant checks records call in __post_init__
+    ports/          protocols AudioAnalyzer, DecisionMaker, Renderer and their response checks
+    admission/      is a proposal allowed: admit_action, metadata preflight
+    verification/   did the change help without regressions (rules only)
     diagnosis/      problem candidates (only from its roadmap phase on)
-    loop/           run(): stage order, budgets, history, state transitions, rollback, RunRecord
+    loop/           run(): stage order, budget enforcement, state transitions, rollback
   adapters/
     dsp_analysis/   implements AudioAnalyzer (deterministic DSP)
     rendering/      implements Renderer (gain/mix, WAV I/O, workspaces, file integrity)
@@ -32,20 +33,23 @@ autonomous_mixing/
 
 ## Import rules
 1. `core` imports nothing outside `core`: no NumPy, soundfile, provider SDK or filesystem access.
-2. Inside `core`, `core.ports` imports only `core.records`; stage packages (`admission`, `verification`, `diagnosis`) import only `core.records` and `core.ports` (and the standard library). Only `core.loop` composes stages and ports.
+2. Inside `core`, `core.records` imports nothing outside itself; `core.ports` imports only `core.records`; stage packages (`admission`, `verification`, `diagnosis`) import only `core.records` and `core.ports` (and the standard library). Only `core.loop` composes stages and ports.
 3. `adapters` import only `core.records`, `core.ports`, third-party libraries and their own internals; never another adapter's internals and never `core.loop`.
-4. Only `drivers.experiments` imports `evaluation` (SR-10, ADR-010).
+4. Only `drivers.experiments` imports `evaluation` (SR-10, ADR-010). This rule is necessary, not sufficient: an import test is not a filesystem sandbox. Runtime inputs, decision inputs and runtime configuration must also contain no hidden-data fields or references, and adapters read only from explicitly supplied roots (ADR-023).
+5. Data types are defined only in `core.records`; ports, stages and the loop define functions. A function that a record calls in `__post_init__` lives with the records.
 
 One boundary test enforces these rules. Do not add finer-grained matrices unless a concrete defect requires one.
 
 ## Immutability rules
-1. Every record is `@dataclass(frozen=True, slots=True)` and validates itself in `__post_init__`; an invalid record cannot be constructed.
+1. Every record is `@dataclass(frozen=True)` and validates itself in `__post_init__`; an invalid record cannot be constructed. `slots=True` is the target, added in a separate optional migration step; new records may use it already.
 2. Record fields hold only immutable values: scalars, enums, other records, `tuple`, `frozenset`. No `list`, `dict`, `set` or NumPy arrays.
 3. Audio samples never enter records. Records carry artifact references, metadata and checksums; sample arrays stay inside adapters. An array that must cross a port is marked read-only (`array.flags.writeable = False`).
 4. New versions are derived with `dataclasses.replace(...)`, never by mutation. `object.__setattr__` is used only inside `__post_init__`.
 5. Stage outcomes are union types (for example `Admitted | Rejected`) handled with `match` and `typing.assert_never` in the fallback branch.
 6. Mutation is allowed only in a function's local scope (build a list, return a `tuple`) and inside adapters (I/O, NumPy). Rebinding a name, as in `state = candidate.state`, is not mutation.
 7. Expected outcomes are typed results; programming and wiring errors raise `ValueError`.
+
+Immutability is a precondition, not a guarantee: rollback still needs retained artifacts that pass integrity checks, correct selection of the last accepted state and handling of uncertain outcomes, and a run history shows what the decision maker saw only if the actual request and raw response are captured and persisted.
 
 Not used: functional-programming libraries (`returns`, `pyrsistent`, `toolz`), monads, currying or effect systems.
 
