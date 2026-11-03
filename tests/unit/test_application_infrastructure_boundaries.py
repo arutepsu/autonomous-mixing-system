@@ -25,7 +25,11 @@ matches exact package segments and enforces:
 - the ``wav_output`` initializer re-exports ``writing`` only; ``writing`` uses the standard library,
   NumPy, soundfile and the ``domain.project``, ``domain.observation`` and ``workspaces`` public
   interfaces only (never application, audio, filesystem or workspace internals). ``writing`` is the
-  only module outside ``workspaces`` that imports it, and nothing imports ``wav_output``.
+  only module outside ``workspaces`` that imports it besides ``gain_mix``;
+- the ``processing`` initializer re-exports ``gain_mix`` only; ``gain_mix`` uses the standard library,
+  NumPy, the ``domain.project``, ``domain.shared`` and ``domain.action`` interfaces, the
+  ``application.execution`` interface and the ``audio``, ``filesystem``, ``workspaces`` and ``wav_output``
+  interfaces only (ADR-026). It is the only module importing ``wav_output``, and nothing imports it.
 
 These are source-import rules. The ``audio`` facade loads both leaves eagerly, so importing it is not
 claimed to avoid loading soundfile.
@@ -52,6 +56,8 @@ ALLOCATION = f"{WORKSPACES}.allocation"
 VALIDATION = f"{WORKSPACES}.validation"
 WAV_OUTPUT = f"{INFRASTRUCTURE}.wav_output"
 WRITING = f"{WAV_OUTPUT}.writing"
+PROCESSING = f"{INFRASTRUCTURE}.processing"
+GAIN_MIX = f"{PROCESSING}.gain_mix"
 DOMAIN = f"{PKG}.domain"
 DOMAIN_COMPONENTS = ("shared", "project", "context", "observation", "action", "decision", "validation", "run")
 
@@ -179,6 +185,20 @@ def _application_rule(source: str, target: str, relative: bool, known_modules: f
     return None if target_component in ALLOWED[source_component] else "dependency matrix"
 
 
+GAIN_MIX_TARGETS = frozenset(
+    {
+        f"{DOMAIN}.project",
+        f"{DOMAIN}.shared",
+        f"{DOMAIN}.action",
+        f"{APPLICATION}.execution",
+        AUDIO,
+        FILESYSTEM,
+        WORKSPACES,
+        WAV_OUTPUT,
+    }
+)
+
+
 def _infrastructure_rule(source: str, target: str, relative: bool, known_modules: frozenset[str]) -> str | None:
     if source == INFRASTRUCTURE:
         return "descriptive infrastructure initializer imports nothing"
@@ -232,6 +252,17 @@ def _infrastructure_rule(source: str, target: str, relative: bool, known_modules
         return (
             "writing may import only the standard library, NumPy, soundfile, domain.project, "
             "domain.observation and the workspaces interface"
+        )
+    if source == PROCESSING:
+        return None if target == GAIN_MIX else "processing initializer may re-export only gain_mix"
+    if source == GAIN_MIX:
+        if _is_stdlib(target, relative) or _top(target) == "numpy":
+            return None
+        if target in GAIN_MIX_TARGETS and target in known_modules:
+            return None
+        return (
+            "gain_mix may import only the standard library, NumPy, domain.project/shared/action, "
+            "application.execution and the audio, filesystem, workspaces and wav_output interfaces"
         )
     return "unclassified infrastructure module needs an explicit rule"
 
@@ -302,6 +333,9 @@ FIXTURE_MODULES = KNOWN | {
     f"{INFRASTRUCTURE}.wav_output_extra",
     f"{WAV_OUTPUT}.writing_extra",
     f"{WAV_OUTPUT}.publication",
+    f"{INFRASTRUCTURE}.processing_extra",
+    f"{PROCESSING}.gain_mix_extra",
+    f"{PROCESSING}.eq",
 }
 PACKAGES = frozenset(name for name, path in ALL_MODULES.items() if path.name == "__init__.py")
 
@@ -664,6 +698,48 @@ FORBIDDEN = [
     ("import math", f"{WAV_OUTPUT}.writing_extra", "unclassified infrastructure"),
     ("import math", f"{INFRASTRUCTURE}.wav_output_extra", "unclassified infrastructure"),
     ("import math", f"{WORKSPACES}.validation_extra", "unclassified infrastructure"),
+    # processing initializer re-exports gain_mix only
+    ("import os", PROCESSING, "processing initializer"),
+    ("from .eq import x", PROCESSING, "processing initializer"),
+    ("from .gain_mix_extra import x", PROCESSING, "processing initializer"),
+    ("from ..audio import sum_stems", PROCESSING, "processing initializer"),
+    ("from ......... import x", PROCESSING, "unresolvable"),
+    # gain_mix: no soundfile, internals, other application components, M0, CLI or providers
+    ("import soundfile as sf", GAIN_MIX, "gain_mix"),
+    ("import scipy", GAIN_MIX, "gain_mix"),
+    ("import anthropic", GAIN_MIX, "gain_mix"),
+    ("from ..audio.dsp import sum_stems", GAIN_MIX, "gain_mix"),
+    ("from ..audio import dsp", GAIN_MIX, "gain_mix"),
+    ("import autonomous_mixing.infrastructure.audio.verification as verification", GAIN_MIX, "gain_mix"),
+    ("from ..filesystem.locations import ResolvedArtifactLocation", GAIN_MIX, "gain_mix"),
+    ("from ..workspaces.allocation import AllocatedWorkspace", GAIN_MIX, "gain_mix"),
+    ("from ..workspaces import validation", GAIN_MIX, "gain_mix"),
+    ("from ..wav_output.writing import write_wav_output", GAIN_MIX, "gain_mix"),
+    ("from ..wav_output import writing", GAIN_MIX, "gain_mix"),
+    ("from . import GainMixProcessor", GAIN_MIX, "gain_mix"),
+    ("from .eq import x", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.application.execution.processing import ProcessingPlan", GAIN_MIX, "gain_mix"),
+    ("from ...application.execution import ports", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.application.decision import Decision", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.application.shared import PortResult", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.application.ports import AudioProcessor", GAIN_MIX, "gain_mix"),
+    ("import autonomous_mixing.application as application", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.domain.project.artifacts import AudioArtifact", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.domain.decision import Decision", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.domain import RenderSpec", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing.audio.io import load_stem", GAIN_MIX, "gain_mix"),
+    ("from autonomous_mixing import cli", GAIN_MIX, "gain_mix"),
+    ("from ......... import x", GAIN_MIX, "unresolvable"),
+    # nothing else imports processing
+    ("from ..processing import GainMixProcessor", WRITING, "writing"),
+    ("from ..processing import GainMixProcessor", ALLOCATION, "allocation"),
+    ("from ..processing import GainMixProcessor", VERIFICATION, "verification"),
+    ("from ..processing import GainMixProcessor", AUDIO, "audio facade"),
+    ("from . import processing", INFRASTRUCTURE, "descriptive"),
+    ("from autonomous_mixing.infrastructure.processing import GainMixProcessor", EXE_PORTS, "layer"),
+    ("import math", f"{PROCESSING}.eq", "unclassified infrastructure"),
+    ("import math", f"{PROCESSING}.gain_mix_extra", "unclassified infrastructure"),
+    ("import math", f"{INFRASTRUCTURE}.processing_extra", "unclassified infrastructure"),
 ]
 
 PERMITTED = [
@@ -792,6 +868,23 @@ PERMITTED = [
     ("from ..workspaces import WorkspaceAllocationError, validate_allocated_workspace", WRITING),
     ("from autonomous_mixing.infrastructure import workspaces", WRITING),
     ("import autonomous_mixing.infrastructure.workspaces as workspaces", WRITING),
+    # processing initializer re-exports gain_mix
+    ("from .gain_mix import GainMixProcessor, ProcessingLimits", PROCESSING),
+    ("from . import gain_mix", PROCESSING),
+    # gain_mix: the approved interfaces
+    ("from dataclasses import dataclass", GAIN_MIX),
+    ("from typing import Any", GAIN_MIX),
+    ("import numpy as np", GAIN_MIX),
+    ("from autonomous_mixing.application.execution import ProcessingPlan, ProcessedCandidate", GAIN_MIX),
+    ("from ...application import execution", GAIN_MIX),
+    ("from autonomous_mixing.domain.action import ExecutionIssue, ExecutionStatus", GAIN_MIX),
+    ("from autonomous_mixing.domain.project import AudioArtifact", GAIN_MIX),
+    ("from ...domain.shared import ArtifactId", GAIN_MIX),
+    ("from autonomous_mixing.infrastructure.audio import sum_stems, verify_resolved_wav_artifact", GAIN_MIX),
+    ("from ..filesystem import LocationResolutionError", GAIN_MIX),
+    ("from ..workspaces import AllocatedWorkspace", GAIN_MIX),
+    ("from autonomous_mixing.infrastructure.wav_output import write_wav_output", GAIN_MIX),
+    ("import autonomous_mixing.infrastructure.wav_output as wav_output", GAIN_MIX),
 ]
 
 
@@ -840,6 +933,8 @@ EXPECTED_INFRASTRUCTURE_MODULES = {
     VALIDATION,
     WAV_OUTPUT,
     WRITING,
+    PROCESSING,
+    GAIN_MIX,
 }
 
 
@@ -940,6 +1035,8 @@ def test_infrastructure_initializer_is_descriptive_and_leaves_keep_their_locatio
     assert ALL_MODULES[VALIDATION] == SRC / PKG / "infrastructure" / "workspaces" / "validation.py"
     assert ALL_MODULES[WAV_OUTPUT] == SRC / PKG / "infrastructure" / "wav_output" / "__init__.py"
     assert ALL_MODULES[WRITING] == SRC / PKG / "infrastructure" / "wav_output" / "writing.py"
+    assert ALL_MODULES[PROCESSING] == SRC / PKG / "infrastructure" / "processing" / "__init__.py"
+    assert ALL_MODULES[GAIN_MIX] == SRC / PKG / "infrastructure" / "processing" / "gain_mix.py"
 
 
 def _project_imports(name: str) -> set[str]:
@@ -968,8 +1065,8 @@ def test_real_workspace_edges_are_exactly_the_permitted_ones():
         if name in {WORKSPACES, ALLOCATION, VALIDATION}:
             continue
         workspace_targets = {t for t in _resolved_imports(name) if _within(t, WORKSPACES)}
-        # the writer is the only outside consumer, and only through the public workspaces interface
-        assert workspace_targets == ({WORKSPACES} if name == WRITING else set()), name
+        # the writer and the processor are the only outside consumers, through the public interface only
+        assert workspace_targets == ({WORKSPACES} if name in {WRITING, GAIN_MIX} else set()), name
 
 
 def test_real_wav_output_edges_are_exactly_the_permitted_ones():
@@ -979,7 +1076,19 @@ def test_real_wav_output_edges_are_exactly_the_permitted_ones():
     assert third_party == {"numpy", "soundfile"}
     for name in ALL_MODULES:
         if name not in {WAV_OUTPUT, WRITING}:
-            assert not [t for t in _resolved_imports(name) if _within(t, WAV_OUTPUT)], name
+            wav_targets = {t for t in _resolved_imports(name) if _within(t, WAV_OUTPUT)}
+            # the processor is the only consumer, through the public interface only
+            assert wav_targets == ({WAV_OUTPUT} if name == GAIN_MIX else set()), name
+
+
+def test_real_processing_edges_are_exactly_the_permitted_ones():
+    assert _project_imports(PROCESSING) == {GAIN_MIX}
+    assert _project_imports(GAIN_MIX) == GAIN_MIX_TARGETS
+    third_party = {_top(t) for t in _resolved_imports(GAIN_MIX)} - {PKG} - set(sys.stdlib_module_names)
+    assert third_party == {"numpy"}
+    for name in ALL_MODULES:
+        if name not in {PROCESSING, GAIN_MIX}:
+            assert not [t for t in _resolved_imports(name) if _within(t, PROCESSING)], name
 
 
 def _reexports(name: str) -> tuple[list[str], list[str]]:
@@ -1028,6 +1137,7 @@ WORKSPACE_EXPORTS = {
     "validate_allocated_workspace",
 }
 WAV_OUTPUT_EXPORTS = {"WrittenWav", "WavOutputFailureCode", "WavOutputError", "write_wav_output"}
+PROCESSING_EXPORTS = {"GAIN_MIX_PROCESSOR", "GainMixProcessor", "ProcessingLimits"}
 
 
 @pytest.mark.parametrize(
@@ -1037,6 +1147,7 @@ WAV_OUTPUT_EXPORTS = {"WrittenWav", "WavOutputFailureCode", "WavOutputError", "w
         (AUDIO, AUDIO_EXPORTS),
         (WORKSPACES, WORKSPACE_EXPORTS),
         (WAV_OUTPUT, WAV_OUTPUT_EXPORTS),
+        (PROCESSING, PROCESSING_EXPORTS),
     ],
 )
 def test_infrastructure_component_initializers_only_reexport_their_public_names(name, expected):
@@ -1071,12 +1182,13 @@ def test_only_the_compatibility_test_imports_application_facades():
 
 
 def test_production_code_outside_the_application_imports_no_application_module():
-    # Only workspace allocation realizes an application record (ExecutionWorkspace), through the
-    # execution interface alone; any other consumer needs its own explicit, reviewed exception.
+    # Only workspace allocation (ExecutionWorkspace) and the processor (the AudioProcessor port's
+    # records, ADR-026) use application records, through the execution interface alone; any other
+    # consumer needs its own explicit, reviewed exception.
     for name in ALL_MODULES:
         if not _within(name, APPLICATION):
             imported = {t for t in _resolved_imports(name) if _within(t, APPLICATION)}
-            expected = {f"{APPLICATION}.execution"} if name == ALLOCATION else set()
+            expected = {f"{APPLICATION}.execution"} if name in {ALLOCATION, GAIN_MIX} else set()
             assert imported == expected, name
 
 
@@ -1137,6 +1249,15 @@ for n in wav_output.__all__:
 assert writing.validate_allocated_workspace is workspaces.validate_allocated_workspace
 assert writing.AllocatedWorkspace is workspaces.AllocatedWorkspace
 assert writing.WorkspaceAllocationError is allocation.WorkspaceAllocationError
+processing = importlib.import_module("autonomous_mixing.infrastructure.processing")
+gain_mix = importlib.import_module("autonomous_mixing.infrastructure.processing.gain_mix")
+assert len(processing.__all__) == 3
+for n in processing.__all__:
+    assert getattr(processing, n) is getattr(gain_mix, n)
+assert gain_mix.ProcessingPlan is execution.ProcessingPlan
+assert gain_mix.write_wav_output is writing.write_wav_output
+assert gain_mix.verify_resolved_wav_artifact is verification.verify_resolved_wav_artifact
+assert gain_mix.AllocatedWorkspace is allocation.AllocatedWorkspace
 print("ok")
 """
 
@@ -1171,6 +1292,10 @@ def test_fresh_process_imports_succeed_in_every_order_without_partial_initializa
         "audio then wav_output": [AUDIO, DSP, WAV_OUTPUT, WRITING],
         "workspaces then wav_output": [WORKSPACES, ALLOCATION, WRITING, WAV_OUTPUT] + CANONICAL_ORDER,
         "execution then wav_output": [f"{APPLICATION}.execution", WRITING, WORKSPACES],
+        "processing facade first": [PROCESSING, AUDIO, WAV_OUTPUT, WORKSPACES],
+        "gain_mix leaf first": [GAIN_MIX, PROCESSING, WRITING, VERIFICATION],
+        "infrastructure then processing": [AUDIO, FILESYSTEM, WORKSPACES, WAV_OUTPUT, GAIN_MIX] + CANONICAL_ORDER,
+        "execution then processing": [f"{APPLICATION}.execution", GAIN_MIX, PROCESSING],
     }
     # Every module must also import on its own as the first import of a fresh process.
     for name in sorted(EXPECTED_APPLICATION_MODULES | EXPECTED_INFRASTRUCTURE_MODULES):
@@ -1204,7 +1329,7 @@ def test_infrastructure_audio_loads_no_application_m0_or_cli_modules_at_runtime(
     loaded = _loaded_after(f"import {AUDIO}")
     assert loaded, "the probe must observe newly loaded modules"
     assert not [n for n in loaded if _within(n, APPLICATION) or _within(n, f"{PKG}.audio") or n == f"{PKG}.cli"]
-    assert not [n for n in loaded if _within(n, WORKSPACES) or _within(n, WAV_OUTPUT)]
+    assert not [n for n in loaded if _within(n, WORKSPACES) or _within(n, WAV_OUTPUT) or _within(n, PROCESSING)]
 
 
 def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or_cli_at_runtime():
@@ -1215,6 +1340,7 @@ def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or
         for n in loaded
         if _within(n, AUDIO)
         or _within(n, WAV_OUTPUT)
+        or _within(n, PROCESSING)
         or _within(n, f"{PKG}.audio")
         or n == f"{PKG}.cli"
         or _top(n) in {"numpy", "soundfile", "anthropic"}
@@ -1235,6 +1361,7 @@ def test_infrastructure_filesystem_loads_no_audio_application_numpy_soundfile_m0
         or _within(n, AUDIO)
         or _within(n, WORKSPACES)
         or _within(n, WAV_OUTPUT)
+        or _within(n, PROCESSING)
         or _within(n, f"{PKG}.audio")
         or n == f"{PKG}.cli"
         or _top(n) in {"numpy", "soundfile"}
@@ -1249,9 +1376,22 @@ def test_infrastructure_wav_output_loads_workspaces_and_execution_but_no_audio_m
     forbidden = [
         n
         for n in loaded
-        if _within(n, AUDIO) or _within(n, f"{PKG}.audio") or n == f"{PKG}.cli" or _top(n) == "anthropic"
+        if _within(n, AUDIO)
+        or _within(n, PROCESSING)
+        or _within(n, f"{PKG}.audio")
+        or n == f"{PKG}.cli"
+        or _top(n) == "anthropic"
     ]
     assert forbidden == []
     # Like the audio facade, the writer loads NumPy and soundfile (and their dependencies); only layer
     # independence is asserted. Loading application.execution runs the application package initializer,
     # exactly as importing the workspaces facade already does.
+
+
+def test_infrastructure_processing_loads_its_components_but_no_m0_cli_or_provider_at_runtime():
+    # The processor loads the components it composes (and so NumPy and soundfile); only layer
+    # independence from M0, the CLI and providers is asserted.
+    loaded = _loaded_after(f"import {PROCESSING}")
+    assert {GAIN_MIX, AUDIO, FILESYSTEM, WORKSPACES, WAV_OUTPUT, f"{APPLICATION}.execution"} <= set(loaded)
+    forbidden = [n for n in loaded if _within(n, f"{PKG}.audio") or n == f"{PKG}.cli" or _top(n) == "anthropic"]
+    assert forbidden == []

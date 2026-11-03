@@ -29,6 +29,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [023](0023-explicit-root-artifact-location-resolution.md) | Explicit-root, read-only artifact-location resolution with a separate provenance record | 2026-11-02 | Proposed |
 | [024](0024-fresh-output-workspace-allocation.md) | Fresh output workspace allocation in a separate infrastructure component | 2026-11-02 | Proposed |
 | [025](0025-exclusive-wav-output.md) | Exclusive WAV/DOUBLE output in a separate infrastructure component, with read-only workspace revalidation | 2026-11-03 | Proposed |
+| [026](0026-gain-mix-processor-adapter.md) | Gain/full-mix processor adapter bound to a pre-allocated workspace | 2026-11-03 | Proposed |
 | [027](0027-hexagonal-control-loop-architecture.md) | Hexagonal architecture around a MAPE-K control loop, with immutable records | 2026-11-03 | Proposed |
 
 ## Template
