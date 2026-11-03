@@ -7,6 +7,7 @@ adapter, carried over from the ADR-022 to ADR-026 infrastructure rules) and G4 f
 load isolation in fresh processes).
 """
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -148,9 +149,13 @@ def test_dsp_analysis_edges_are_exactly_the_permitted_ones(module):
 
 
 def test_adapter_package_initializers_contain_only_a_docstring():
+    # Exact AST shape (Codex review of M3): one string expression and nothing else, so an import-free
+    # assignment or call in an initializer fails too.
     for package in (ADAPTERS, RENDERING, ANALYSIS):
-        source = MODULES[package].read_text(encoding="utf-8")
-        assert resolve_imports(source, package, True, KNOWN) == set(), package
+        body = ast.parse(MODULES[package].read_text(encoding="utf-8")).body
+        assert len(body) == 1, package
+        assert isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant), package
+        assert isinstance(body[0].value.value, str), package
 
 
 def _loaded_after(statement: str) -> list[str]:
