@@ -36,6 +36,7 @@ claimed to avoid loading soundfile.
 """
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -1271,7 +1272,12 @@ print("ok")
 
 def _start(order: list[str]) -> subprocess.Popen:
     script = "import importlib\n" + "".join(f"importlib.import_module({m!r})\n" for m in order) + IDENTITY_PROBE
-    return subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # The probes run in parallel and each loads NumPy; one OpenBLAS thread per probe avoids the intermittent
+    # "OpenBLAS error: Memory allocation still failed" seen when every probe starts a full thread pool.
+    env = {**os.environ, "OPENBLAS_NUM_THREADS": "1"}
+    return subprocess.Popen(
+        [sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
+    )
 
 
 def test_fresh_process_imports_succeed_in_every_order_without_partial_initialization():
