@@ -1,21 +1,8 @@
-"""Tracks with stable identity; musical roles live in the context component."""
+"""Compatibility shim (ADR-027 migration step M1): definitions moved to ``autonomous_mixing.core.records``.
 
-from dataclasses import dataclass
+Removed in the class (b) step of the migration; contains no definitions of its own.
+"""
 
-from autonomous_mixing.domain.shared import (
-    TrackId,
-    require_instance,
-    require_text,
-)
+from autonomous_mixing.core.records.project import Track
 
-
-@dataclass(frozen=True)
-class Track:
-    """A track with stable identity. Musical roles are declared in MusicalContext, never derived from the name."""
-
-    track_id: TrackId
-    name: str
-
-    def __post_init__(self) -> None:
-        require_instance(self.track_id, TrackId, "Track.track_id")
-        require_text(self.name, "Track.name")
+__all__ = ["Track"]

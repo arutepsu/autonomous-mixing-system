@@ -1,17 +1,8 @@
-"""Versioned references to specifications and implementations."""
+"""Compatibility shim (ADR-027 migration step M1): definitions moved to ``autonomous_mixing.core.records``.
 
-from dataclasses import dataclass
+Removed in the class (b) step of the migration; contains no definitions of its own.
+"""
 
-from autonomous_mixing.domain.shared.invariants import require_text
+from autonomous_mixing.core.records.identifiers import VersionRef
 
-
-@dataclass(frozen=True)
-class VersionRef:
-    """Exact identifier of a versioned specification or implementation; no implicit compatibility."""
-
-    name: str
-    version: str
-
-    def __post_init__(self) -> None:
-        require_text(self.name, "VersionRef.name")
-        require_text(self.version, "VersionRef.version")
+__all__ = ["VersionRef"]

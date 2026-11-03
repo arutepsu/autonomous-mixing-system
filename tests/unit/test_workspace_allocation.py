@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import autonomous_mixing.application.execution.identity as identity
+import autonomous_mixing.core.records.rendering as identity  # ExecutionWorkspace moved here in ADR-027 step M1
 import autonomous_mixing.infrastructure.filesystem.locations as locations
 import autonomous_mixing.infrastructure.workspaces as workspaces
 import autonomous_mixing.infrastructure.workspaces.allocation as allocation

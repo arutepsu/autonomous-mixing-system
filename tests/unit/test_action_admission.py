@@ -434,5 +434,7 @@ def test_admission_module_imports_only_stdlib_application_and_component_interfac
             parts[0] in sys.stdlib_module_names
             or (parts[:2] == ["autonomous_mixing", "application"])
             or (len(parts) == 3 and parts[:2] == ["autonomous_mixing", "domain"] and parts[2] in components)
+            # ADR-027 migration step M1: records moved to the core records package.
+            or (len(parts) == 4 and parts[:3] == ["autonomous_mixing", "core", "records"])
         )
         assert allowed, name

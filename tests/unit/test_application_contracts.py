@@ -523,7 +523,8 @@ def test_retryable_failure_is_advisory_and_triggers_no_retry():
 # --- dependency boundaries -------------------------------------------------------------
 
 APPLICATION_PACKAGE = "autonomous_mixing.application"
-ALLOWED_INTERNAL = ("autonomous_mixing.application", "autonomous_mixing.domain")
+# ADR-027 migration step M1: records moved to the core records package.
+ALLOWED_INTERNAL = ("autonomous_mixing.application", "autonomous_mixing.domain", "autonomous_mixing.core.records")
 
 
 def _application_boundary_violations(source: str, module_name: str, *, is_package: bool = False) -> list[str]:
@@ -643,7 +644,9 @@ def test_application_runtime_imports_stay_within_stdlib_domain_and_application()
         f"{APPLICATION_PACKAGE}.{c}" for c in ("shared", "observation", "decision", "admission", "execution")
     )
     for name in _modules_loaded_by(f"import {components}"):
-        internal = name == "autonomous_mixing" or any(name == p or name.startswith(p + ".") for p in ALLOWED_INTERNAL)
+        internal = name in ("autonomous_mixing", "autonomous_mixing.core") or any(
+            name == p or name.startswith(p + ".") for p in ALLOWED_INTERNAL
+        )
         assert internal or name.split(".")[0] in sys.stdlib_module_names, name
 
 

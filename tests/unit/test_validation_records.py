@@ -481,7 +481,10 @@ def test_validation_module_loads_only_standard_library_and_domain_modules():
         "for name in sorted(set(sys.modules) - before):\n"
         "    top = name.split('.')[0]\n"
         "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
-        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.')\n"
+        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.') \\\n"
+        # ADR-027 migration step M1: domain records moved to the core records package.
+        "        or name in ('autonomous_mixing.core', 'autonomous_mixing.core.records') \\\n"
+        "        or name.startswith('autonomous_mixing.core.records.')\n"
         "    if not ok: print(name)\n"
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)

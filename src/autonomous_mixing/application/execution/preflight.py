@@ -7,57 +7,12 @@ have changed since, workspace safety or collision freedom, or exclusive access. 
 service must establish those immediately before processing and recheck state before publication.
 """
 
-from dataclasses import dataclass
-from enum import Enum
-
 from autonomous_mixing.application.admission import ActionAdmissionRequest, RejectedAction, admit_action
 from autonomous_mixing.application.execution.processing import ProcessingPlan
 from autonomous_mixing.application.execution.requests import ExecutionRequest
+from autonomous_mixing.core.records.admission import MetadataReady, PreflightCode, PreflightRejected, PreflightResult
 from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
-from autonomous_mixing.domain.shared import ExecutionId, require_instance, require_text
-
-
-class PreflightCode(Enum):
-    ADMISSION_REJECTED = "admission_rejected"
-    INVALID_WORKSPACE = "invalid_workspace"
-    INVALID_CANDIDATE_IDENTITY = "invalid_candidate_identity"
-    INVALID_RECIPE_BINDINGS = "invalid_recipe_bindings"
-    INVALID_MIX = "invalid_mix"
-    MISSING_GAIN_STATE = "missing_gain_state"
-    INCOMPATIBLE_AUDIO = "incompatible_audio"
-    UNSUPPORTED_DEPENDENCY = "unsupported_dependency"
-
-
-@dataclass(frozen=True)
-class PreflightRejected:
-    """A typed preflight rejection; ``admission_rejection`` is present exactly for ADMISSION_REJECTED."""
-
-    execution_id: ExecutionId
-    code: PreflightCode
-    explanation: str
-    admission_rejection: RejectedAction | None
-
-    def __post_init__(self) -> None:
-        require_instance(self.execution_id, ExecutionId, "PreflightRejected.execution_id")
-        require_instance(self.code, PreflightCode, "PreflightRejected.code")
-        require_text(self.explanation, "PreflightRejected.explanation")
-        if self.admission_rejection is not None:
-            require_instance(self.admission_rejection, RejectedAction, "PreflightRejected.admission_rejection")
-        if (self.code is PreflightCode.ADMISSION_REJECTED) != (self.admission_rejection is not None):
-            raise ValueError("an admission rejection is required exactly for ADMISSION_REJECTED")
-
-
-@dataclass(frozen=True)
-class MetadataReady:
-    """Metadata is consistent for processing; not executable authorization (see module docstring)."""
-
-    plan: ProcessingPlan
-
-    def __post_init__(self) -> None:
-        require_instance(self.plan, ProcessingPlan, "MetadataReady.plan")
-
-
-PreflightResult = MetadataReady | PreflightRejected
+from autonomous_mixing.domain.shared import require_instance
 
 
 def _dimensions(artifact: AudioArtifact) -> tuple[int, int, int, float]:

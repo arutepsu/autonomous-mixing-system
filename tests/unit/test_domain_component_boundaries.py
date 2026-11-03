@@ -26,6 +26,9 @@ ALLOWED = {
     "validation": frozenset({"shared", "project", "observation"}),
     "run": frozenset({"shared", "project", "context", "observation", "action", "decision", "validation"}),
 }
+# ADR-027 migration step M1: domain and application records moved here; the new rules for this
+# package are enforced by tests/architecture/test_core_records.py.
+RECORDS = "autonomous_mixing.core.records"
 COMPATIBILITY_SURFACES = frozenset({DOMAIN, f"{DOMAIN}.values", f"{DOMAIN}.execution"})
 
 
@@ -92,6 +95,8 @@ def _rule(source: str, target: str | None, relative: bool, known_modules: frozen
         return None  # same-component internals
     if _within(source, APPLICATION) and _within(target, APPLICATION):
         return None
+    if _within(target, RECORDS):
+        return None  # domain and application modules re-export or use the moved records
     if _within(target, APPLICATION):
         return "domain must not import application"
     if target in COMPATIBILITY_SURFACES:
@@ -343,4 +348,5 @@ def test_domain_never_loads_application_or_third_party_modules_at_runtime():
     loaded = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True).stdout.split()
     for name in loaded:
         ok = name.split(".")[0] in sys.stdlib_module_names or name == "autonomous_mixing" or _within(name, DOMAIN)
+        ok = ok or name == "autonomous_mixing.core" or _within(name, RECORDS)  # ADR-027 step M1
         assert ok, name

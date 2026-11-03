@@ -20,8 +20,12 @@ def peak_dbfs(samples: np.ndarray) -> float | None:
 def spectral_features(samples: np.ndarray, sr: int, frame_length: int = 2048, hop_length: int = 512):
     x = mono(samples)
     frequencies, times, transform = stft(
-        x, fs=sr, nperseg=frame_length, noverlap=frame_length-hop_length,
-        boundary=None, padded=False,
+        x,
+        fs=sr,
+        nperseg=frame_length,
+        noverlap=frame_length - hop_length,
+        boundary=None,
+        padded=False,
     )
     return frequencies, times, np.abs(transform)
 
@@ -33,7 +37,7 @@ def coactivity_proxy(kick_mag: np.ndarray, bass_mag: np.ndarray) -> float:
     b = np.square(bass_mag).sum(axis=0)
     if not k.any() or not b.any():
         return 0.0
-    return float(np.mean((k > k.max()*0.1) & (b > b.max()*0.1)))
+    return float(np.mean((k > k.max() * 0.1) & (b > b.max() * 0.1)))
 
 
 def band_power(mag: np.ndarray, frequencies: np.ndarray, lo: float, hi: float) -> float:

@@ -64,6 +64,12 @@ def _canonical_owner(name: str):
     raise KeyError(name)
 
 
+# ADR-027 migration step M1: records moved to ``autonomous_mixing.core.records``. Their exact owner
+# module is asserted by tests/architecture/test_core_records.py (guarantee ledger G9); here the legacy
+# paths must still name the same object.
+RECORDS = "autonomous_mixing.core.records"
+
+
 def _check_component(component: str) -> None:
     package = _module(component)
     assert hasattr(package, "__path__"), f"{component} must be a package"
@@ -74,7 +80,11 @@ def _check_component(component: str) -> None:
         for name in names:
             obj = getattr(package, name)
             assert getattr(module, name) is obj, f"{component}.{name}"
-            if name not in ALIASES:
+            if name in ALIASES:
+                continue
+            if obj.__module__.startswith(RECORDS + "."):
+                assert getattr(importlib.import_module(obj.__module__), name) is obj
+            else:
                 assert obj.__module__ == module.__name__, f"{component}.{name} defined in {obj.__module__}"
 
 

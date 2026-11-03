@@ -62,7 +62,8 @@ Module graph inside `core/records`, derived from the current imports (each modul
 
 | Module | Imports from records |
 | --- | --- |
-| `identifiers`, `invariants` | — |
+| `invariants` | — |
+| `identifiers` | invariants |
 | `artifacts` | identifiers, invariants |
 | `project` | artifacts |
 | `mix` | identifiers |
@@ -75,7 +76,7 @@ Module graph inside `core/records`, derived from the current imports (each modul
 | `analysis` | observation, project |
 | `verification` | observation, project |
 | `rendering` | actions, artifacts, mix, observation, project |
-| `admission` | decision, mix, observation, rendering |
+| `admission` | actions, decision, mix, observation, rendering |
 | `run` | actions, budgets, context, decision, observation, project, verification |
 
 `budgets` is a module of its own because `decision` (`DecisionRequest`) needs it and `run` (`RunConfiguration`, which needs `ControllerIdentity` from `decision`) needs it too; putting budgets into `run` would create the cycle decision → run → decision.
@@ -90,7 +91,7 @@ Module graph inside `core/records`, derived from the current imports (each modul
 | `domain/context/*` | `context` |
 | `domain/observation/*` incl. `validate_observation_sources` (called by `DecisionRequest.__post_init__`) | `observation` |
 | `domain/action/proposal.py`, `operations.py` | `actions` |
-| `domain/action/execution.py`: `ExecutionStatus`, `ExecutionIssue`, `ExecutionReceipt`, `validate_receipt_against_checkpoint` (called by `CorrectionAttempt.__post_init__`) | `actions` |
+| `domain/action/execution.py`: `ExecutionStatus`, `ExecutionIssue`, `ExecutionReceipt`, `validate_receipt_against_checkpoint` and `derive_candidate_checkpoint` (both called by `CorrectionAttempt.__post_init__`; the latter found in the M1 pilot) | `actions` |
 | `domain/action/rollback.py`: `RollbackStatus`, `RollbackReceipt`, `validate_rollback_references` (called by `CorrectionAttempt.__post_init__`) | `actions` |
 | `domain/decision/decision.py` | `decision` |
 | `domain/validation/criteria.py`, `result.py` | `verification` |
@@ -110,7 +111,7 @@ Module graph inside `core/records`, derived from the current imports (each modul
 | `application/execution/ports.py`, `validation.py` | `core/ports/rendering.py` |
 | `application/admission/admission.py`; `preflight_execution` | `core/admission/` |
 | `domain/validation/consistency.py` | `core/verification/` |
-| `domain/action/execution.py`: `derive_candidate_checkpoint`, `derive_candidate_project_state`, `validate_gain_execution` | `core/loop/transitions.py` |
+| `domain/action/execution.py`: `derive_candidate_project_state`, `validate_gain_execution` | `core/loop/transitions.py` |
 | `domain/run/references.py` | `core/loop/references.py` |
 
 `validate_gain_execution` is also called by `derive_candidate_*` (same target module) and `domain/run/references.py` (also loop). If the M1 pilot finds a record that calls a function mapped here, that function moves to `core/records` instead, and the ledger notes it.
@@ -155,17 +156,17 @@ Maintained in this section during the migration. Every assertion of the four old
 
 | ID | Old guarantee | New form | Status |
 | --- | --- | --- | --- |
-| G1 | Layer direction: domain imports no application, third-party or M0 code; application imports no infrastructure | Rules (a)–(c) of ADR-027 in `tests/architecture/` | planned |
-| G2 | Component dependency matrices and acyclic component graph | Dropped: matrices (ADR-027 rationale). Kept: acyclic module graph | planned |
-| G3 | Import-checker robustness: relative, aliased, nested-init imports; look-alike packages; unresolved and unclassified modules; recursive discovery | Kept: the existing checker helper moves into `tests/architecture/` with its fixture tests | planned |
-| G4 | Runtime load isolation in fresh processes (domain loads no third-party code; infrastructure leaves load no M0/CLI) | Kept for `core` (loads no NumPy, soundfile, provider SDK). Per-leaf rendering isolation: decided in M4, default dropped with reason | planned |
-| G5 | Fresh-process imports succeed in every order without partial initialization | Kept | planned |
-| G6 | Cross-component imports go through package interfaces, not internals | Kept for adapters (rule c); inside `core`, decided in the M1 pilot | planned |
-| G7 | Legacy paths and facades re-export identical objects; root exports unchanged | Kept until the class (b) step, then dropped (deliberate API break) | planned |
-| G8 | Constructor, function and protocol signatures equal the 218c3dc baseline | Kept through class (a) moves as move-equivalence evidence (old name → new path); retired or rebased in class (c) | planned |
-| G9 | Every public definition defined exactly once, inventory complete | Kept | planned |
+| G1 | Layer direction: domain imports no application, third-party or M0 code; application imports no infrastructure | Rules (a)–(c) of ADR-027 in `tests/architecture/` | M1: records rule (b) in `tests/architecture/test_core_records.py`; old domain/application checkers extended to admit `core.records` as a target (no other rule relaxed) |
+| G2 | Component dependency matrices and acyclic component graph | Dropped: matrices (ADR-027 rationale). Kept: acyclic module graph | M1: unchanged (old matrices still enforced for domain and application) |
+| G3 | Import-checker robustness: relative, aliased, nested-init imports; look-alike packages; unresolved and unclassified modules; recursive discovery | Kept: the existing checker helper moves into `tests/architecture/` with its fixture tests | M1: partial. The new records test uses a small resolver (absolute and relative imports); the old checkers and their fixture tests are unchanged and still run. Moving the full checker is due by M4 |
+| G4 | Runtime load isolation in fresh processes (domain loads no third-party code; infrastructure leaves load no M0/CLI) | Kept for `core` (loads no NumPy, soundfile, provider SDK). Per-leaf rendering isolation: decided in M4, default dropped with reason | M1: `core.records` load test added; old runtime-load tests extended to admit `core` and `core.records` |
+| G5 | Fresh-process imports succeed in every order without partial initialization | Kept | M1: unchanged; passes alone and in most full runs, but failed intermittently in full runs both before M1 (baseline) and after it; cause not determined |
+| G6 | Cross-component imports go through package interfaces, not internals | Kept for adapters (rule c); inside `core`, decided in the M1 pilot | M1 decision: inside `core.records`, modules import sibling modules directly (never the `records` interface), which keeps the module graph explicit and checkable; enforced by `test_the_records_interface_imports_only_records_modules` and the planned-graph test |
+| G7 | Legacy paths and facades re-export identical objects; root exports unchanged | Kept until the class (b) step, then dropped (deliberate API break) | M1: kept; every old module path still re-exports the moved objects (shims or package interfaces) |
+| G8 | Constructor, function and protocol signatures equal the 218c3dc baseline | Kept through class (a) moves as move-equivalence evidence (old name → new path); retired or rebased in class (c) | M1: unchanged and passing; the signature baselines are checked through the legacy paths, which now resolve to the moved objects |
+| G9 | Every public definition defined exactly once, inventory complete | Kept | M1: for moved records, exact ownership moved to `test_every_public_record_is_defined_exactly_once_in_its_listed_module` (explicit inventory, AST definition sites); old compatibility tests now assert identity through legacy paths for moved names and exact ownership only for names not yet moved |
 | G10 | Exact permitted edges of filesystem, audio, workspaces, wav_output, processing | Decided in M4: kept as internal rules of `adapters/rendering`, or dropped with reason | planned |
-| G11 | (new) Core records are frozen dataclasses with only immutable field types and no arrays; no dataclass is defined in `core` outside `core/records`; the `core/records` module graph is acyclic. Adapter-local dataclasses are out of scope | New in M1 | planned |
+| G11 | (new) Core records are frozen dataclasses with only immutable field types and no arrays; no dataclass is defined in `core` outside `core/records`; the `core/records` module graph is acyclic. Adapter-local dataclasses are out of scope | New in M1 | M1: implemented in `tests/architecture/test_core_records.py` |
 | G12 | (gap) SR-10 runtime inputs and configuration contain no hidden-data fields | No test exists today. Not created by the migration; required separately (ADR-027 point 4) | open |
 
 ## 7. Steps
@@ -176,7 +177,7 @@ Maintained in this section during the migration. Every assertion of the four old
 | **M1 pilot** | (a) | Create `tests/architecture/` (checker moved, rules for `core.records`, G11). Move all data types and record invariants into `core/records` per section 4; old `domain` and `application` package paths re-export from the new locations. Update the old architecture tests for the moved modules in the same commit. | Behavior tests: same count. Ledger rows G1, G3, G6, G8, G9, G11 updated. Effort measured and recorded; go/no-go decision by the owner. |
 | M2 | (a) | Move behavior into `core/ports`, `core/admission`, `core/verification`, `core/loop`. | As M1; ledger updated. |
 | M3 | (a) | Move `infrastructure/*`, `audio/*`, `cli.py` into `adapters` and `drivers`; entry point and `uv sync`; decide G4 and G10. | As M1; `autonomous-mixing --help` works. |
-| M4 | (b) | Delete all compatibility facades, shims and the empty `domain`, `application`, `infrastructure` packages; retire the four old architecture tests; ledger complete. | Behavior tests: same count; every ledger row has a final status. |
+| M4 | (b) | Delete all compatibility facades, shims and the empty `domain`, `application`, `infrastructure` packages; remove the convenience re-exports of `core/records/__init__.py` so every record has exactly one import path, its module (owner decision 2026-11-03); retire the four old architecture tests; ledger complete. | Behavior tests: same count; every ledger row has a final status. |
 | M5 | (c) | Optional: vocabulary renames. | No old names in `src`; G8 rebased. |
 | M6 | (d) | Optional: `slots=True` with tests for attribute assignment, pickling and `dataclasses.replace`. | As M1. |
 | M7 | — | Documentation: `overview.md` implemented sections, `CLAUDE.md` State, ADR index, research log with evidence per step. | Docs name new paths only; superseded statements marked. |

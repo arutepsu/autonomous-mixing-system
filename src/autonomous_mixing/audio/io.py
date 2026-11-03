@@ -40,9 +40,7 @@ def load_stem(path: str | Path) -> AudioStem:
 
 def validate_pair(kick: AudioStem, bass: AudioStem) -> None:
     if kick.sample_rate != bass.sample_rate:
-        raise ValueError(
-            f"Stems must share a sample rate (kick: {kick.sample_rate} Hz, bass: {bass.sample_rate} Hz)"
-        )
+        raise ValueError(f"Stems must share a sample rate (kick: {kick.sample_rate} Hz, bass: {bass.sample_rate} Hz)")
     if len(kick.samples) != len(bass.samples):
         raise ValueError(
             "Stems must have identical frame counts and common timeline "

@@ -26,7 +26,19 @@ def analyze_pair(kick_path: str | Path, bass_path: str | Path) -> dict:
         "sample_rate_hz": kick.sample_rate,
         "duration_seconds": round(len(kick.samples) / kick.sample_rate, 6),
         "configuration": {"stft_frame_length": 2048, "stft_hop_length": 512, "low_band_hz": [30, 200]},
-        "kick": {"file": str(kick_path), "sha256": sha256(kick_path), "rms_dbfs": rms_dbfs(kick.samples), "peak_dbfs": peak_dbfs(kick.samples), "low_band_power_proxy": band_power(mk, fk, 30, 200)},
-        "bass": {"file": str(bass_path), "sha256": sha256(bass_path), "rms_dbfs": rms_dbfs(bass.samples), "peak_dbfs": peak_dbfs(bass.samples), "low_band_power_proxy": band_power(mb, fb, 30, 200)},
+        "kick": {
+            "file": str(kick_path),
+            "sha256": sha256(kick_path),
+            "rms_dbfs": rms_dbfs(kick.samples),
+            "peak_dbfs": peak_dbfs(kick.samples),
+            "low_band_power_proxy": band_power(mk, fk, 30, 200),
+        },
+        "bass": {
+            "file": str(bass_path),
+            "sha256": sha256(bass_path),
+            "rms_dbfs": rms_dbfs(bass.samples),
+            "peak_dbfs": peak_dbfs(bass.samples),
+            "low_band_power_proxy": band_power(mb, fb, 30, 200),
+        },
         "temporal_coactivity_fraction": coactivity_proxy(mk, mb),
     }

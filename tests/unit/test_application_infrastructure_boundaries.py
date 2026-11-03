@@ -59,6 +59,9 @@ WRITING = f"{WAV_OUTPUT}.writing"
 PROCESSING = f"{INFRASTRUCTURE}.processing"
 GAIN_MIX = f"{PROCESSING}.gain_mix"
 DOMAIN = f"{PKG}.domain"
+# ADR-027 migration step M1: domain and application records moved here; the new rules for this
+# package are enforced by tests/architecture/test_core_records.py.
+RECORDS = f"{PKG}.core.records"
 DOMAIN_COMPONENTS = ("shared", "project", "context", "observation", "action", "decision", "validation", "run")
 
 COMPONENTS = ("shared", "observation", "decision", "admission", "execution")
@@ -160,6 +163,8 @@ def _application_rule(source: str, target: str, relative: bool, known_modules: f
         return "unresolved import"
     if _within(target, DOMAIN):
         return _domain_rule(target)
+    if _within(target, RECORDS):
+        return None if source not in FACADES else "compatibility facades re-export component interfaces only"
     if not _within(target, APPLICATION):
         return "foreign layer import"  # infrastructure, M0 audio, CLI, package root, look-alike packages
     source_component, target_component = _app_component(source), _app_component(target)
@@ -987,10 +992,12 @@ def test_real_module_import_graph_is_acyclic():
 
 
 def test_processing_records_depend_on_identities_but_not_on_requests_or_preflight():
+    # ADR-027 migration step M1: identities, plans and outcomes moved to records.rendering; requests and
+    # preflight results to records.admission. The same direction holds there: rendering records never
+    # depend on admission records, and admission records depend on rendering identities.
+    assert f"{RECORDS}.admission" not in _resolved_imports(f"{RECORDS}.rendering")
+    assert f"{RECORDS}.rendering" in _resolved_imports(f"{RECORDS}.admission")
     execution = f"{APPLICATION}.execution"
-    internal = {m for m in KNOWN if _within(m, execution)}
-    assert _resolved_imports(f"{execution}.processing") & internal == {f"{execution}.identity"}
-    assert f"{execution}.identity" in _resolved_imports(f"{execution}.requests")
     assert {f"{execution}.requests", f"{execution}.processing"} <= _resolved_imports(f"{execution}.preflight")
 
 
@@ -1321,6 +1328,7 @@ def test_application_components_and_facades_load_only_stdlib_domain_and_applicat
     modules = ", ".join(sorted(EXPECTED_APPLICATION_MODULES))
     for name in _loaded_after(f"import {modules}"):
         layer_ok = name == PKG or _within(name, DOMAIN) or _within(name, APPLICATION)
+        layer_ok = layer_ok or name == f"{PKG}.core" or _within(name, RECORDS)  # ADR-027 step M1
         assert layer_ok or _top(name) in sys.stdlib_module_names, name
 
 
@@ -1347,7 +1355,10 @@ def test_infrastructure_workspaces_load_application_execution_but_no_audio_m0_or
     ]
     assert forbidden == []
     for name in loaded:
-        layer_ok = name == PKG or any(_within(name, p) for p in (DOMAIN, APPLICATION, INFRASTRUCTURE))
+        layer_ok = name in (PKG, f"{PKG}.core") or any(
+            _within(name, p)
+            for p in (DOMAIN, APPLICATION, INFRASTRUCTURE, RECORDS)  # RECORDS: ADR-027 step M1
+        )
         assert layer_ok or _top(name) in sys.stdlib_module_names, name
 
 

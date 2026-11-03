@@ -82,6 +82,12 @@ COMPONENT_PUBLIC = {
 }
 
 
+# ADR-027 migration step M1: records moved to ``autonomous_mixing.core.records``. Their exact owner
+# module is asserted by tests/architecture/test_core_records.py (guarantee ledger G9); here the legacy
+# paths must still name the same object.
+RECORDS = "autonomous_mixing.core.records"
+
+
 def _check_component(component: str, owners: dict[str, tuple[str, ...]]) -> None:
     package = importlib.import_module(f"autonomous_mixing.domain.{component}")
     assert hasattr(package, "__path__"), f"{component} must be a package"
@@ -91,8 +97,13 @@ def _check_component(component: str, owners: dict[str, tuple[str, ...]]) -> None
         module = importlib.import_module(f"autonomous_mixing.domain.{component}.{module_name}")
         for name in names:
             obj = getattr(package, name)
-            assert obj.__module__ == module.__name__, f"{component}.{name} defined in {obj.__module__}"
-            assert getattr(module, name) is obj
+            if obj.__module__.startswith(RECORDS + "."):
+                assert getattr(importlib.import_module(obj.__module__), name) is obj
+                # A partially moved legacy module keeps only the names its remaining code uses.
+                assert getattr(module, name, obj) is obj
+            else:
+                assert obj.__module__ == module.__name__, f"{component}.{name} defined in {obj.__module__}"
+                assert getattr(module, name) is obj
             assert getattr(root, name) is obj, f"root {name}"
 
 
@@ -279,9 +290,8 @@ def test_checkpoint_moved_to_project_keeps_identity_with_legacy_execution():
 
 
 def test_shared_objects_are_defined_once_in_their_owner_modules():
-    owners = {name: "autonomous_mixing.domain.shared.identifiers" for name in IDENTIFIERS}
-    owners["VersionRef"] = "autonomous_mixing.domain.shared.versions"
-    owners.update({name: "autonomous_mixing.domain.shared.invariants" for name in INVARIANT_HELPERS})
+    owners = {name: f"{RECORDS}.identifiers" for name in (*IDENTIFIERS, "VersionRef")}
+    owners.update({name: f"{RECORDS}.invariants" for name in INVARIANT_HELPERS})
     for name, module in owners.items():
         obj = getattr(shared, name)
         assert obj.__module__ == module, name

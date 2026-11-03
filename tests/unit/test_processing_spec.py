@@ -111,5 +111,5 @@ def test_specification_is_owned_by_the_project_component():
     ):
         obj = getattr(project, name)
         assert name in project.__all__
-        assert obj.__module__ == "autonomous_mixing.domain.project.processing_spec", name
+        assert obj.__module__ == "autonomous_mixing.core.records.mix", name  # moved in ADR-027 step M1
         assert obj is globals()[name]

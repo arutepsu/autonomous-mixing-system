@@ -518,6 +518,9 @@ def test_valid_artifact_derived_values_still_work():
 DOMAIN_PACKAGE = "autonomous_mixing.domain"
 
 
+RECORDS_PACKAGE = "autonomous_mixing.core.records"
+
+
 def _boundary_violations(source: str, module_name: str, *, is_package: bool = False) -> list[str]:
     """Return imports in ``source`` that are neither standard library nor inside the domain package.
 
@@ -545,6 +548,8 @@ def _boundary_violations(source: str, module_name: str, *, is_package: bool = Fa
             continue
         for name in names:
             in_domain = name == DOMAIN_PACKAGE or name.startswith(DOMAIN_PACKAGE + ".")
+            # ADR-027 migration step M1: domain records moved to the core records package.
+            in_domain = in_domain or name == RECORDS_PACKAGE or name.startswith(RECORDS_PACKAGE + ".")
             in_stdlib = not relative and name.split(".")[0] in sys.stdlib_module_names
             if not (in_domain or in_stdlib):
                 violations.append(name)

@@ -1,91 +1,40 @@
-"""Opaque typed identifiers and the project revision token."""
+"""Compatibility shim (ADR-027 migration step M1): definitions moved to ``autonomous_mixing.core.records``.
 
-from dataclasses import dataclass
+Removed in the class (b) step of the migration; contains no definitions of its own.
+"""
 
-from autonomous_mixing.domain.shared.invariants import require_text
+from autonomous_mixing.core.records.identifiers import (
+    ActionId,
+    ArtifactId,
+    AttemptId,
+    CheckpointId,
+    ConditionId,
+    ContextId,
+    CriteriaId,
+    DecisionId,
+    ExecutionId,
+    ObservationId,
+    ProjectId,
+    Revision,
+    RunId,
+    TrackId,
+    ValidationResultId,
+)
 
-
-@dataclass(frozen=True)
-class _Identifier:
-    value: str
-
-    def __post_init__(self) -> None:
-        require_text(self.value, type(self).__name__)
-
-    def __str__(self) -> str:
-        return self.value
-
-
-@dataclass(frozen=True)
-class ProjectId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class TrackId(_Identifier):
-    """Project-scoped stable track identity; independent of the display name."""
-
-
-@dataclass(frozen=True)
-class ArtifactId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class ObservationId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class ContextId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class ActionId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class DecisionId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class CriteriaId(_Identifier):
-    """Identifies a criteria definition together with its version."""
-
-
-@dataclass(frozen=True)
-class ConditionId(_Identifier):
-    """Unique within one criteria definition."""
-
-
-@dataclass(frozen=True)
-class ValidationResultId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class RunId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class AttemptId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class ExecutionId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class CheckpointId(_Identifier):
-    pass
-
-
-@dataclass(frozen=True)
-class Revision(_Identifier):
-    """Opaque project revision token; only equality is meaningful (no ordering or counter contract)."""
+__all__ = [
+    "ProjectId",
+    "TrackId",
+    "ArtifactId",
+    "ObservationId",
+    "ContextId",
+    "ActionId",
+    "DecisionId",
+    "CriteriaId",
+    "ConditionId",
+    "ValidationResultId",
+    "RunId",
+    "AttemptId",
+    "ExecutionId",
+    "CheckpointId",
+    "Revision",
+]
