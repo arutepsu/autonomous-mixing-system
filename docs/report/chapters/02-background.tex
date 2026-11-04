@@ -1,38 +1,77 @@
 % !TEX root = ../thesis.tex
+% Sources: see bib/references.bib; each entry is marked "read" (full text) or
+% "abstract only". Claims here stay within what was verified on 2026-11-04.
+% This is a first pass, not the roadmap M1 method review: the measurement
+% method per problem family is still to be selected from the literature (FR-13).
 \chapter{Background and Related Work}
 \label{ch:background}
-% Sources: primary literature only (no citation without a verified source).
-% The roadmap M1 literature review feeds this chapter; see the open questions in
-% docs/research/project-scope.md.
+
+This chapter introduces the technical mixing problems the thesis addresses, summarises prior work on automating mixing tasks and on \acsp{LLM} as decision makers, and describes the feedback-loop model on which the system is built. It closes with the gap that this thesis addresses.
+
+\todo{This chapter is a first pass. Extend it with the roadmap M1 literature review, and read the full texts of the sources currently known only from their abstracts (marked in references.bib).}
 
 \section{Multitrack Mixing and Technical Mixing Problems}
 \label{sec:bg-mixing}
-\todo{Role of mixing; what technical (as opposed to aesthetic) problems are.}
+
+In multitrack music production, each instrument or voice is recorded or produced as a separate track. Mixing combines these tracks into a stereo result. De Man et al.\ list balancing, panning, equalisation, dynamic range compression and artificial reverberation among the processing that raw tracks typically require before distribution \cite{DeMan2017TenYears}.
+
+Mixing has both a creative and a technical side. This thesis is concerned only with the technical side: properties of the signal that can be measured and that commonly need correction regardless of genre or taste, such as two tracks competing in the same frequency range. Whether a given mix sounds good is outside its scope (\autoref{sec:intro-scope}). The three problem families are introduced below.
 
 \subsection{Spectral and Temporal Masking (P1)}
 \label{sec:bg-masking}
-\todo{Psychoacoustic masking; multitrack masking measures from the literature; difference between time--frequency overlap and perceived masking (SR-08).}
+
+In psychoacoustics, masking describes how the presence of one sound makes another sound harder to hear or inaudible \cite{Moore2012}. Masking is strongest when the two sounds are close in frequency, which is explained by the frequency selectivity of the auditory system and the concept of the critical band. It also occurs when the sounds do not overlap in time (non-simultaneous masking) \cite{Moore2012}. \todo{Read Moore's chapters on frequency selectivity and masking and add page references.}
+
+In a mix, masking occurs between tracks. A typical case in the electronic genres studied here is the kick drum and the bass, which both carry most of their energy at low frequencies and often play at the same time. Hafezi and Reiss built offline and real-time systems that equalise tracks automatically to reduce inter-track masking, based on a simplified masking measure. In their listening tests the systems reduced both perceived and objectively measured masking. They also report that existing objective masking measures are poorly suited to predicting perceived masking in multitrack music \cite{Hafezi2015}. Earlier, Perez-Gonzalez and Reiss equalised the tracks of a multitrack mix with cross-adaptive methods, aiming for equal average perceptual loudness across frequencies among the channels \cite{PerezGonzalez2009EQ}.
+
+For this thesis, the important point is the gap between measurement and perception. A measurement can show that two tracks have energy in the same frequency band at the same time. Whether a listener perceives one of them as masked depends on more than this overlap \cite{Moore2012, Hafezi2015}. The thesis therefore treats time--frequency overlap as evidence of \emph{possible} masking, never as proof of an audible problem (requirement SR-08).
 
 \subsection{Frequency Buildup and Resonance (P2)}
 \label{sec:bg-buildup}
-\todo{Definitions and published detection methods.}
+
+Energy can accumulate in narrow frequency regions, either within one track (for example a resonance of an instrument or room) or across tracks in the sum of the mix. Dewey and Wakefield evaluated an algorithm that finds salient frequencies in individual tracks of multitrack recordings by taking the peak level of each \ac{FFT} bin over an audio region and selecting the highest peaks. Compared with frequencies identified by listeners, the algorithm worked well for electric guitars but less well for other instruments \cite{Dewey2015}. A salient frequency is not necessarily an unwanted one; deciding whether a peak is a problem requires more than detecting it.
+
+\todo{Find published methods for detecting buildup across tracks and unwanted resonances, and how such detections were validated.}
 
 \subsection{Stereo and Phase Compatibility (P3)}
 \label{sec:bg-stereo}
-\todo{Phase correlation and mono compatibility; published methods.}
+
+A stereo mix is often also reproduced in mono, for example on single-speaker devices. When the left and right channels contain the same content with opposite polarity or with a time offset, parts of it cancel in the mono sum. A common descriptive measure is the correlation between the two channels, which ranges from $+1$ for identical channels to $-1$ for channels of opposite polarity. Automatic stereo placement of tracks has been studied, for example by Mansbridge et al.\ \cite{Mansbridge2012Pan}, but this concerns panning rather than phase problems.
+
+\todo{Find peer-reviewed sources on measuring mono compatibility and inter-channel phase problems, including how correlation readings relate to audible cancellation.}
 
 \section{Automatic and Intelligent Mixing}
 \label{sec:bg-automix}
-\todo{Rule-based, knowledge-engineered and learned approaches to automatic mixing, and how they are evaluated.}
+
+Research on automating mixing tasks for multitrack music is usually dated to the late 2000s. De Man et al.\ trace the term ``automatic mixing'' to Dan Dugan's automatic microphone mixing for speech and describe how, from 2007 on, Perez-Gonzalez and Reiss extended it to music, automating level, panning, equalisation and masking reduction \cite{DeMan2017TenYears}. Their review of the following ten years shows a shift from automating level towards more complex processors such as compressors and reverb, and a growing use of machine learning \cite{DeMan2017TenYears}. The field is treated at book length by De Man, Stables and Reiss \cite{DeMan2019IMP}.
+
+Three broad approaches can be distinguished:
+
+\begin{description}
+	\item[Rule- and model-based systems] derive processing from measured signal properties and an explicit goal, for example equal perceptual loudness across frequencies \cite{PerezGonzalez2009EQ} or reduced masking \cite{Hafezi2015}. Wichern et al.\ derived loudness targets from human mixes and compared three level-setting algorithms in a listening test. Listeners preferred mixes from a simple energy-based model to those from a more complex psychoacoustic one \cite{Wichern2015}.
+	\item[Learned systems] learn mixing from data. Steinmetz et al.\ replaced each channel of a mixing console with a neural network trained to imitate an effect chain of equaliser, compressor and reverb. Their model works with any number of input tracks, outputs mixing parameters that a user can adjust, and was rated above baseline approaches by audio engineers in a listening test \cite{Steinmetz2021}.
+	\item[Language-model-based systems] use an \ac{LLM} to choose processing parameters. Doh et al.\ showed that \acsp{LLM} can predict equaliser and reverb parameters from text descriptions without task-specific training, outperforming earlier optimisation-based methods, and that adding \ac{DSP} features, \ac{DSP} code and examples to the prompt improves the results \cite{Doh2025LLM2Fx}. A follow-up lets an \ac{LLM} listen to audio and produce an executable chain of effect modules through tool calls \cite{Doh2026LLM2FxTools}.
+\end{description}
+
+The review by De Man et al.\ also shows how such systems are evaluated: some objectively, by the deviation from a target metric, some subjectively in formal listening tests, and some not at all \cite{DeMan2017TenYears}. The authors name the shortage of reliable data about mixing practice as a major obstacle and conclude that automatic mixing of multitrack music remains an unsolved problem \cite{DeMan2017TenYears}. They also sketch, among metering and diagnostic tools, a feedback loop that adjusts parameters until a detected problem is mitigated \cite{DeMan2017TenYears}, which is close to the loop built in this thesis.
 
 \section{Large Language Models as Decision Makers}
 \label{sec:bg-llm}
-\todo{LLM agents and tool use; structured outputs; variability of LLM outputs (motivates SR-05).}
+
+An \ac{LLM}-based agent uses a language model to choose actions in an environment, often by calling external tools. Wang et al.\ survey how such agents are constructed, where they are applied and how they are evaluated \cite{Wang2024AgentSurvey}. Two influential techniques illustrate the idea. ReAct lets a model alternate between reasoning steps and actions, such as queries to an external \ac{API}, so that each informs the other \cite{Yao2023ReAct}. Toolformer trains a model, with only a few demonstrations per tool, to decide which \ac{API} to call, when, with which arguments, and how to use the result \cite{Schick2023Toolformer}.
+
+Two properties of \acsp{LLM} matter for this thesis. First, their outputs are not guaranteed to be correct, so a proposal must be checked before it is acted upon. Second, they are not reproducible: Ouyang et al.\ found substantial variation between repeated requests with the same input for code generation, which was reduced but not eliminated by setting the sampling temperature to zero, and they argue that this threatens the validity of conclusions drawn from \ac{LLM}-based experiments \cite{Ouyang2023Nondeterminism}. This motivates repeating the agent-guided conditions and reporting the spread of their results (SR-05).
 
 \section{Feedback Control Loops in Self-Adaptive Systems}
 \label{sec:bg-mapek}
-\todo{The MAPE-K reference model, used to structure the control loop (ADR-027).}
+
+Kephart and Chess describe autonomic computing systems that manage themselves according to high-level goals. In their reference model, an autonomic manager \emph{monitors} a managed resource, \emph{analyses} the collected data, \emph{plans} a change and \emph{executes} it, using shared \emph{knowledge}; the model is known as \ac{MAPE-K} \cite{Kephart2003}. It provides a vocabulary for systems that observe their own effects and adapt, and it is used in this thesis to structure the control loop (\autoref{sec:arch-loop}).
 
 \section{Research Gap}
 \label{sec:bg-gap}
-\todo{What prior work leaves open that this thesis addresses; claim only what the cited sources support.}
+
+The work reviewed above addresses parts of the problem. Rule-based systems reduce masking or balance loudness with fixed objectives \cite{PerezGonzalez2009EQ, Hafezi2015}. Learned and language-model-based systems choose processing parameters, and the latter can do so from natural language and tool calls \cite{Steinmetz2021, Doh2025LLM2Fx, Doh2026LLM2FxTools}. General \ac{LLM} agents act through tools but their outputs vary between runs \cite{Yao2023ReAct, Schick2023Toolformer, Ouyang2023Nondeterminism}.
+
+Among the sources reviewed here, none combines the following: an \ac{LLM} that proposes corrections for explicitly measured technical mixing problems; deterministic admission of those proposals against declared bounds and producer intent; verification of each correction against the last accepted state, with rollback; and a comparison with a rule-based baseline in which the decision maker is the only difference and the ground truth is hidden from the runtime. This combination, and the question whether it actually improves the targeted problems, is what this thesis investigates.
+
+\todo{Re-check this gap after the M1 literature review; it holds only for the sources read so far.}
