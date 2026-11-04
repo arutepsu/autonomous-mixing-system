@@ -73,51 +73,118 @@ The previous layout divided the same code into horizontal domain, application an
 
 \section{The Control Loop}
 \label{sec:arch-loop}
+% Sources: docs/superpowers/specs/2026-11-04-control-loop-lifecycle-design.md (lifecycle
+% confirmed by the owner) and 2026-11-04-control-loop-attempt-contract.md (Task 1 approved,
+% Task 2 proposed, Request Context decision approved). Update when Tasks 3 and 4 are decided.
 
-The behaviour of the core is a feedback loop modelled on the \ac{MAPE-K} reference model of autonomic computing \cite{Kephart2003}. In \ac{MAPE-K}, an autonomic manager \emph{monitors} a managed resource, \emph{analyses} the collected data, \emph{plans} a change and \emph{executes} it, all over shared \emph{knowledge}. Here the managed resource is the state of a mixing project, and the knowledge is the run history. \autoref{fig:arch-loop} shows the stages.
+The behaviour of the core is a feedback loop. Its lifecycle comes from the thesis proposal and was confirmed as a standing design constraint for the implementation:
+
+\begin{enumerate}
+	\item \textbf{Observe:} measure the audio and collect the project state, the supplied musical context and the feedback from previous attempts.
+	\item \textbf{Diagnose:} identify plausible mixing problems, such as masking, frequency buildup or phase interaction, with their supporting evidence and uncertainty. A measurement is not automatically a perceptual diagnosis.
+	\item \textbf{Plan / decide:} choose a justified intervention, or recommend no change. How sure the diagnosis is and how well the chosen action is justified are recorded separately.
+	\item \textbf{Enough evidence and context?} Only a justified, permitted action may proceed. Otherwise the decision maker abstains or asks for the specific missing context; it never guesses it.
+	\item \textbf{Act:} apply one bounded modification. Deterministic admission and a metadata check precede rendering, and rendering produces tentative candidate audio.
+	\item \textbf{Evaluate:} analyse the candidate again and decide whether the target improved sufficiently and whether other measurements became worse, using criteria declared before the attempt.
+	\item \textbf{Stop, iterate or roll back:} stop once the target is met, keep a qualifying intermediate improvement and continue where allowed, or return to the last accepted state after a rejected attempt. Resource limits and failures also end the run explicitly.
+\end{enumerate}
+
+In the code and in the rest of this thesis, the runtime \emph{evaluate} step is called \emph{verification} (\texttt{core.verification}). The word \emph{evaluation} is reserved for the comparison with hidden ground truth after a run, which the loop can never access (\autoref{sec:arch-hidden}). \autoref{fig:arch-loop} shows the lifecycle as it is mapped onto the architecture.
 
 \begin{figure}[htb]
 	\centering
 	\begin{tikzpicture}[
-		stage/.style={draw=htwg-dark-blue, rounded corners=2pt, minimum width=24mm, minimum height=9mm, align=center, font=\small},
+		stage/.style={draw=htwg-dark-blue, rounded corners=2pt, minimum width=23mm, minimum height=9mm, align=center, font=\small},
 		ai/.style={stage, fill=htwg-soft-blue, dashed},
 		det/.style={stage, fill=white},
+		gate/.style={draw=htwg-dark-blue, diamond, aspect=2, inner sep=1pt, align=center, font=\scriptsize, fill=white},
 		flow/.style={-{Stealth[length=2mm]}, thick, htwg-dark-blue},
+		phase/.style={font=\scriptsize\bfseries, text=htwg-teal},
 		note/.style={font=\scriptsize, align=center, text=htwg-black-70},
-		node distance=6mm and 9mm
+		node distance=6mm and 7mm
 	]
-		\node[det] (measure) {Measure};
-		\node[det, right=of measure] (diagnose) {Diagnose};
+		\node[det] (observe) {Observe};
+		\node[det, right=of observe] (diagnose) {Diagnose};
 		\node[ai, right=of diagnose] (decide) {Decide};
-		\node[det, right=of decide] (admit) {Admit};
-		\node[det, below=14mm of admit] (render) {Render};
+		\node[gate, right=of decide] (gate) {evidence and\\ context?};
+		\node[det, below=16mm of gate] (admit) {Admit and\\ preflight};
+		\node[det, left=of admit] (render) {Render};
 		\node[det, left=of render] (verify) {Verify};
-		\node[det, left=of verify] (accept) {Accept or\\ roll back};
-		\node[det, left=of accept] (history) {Run history};
+		\node[det, left=of verify] (select) {Accept or\\ roll back};
 
-		\draw[flow] (measure) -- (diagnose);
+		\node[phase, above=1mm of observe] {OBSERVE};
+		\node[phase, above=1mm of diagnose] {DIAGNOSE};
+		\node[phase, above=1mm of decide] {PLAN / DECIDE};
+		\node[phase, below=1mm of admit] {ACT};
+		\node[phase, below=1mm of render] {ACT};
+		\node[phase, below=1mm of verify] {EVALUATE};
+		\node[phase, below=1mm of select, align=center] {STOP / ITERATE /\\ ROLLBACK};
+
+		\draw[flow] (observe) -- (diagnose);
 		\draw[flow] (diagnose) -- (decide);
-		\draw[flow] (decide) -- (admit);
-		\draw[flow] (admit) -- node[note, right]{admitted\\ action} (render);
+		\draw[flow] (decide) -- (gate);
+		\draw[flow] (gate) -- node[note, right]{justified\\ action} (admit);
+		\draw[flow] (admit) -- (render);
 		\draw[flow] (render) -- (verify);
-		\draw[flow] (verify) -- (accept);
-		\draw[flow] (accept) -- (history);
-		\draw[flow] (history) -- node[note, left]{next\\ iteration} (measure);
-		\draw[flow, dashed] (admit.north) -- ++(0,5mm) -| node[note, above, pos=0.25]{rejected: recorded, no rendering} (history.north east);
-
-		\node[note, below=6mm of verify] {verify re-measures the candidate and compares it with the last accepted state};
+		\draw[flow] (verify) -- (select);
+		\draw[flow] (select) -- node[note, left]{next\\ iteration} (observe);
+		\draw[flow, dashed] (gate.east) -- ++(4mm,0) node[note, right, align=left]{no change,\\ abstain or\\ request context:\\ recorded,\\ no rendering};
 	\end{tikzpicture}
-	\caption{Stages of the control loop. Only the dashed stage is performed by the \ac{AI} component; all other stages are deterministic. Iterations, actions, \ac{AI} requests and runtime are bounded, and every stop has a recorded reason.}
+	\caption{Lifecycle of the control loop. Only the dashed stage is performed by the \ac{AI} component; all other stages are deterministic. A rejected admission or preflight is recorded and returns to the next iteration without rendering. Iterations, actions, \ac{AI} requests and runtime are bounded, and every stop has a recorded reason.}
 	\label{fig:arch-loop}
 \end{figure}
 
-The stages map to \ac{MAPE-K} as follows: \emph{measure} corresponds to Monitor and \emph{diagnose} to Analyze. Plan is split into two steps: the decision maker \emph{decides} by proposing one action or abstaining, and a deterministic \emph{admission} step decides whether that proposal may be executed. Execute corresponds to \emph{rendering} the admitted action into new candidate audio. Unlike the reference model, the loop then \emph{verifies} the candidate explicitly: it measures the candidate again and checks whether the targeted problem improved without making other measurements worse, at the level of individual stems and of the combined mix (FR-09). The loop accepts the candidate or rolls back to the last accepted state, records the attempt and continues with the next iteration until the decision maker abstains, a budget is exhausted or a failure ends the run.
+The lifecycle follows the \ac{MAPE-K} reference model of autonomic computing \cite{Kephart2003}, in which an autonomic manager \emph{monitors} a managed resource, \emph{analyses} the collected data, \emph{plans} a change and \emph{executes} it over shared \emph{knowledge}. Here the managed resource is the state of a mixing project and the knowledge is the run history. Observing corresponds to Monitor and diagnosing to Analyze. Plan is split: the decision maker proposes, and a deterministic gate, admission and metadata check decide whether the proposal may be executed. Execute corresponds to rendering. Unlike the reference model, the loop then verifies each change explicitly and can undo it.
 
 The stage order is fixed in the code of \texttt{core.loop}. There is no event bus, plug-in mechanism or configurable pipeline: the loop calls adapters, and adapters never call the loop. This keeps a run readable from beginning to end and makes each stage testable with plain values.
 
-The records for this loop already exist. A run record (\texttt{RunRecord}) holds the configuration, budgets and their usage, and the outcome of the run (succeeded, abstained, limit reached, failed or cancelled). Each correction attempt (\texttt{CorrectionAttempt}) holds the complete state before the change and, if rendering succeeded, the candidate state, and ends as accepted, rolled back, failed or unresolved. Rollback restores the complete saved state, not an inverse operation, so restoring a state never depends on undoing a correction numerically.
+\subsection{States Within a Run}
+\label{sec:arch-states}
 
-\todo{The function that runs the loop (\texttt{core.loop.run}) does not exist yet. Describe its implemented behaviour, including budget enforcement and stop reasons, once it does.}
+Accepting and undoing changes requires the loop to keep track of several complete project states. The design distinguishes five:
+
+\begin{description}
+	\item[Initial state] the complete starting state, fixed for the run and kept for comparisons with the starting point. Being the start does not mean that it meets any target.
+	\item[Accepted state] the last state that passed verification and was accepted. Only the deterministic loop can change which state this is.
+	\item[Before state] the accepted state saved at the start of an attempt; it is the baseline for that attempt and the state to return to if the attempt is rejected.
+	\item[Candidate state] the new state derived from the before state, the admitted action and the rendered files. It remains tentative until verification and acceptance.
+	\item[Fixed inputs] the original stem of each track, from which gain settings are always rendered.
+\end{description}
+
+Because gain is set in absolute terms on the fixed input of a track, a second correction of the same track does not compound the first. After an accepted attempt, the next attempt starts from the newly accepted state; after a rejected attempt, it starts again from the saved accepted state, and the history records the rejection so that the decision maker does not see a fictitious first attempt. Outputs of rejected or failed attempts never enter the accepted state, even if their files are kept.
+
+\subsection{Decision Outcomes}
+\label{sec:arch-outcomes}
+
+The decision maker can return more than a proposed action, and each outcome is routed differently:
+
+\begin{description}
+	\item[Propose action] one supported, bounded operation, linked to the evidence and the problem candidates it addresses and stating its expected effect. It continues to the evidence and context gate and then to admission.
+	\item[No change] a deliberate recommendation to leave the accepted state as it is. Nothing is rendered. The run counts as successful only if the deterministic verification criteria are met; the recommendation alone is never a success.
+	\item[Abstain] no intervention can be justified, for example because the evidence is insufficient or the constraints conflict. Nothing is rendered, and the reason is recorded.
+	\item[Request context] specific musical context is missing, for example which of two competing tracks has priority. The run ends with the recorded questions and keeps any edits accepted so far. Once the producer answers, a new run starts with the updated context; the first version does not pause and resume a run.
+	\item[Invalid response or service failure] no valid decision was produced. The failure is recorded as such and is not turned into an abstention or a no-change decision that the provider never returned.
+\end{description}
+
+The handling of a context request is decided. A separate no-change outcome and the stricter requirements on proposals are part of the decision-input design that is still under review; the current records support proposed actions and abstentions with a reason, including missing context.
+
+\subsection{Acceptance and Rollback}
+\label{sec:arch-acceptance}
+
+Verification compares measurements of the candidate with those of the before state, and with the initial state where a criterion refers to the starting point. The acceptance rules are fixed before the run:
+
+\begin{itemize}
+	\item Passing all guard checks, which detect regressions elsewhere in the mix, is necessary for accepting a candidate.
+	\item If the target is met, the candidate is accepted and the run may stop with success; a minimum improvement is not additionally required.
+	\item If the target is not yet met, an intermediate improvement is accepted only if the configured minimum-improvement checks pass, and the loop may continue within its budgets.
+	\item Missing or incompatible measurements can never establish acceptance.
+\end{itemize}
+
+A rejected candidate is not deleted; its files are kept as unaccepted outputs. Rollback means selecting the saved accepted state again, not reversing the correction numerically. Selecting it is not enough on its own, however: a rollback counts as successful only if the saved state and its audio files are shown to be intact. If the renderer fails after writing only part of its output, or if the outcome of rendering or restoration cannot be established, the attempt is recorded as failed or unresolved rather than as a successful rollback.
+
+The records for this loop exist already. A run record (\texttt{RunRecord}) holds the configuration, budgets and their usage, and the outcome of the run (succeeded, abstained, limit reached, failed or cancelled). A correction attempt (\texttt{CorrectionAttempt}) holds the complete before state and, if rendering succeeded, the candidate state, and ends as accepted, rolled back, failed or unresolved. These records do not yet hold everything a full trace needs, such as the exact decision input, the raw response of the \ac{AI} service, rejected proposals or retained partial files; this broader trace is part of the ongoing design.
+
+\todo{Not yet decided at the time of writing: comparability of measurements, verdict precedence and restoration evidence (contract Task 3); budget charging, retries, terminal reasons and persistence (Task 4). The function that runs the loop (\texttt{core.loop.run}) does not exist yet. Update this section once these are decided and implemented.}
 
 \section{Ports and Records}
 \label{sec:arch-ports}
@@ -130,6 +197,8 @@ The core defines three ports as Python protocols:
 	\item[\texttt{Renderer}] receives a render plan for one admitted action and returns a rendered candidate or a failure.
 \end{description}
 
+The decision input is to be extended so that the decision maker sees everything the lifecycle requires and nothing more: the declared scope and objectives of the run, the diagnosis report with its problem candidates and coverage, a read-only view of the actions that are actually supported and permitted together with their bounds, and a compact summary of all earlier decisions and attempts in the run, including rejected and failed ones. The view of permitted actions only informs the decision maker; admission still checks the authoritative policy. A diagnosis report must also distinguish between a method that found no candidates, a method that could not run, and evidence that is incomplete, so that an unassessed problem is never mistaken for an absent one. \todo{This extension is a proposal under review (control-loop contract, Task 2); state the final contents once decided.}
+
 Each port returns expected failures as values rather than exceptions, so that, for example, a failed request to the \ac{AI} service becomes a recorded outcome instead of a crash (OP-04). For each port the core also defines a check of the response against the request. A decision, for instance, must refer to the project revision, context and observations it was given and must name the controller that was asked; anything else is rejected before admission.
 
 All data exchanged between stages and ports are \emph{records} in \texttt{core.records}. Every record is a frozen data class that validates itself on construction, so that an invalid record cannot exist. Its fields hold only immutable values, and new versions are derived by copying rather than by changing an existing record. Audio samples never enter records: records refer to audio files by identifier, location, format and checksum, while sample arrays stay inside the adapters. The outcome of a stage is a union type, for example an admitted or a rejected action, and the caller must handle every case explicitly.
@@ -139,7 +208,9 @@ Immutability serves testability and traceability: a request cannot change after 
 \section{Separation of Proposal and Execution}
 \label{sec:arch-proposal}
 
-The central architectural decision of the thesis is that the \ac{AI} component proposes and deterministic code disposes (ADR-004). A proposal is not permission to act. The admission step checks it against a versioned admission policy for the project, in a fixed order: the proposal must refer to the current project state, the policy must belong to the project, the proposal must contain an action at all, the target track must not be protected, an explicit permission for the action on that track must exist, and the requested parameter must lie within that permission's bounds. Admission never clamps a value into range; an out-of-bounds proposal is rejected and the reason is recorded (FR-07). An abstention is a valid outcome, not an error.
+The central architectural decision of the thesis is that the \ac{AI} component proposes and deterministic code disposes (ADR-004). In the sense of the thesis title, the \emph{agent} is the combination of the \ac{LLM} with its observations, state, tools, constraints and feedback loop. Within this agent, only the decision component (\texttt{decision\_agent}) is \ac{AI}; the orchestration around it is the deterministic control loop (ADR-005, ADR-027).
+
+A proposal is not permission to act. Before admission, a deterministic gate is to check, according to the current design proposal, that the proposal refers to evidence that is actually available, that no declared required context is missing, and that the operation is supported; it cannot prove that the rationale given by the \ac{LLM} is musically correct. The admission step then checks it against a versioned admission policy for the project, in a fixed order: the proposal must refer to the current project state, the policy must belong to the project, the proposal must contain an action at all, the target track must not be protected, an explicit permission for the action on that track must exist, and the requested parameter must lie within that permission's bounds. Admission never clamps a value into range; an out-of-bounds proposal is rejected and the reason is recorded (FR-07). Non-action outcomes such as an abstention are routed by the loop directly and never reach admission as if they were actions.
 
 At the time of writing, the only action type is setting the absolute gain of one track (\texttt{SetTrackGain}). Gain is always set relative to the fixed input stem of the track, never as a change applied to the latest output, so repeated corrections do not accumulate. A \emph{preflight} step then checks, on metadata alone, that the admitted action can be rendered: the output workspace, the identity of the new candidate, the inputs of the mix and the target gain must all be consistent. The renderer for this action (ADR-026) reads and checks the fixed input of the target track, applies the gain, sums all stems into the combined mix in a declared order without normalisation or limiting, and writes the new target stem and the new mix as new files into a freshly allocated output directory. It never overwrites an existing file.
 
