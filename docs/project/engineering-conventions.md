@@ -2,7 +2,7 @@
 
 Shared code-structure and coding rules for every contributor, human or AI assistant (Claude Code and Codex read this file through `CLAUDE.md`). The architecture these rules serve is decided in [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Accepted 2026-11-03). Research and documentation rules stay in `CLAUDE.md`, [`documentation-policy.md`](documentation-policy.md) and [ADR-006](../decisions/0006-research-first-development-policy.md).
 
-Status: implemented since migration step M4 (2026-11-04); the domain/application/infrastructure layout and its compatibility paths no longer exist. `core.diagnosis`, `adapters.decision_agent`, `adapters.baselines`, `drivers.experiments` and `evaluation` are created with their first real code. The rules are enforced by `tests/architecture/`.
+Status: implemented by ADR-027 migration steps M0–M5 (completed 2026-11-04; M6 skipped); the domain/application/infrastructure layout and its compatibility paths no longer exist, and names follow the vocabulary below. `core.diagnosis`, `adapters.decision_agent`, `adapters.baselines`, `drivers.experiments` and `evaluation` are created with their first real code. The rules are enforced by `tests/architecture/`.
 
 ## Architecture in one paragraph
 A modular monolith in hexagonal (ports-and-adapters) style. The `core` contains the mixing control loop, structured like a MAPE-K feedback loop (measure → diagnose → decide → admit → render → verify → accept or roll back), plus the pure rules it uses and the immutable records they exchange. Everything that touches audio samples, files or the AI provider is an `adapter` behind a port the core defines. `drivers` (CLI, experiment runner) build the adapters and start runs. `evaluation` holds the hidden reference and is used only by the experiment runner.
@@ -36,7 +36,7 @@ autonomous_mixing/
 2. Inside `core`, `core.records` imports nothing outside itself; `core.ports` imports only `core.records`; stage packages (`admission`, `verification`, `diagnosis`) import only `core.records` and `core.ports` (and the standard library). Only `core.loop` composes stages and ports.
 3. `adapters` import only `core.records`, `core.ports`, third-party libraries and their own internals; never another adapter's internals and never `core.loop`.
 4. Only `drivers.experiments` imports `evaluation` (SR-10, ADR-010). This rule is necessary, not sufficient: an import test is not a filesystem sandbox. Runtime inputs, decision inputs and runtime configuration must also contain no hidden-data fields or references, and adapters read only from explicitly supplied roots (ADR-023).
-5. Inside `core`, data types are defined only in `core.records`; ports, stages and the loop define functions. A function that a record calls in `__post_init__` lives with the records. Ports exchange request and response types; their definitions live in `core.records`. Adapter-local implementation data (for example `VerifiedAudio`, `AllocatedWorkspace`, `WrittenWav`, resource limits) stays inside its adapter.
+5. Inside `core`, data types are defined only in `core.records`; ports, stages and the loop define functions. A function that a record calls in `__post_init__` lives with the records. Ports exchange request and response types; their definitions live in `core.records`. Adapter-local implementation data (for example `CheckedAudio`, `AllocatedWorkspace`, `WrittenWav`, resource limits) stays inside its adapter.
 6. The modules of `core.records` form an acyclic import graph. A record used by several record modules gets its own module (for example `budgets`); cycles are never resolved through import order or local imports.
 
 One boundary test enforces these rules. Do not add finer-grained matrices unless a concrete defect requires one.
@@ -44,7 +44,7 @@ One boundary test enforces these rules. Do not add finer-grained matrices unless
 ## Immutability rules
 These rules apply to core records. Adapter-local data follows its adapter's needs (it may hold NumPy arrays) but must not leak into core records.
 
-1. Every core record is `@dataclass(frozen=True)` and validates itself in `__post_init__`; an invalid record cannot be constructed. `slots=True` is the target, added in a separate optional migration step; new records may use it already.
+1. Every core record is `@dataclass(frozen=True)` and validates itself in `__post_init__`; an invalid record cannot be constructed. `slots=True` remains optional: the migration step that would have added it everywhere (M6) was skipped on 2026-11-04; new records may use it.
 2. Record fields hold only immutable values: scalars, enums, other records, `tuple`, `frozenset`. No `list`, `dict`, `set` or NumPy arrays. Known exception: the generic `Success[T]` port result has an unconstrained payload type; a frozen `Success` does not make its payload immutable. New records must not add such fields.
 3. Audio samples never enter records. Records carry artifact references, metadata and checksums; sample arrays stay inside adapters. An array that must cross a port is marked read-only (`array.flags.writeable = False`).
 4. New versions are derived with `dataclasses.replace(...)`, never by mutation. `object.__setattr__` is used only inside `__post_init__`.

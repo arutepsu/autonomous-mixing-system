@@ -1,6 +1,6 @@
 # Migration plan: layered layout → ADR-027 hexagonal control-loop layout
 
-Status: **Planned**, revised 2026-11-03 after an independent Codex review. Depends on [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Proposed) and on the owner decisions in section 2. Rules for the target are in [`engineering-conventions.md`](../project/engineering-conventions.md).
+Status: **Completed** 2026-11-04 (M0–M5 and M7 done and reviewed by Codex up to M5; M6 skipped by owner decision). The text below is the plan as executed, with its revisions; it is kept as the migration record. Originally: **Planned**, revised 2026-11-03 after an independent Codex review. Depends on [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Proposed) and on the owner decisions in section 2. Rules for the target are in [`engineering-conventions.md`](../project/engineering-conventions.md).
 
 Revised again after Codex's second review (2026-11-03): data scope narrowed to core-facing records, `budgets` split out to avoid a module cycle, MD-6 replaced with the exact reproduced case. Superseded from the first version of this plan: the claim that every step is behavior-preserving, the exit criterion "same behavior-test count" as sole evidence, the mapping that put budgets and run records in `core.loop` (it created a forbidden ports → loop dependency), and the 3-to-4-day estimate as a planning fact.
 
@@ -179,10 +179,12 @@ Maintained in this section during the migration. Every assertion of the four old
 | M3 | (a) | Move `infrastructure/*`, `audio/*`, `cli.py` into `adapters` and `drivers`; decide G4 and G10. Deviation 2026-11-03: `autonomous_mixing/cli.py` stays as a shim and the `pyproject.toml` entry point is changed in M4, because `uv` was not available to resynchronize the environment and `pip install` is not allowed. | As M1; `autonomous-mixing --help` works. |
 | M4 | (b) | Change the `pyproject.toml` entry point to `autonomous_mixing.drivers.cli:main` and run `uv sync` (moved from M3); delete all compatibility facades, shims and the empty `domain`, `application`, `infrastructure` packages and the M0 `audio` package; remove the convenience re-exports of `core/records/__init__.py` so every record has exactly one import path, its module (owner decision 2026-11-03); retire the four old architecture tests; ledger complete. | Behavior tests: same count; every ledger row has a final status. |
 | M5 | (c) | Optional: vocabulary renames. | No old names in `src`; G8 rebased. |
-| M6 | (d) | Optional: `slots=True` with tests for attribute assignment, pickling and `dataclasses.replace`. | As M1. |
+| M6 | (d) | Optional: `slots=True` with tests for attribute assignment, pickling and `dataclasses.replace`. Skipped 2026-11-04 by owner decision: records are already frozen and their field types are checked (G11); it can be added later as its own step if a concrete need arises. | As M1. |
 | M7 | — | Documentation: `overview.md` implemented sections, `CLAUDE.md` State, ADR index, research log with evidence per step. | Docs name new paths only; superseded statements marked. |
 
 Status 2026-11-04: M0–M4 done (pilot `7f71859`, corrections `28a21da`/`5e8766c`, M2 `63f3739`, test fixes `e66e693`, M3 `409d007`/`0f6cbac`, M4 on the same branch); M5 done on 2026-11-04 (see research log); M6 optional and not started; M7 pending.
+
+Final status 2026-11-04: M5 `a61c5cd` (renames, reviewed), M4 correction `5860bde` (reviewed), M6 skipped, M7 documentation update on the same branch. The loop work (section 5) is the next development step; it is not part of this plan.
 
 After M4 (or M7 if run), the control loop (roadmap M4 vertical slice; FR-06, FR-07, FR-09, FR-12) starts in `core/loop` with test stand-ins for the three ports, and answers the questions in section 5.
 
