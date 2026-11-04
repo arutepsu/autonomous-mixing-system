@@ -3,35 +3,15 @@
 Values used here are arbitrary structural fixtures, not musical or analysis parameters.
 """
 
-import ast
 import dataclasses
 import math
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
-from autonomous_mixing.domain.context import AssertionSource, ContextPreference, MusicalContext, TrackRole
-from autonomous_mixing.domain.observation import (
-    AnalysisSpec,
-    MeasuredScalar,
-    Observation,
-    RenderSpec,
-    Unavailable,
-    validate_observation_sources,
-)
-from autonomous_mixing.domain.project import (
-    AnalysisScope,
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    FrequencyRange,
-    ProjectSnapshot,
-    TimeRange,
-    Track,
-)
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.context import AssertionSource, ContextPreference, MusicalContext, TrackRole
+from autonomous_mixing.core.records.identifiers import (
     ArtifactId,
     CheckpointId,
     ContextId,
@@ -41,10 +21,21 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.observation import (
+    AnalysisScope,
+    AnalysisSpec,
+    FrequencyRange,
+    MeasuredScalar,
+    Observation,
+    RenderSpec,
+    TimeRange,
+    Unavailable,
+    validate_observation_sources,
+)
+from autonomous_mixing.core.records.project import ArtifactCheckpoint, ProjectSnapshot, Track
 
 UTC_NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 HASH = "a" * 64
-DOMAIN_DIR = Path(__file__).resolve().parents[2] / "src" / "autonomous_mixing" / "domain"
 INVALID_NUMBERS = [True, False, math.nan, math.inf, -math.inf, "1.0", None]
 
 
@@ -514,104 +505,3 @@ def test_valid_artifact_derived_values_still_work():
 
 
 # --- dependency boundary -------------------------------------------------------
-
-DOMAIN_PACKAGE = "autonomous_mixing.domain"
-
-
-def _boundary_violations(source: str, module_name: str, *, is_package: bool = False) -> list[str]:
-    """Return imports in ``source`` that are neither standard library nor inside the domain package.
-
-    Relative imports are resolved against the package of ``module_name`` (the module itself when
-    ``is_package``). For ``from X import name``, only ``X`` is checked, so ``from autonomous_mixing
-    import domain`` is rejected conservatively.
-    """
-    package = module_name.split(".") if is_package else module_name.split(".")[:-1]
-    violations = []
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Import):
-            names = [alias.name for alias in node.names]
-            relative = False
-        elif isinstance(node, ast.ImportFrom):
-            relative = node.level > 0
-            if relative:
-                if node.level - 1 >= len(package):
-                    violations.append("." * node.level + (node.module or ""))
-                    continue  # escapes beyond the top-level package
-                base = package[: len(package) - (node.level - 1)]
-                names = [".".join(base + ([node.module] if node.module else []))]
-            else:
-                names = [node.module or ""]
-        else:
-            continue
-        for name in names:
-            in_domain = name == DOMAIN_PACKAGE or name.startswith(DOMAIN_PACKAGE + ".")
-            in_stdlib = not relative and name.split(".")[0] in sys.stdlib_module_names
-            if not (in_domain or in_stdlib):
-                violations.append(name)
-    return violations
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "import math",
-        "from collections.abc import Iterable",
-        "from __future__ import annotations",
-        "import autonomous_mixing.domain",
-        "from autonomous_mixing.domain import values",
-        "from autonomous_mixing.domain.values import TrackId",
-        "from . import values",
-        "from .values import TrackId",
-        "from ..domain.project import Track",
-    ],
-)
-def test_boundary_checker_allows_standard_library_and_domain_imports(source):
-    assert _boundary_violations(source, f"{DOMAIN_PACKAGE}.observation") == []
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "import numpy",
-        "import autonomous_mixing",
-        "import autonomous_mixing.audio.io",
-        "from autonomous_mixing import cli",
-        "from autonomous_mixing.domain_extra import x",
-        "import autonomous_mixing.domain_extra",
-        "from ..audio.io import load_stem",
-        "from .. import audio",
-        "from ...elsewhere import x",
-        "from .... import x",
-    ],
-)
-def test_boundary_checker_rejects_imports_escaping_the_domain(source):
-    assert _boundary_violations(source, f"{DOMAIN_PACKAGE}.observation") != []
-
-
-def test_boundary_checker_resolves_relative_imports_from_package_init():
-    init = DOMAIN_PACKAGE
-    assert _boundary_violations("from .values import TrackId", init, is_package=True) == []
-    assert _boundary_violations("from .audio import io", init, is_package=True) == []
-    assert _boundary_violations("from ..audio import io", init, is_package=True) != []
-
-
-def test_domain_modules_import_only_standard_library_and_domain():
-    # Recursive: the domain is organized into component packages (ADR-017); caches are not scanned.
-    modules = sorted(m for m in DOMAIN_DIR.rglob("*.py") if "__pycache__" not in m.parts)
-    relative = {m.relative_to(DOMAIN_DIR).as_posix() for m in modules}
-    assert relative >= {
-        "__init__.py",
-        "values.py",
-        "project/__init__.py",
-        "project/checkpoint.py",
-        "context/musical_context.py",
-        "observation/provenance.py",
-        "action/execution.py",
-        "run/attempt.py",
-    }
-    for module in modules:
-        parts = (DOMAIN_PACKAGE.split(".")) + list(module.relative_to(DOMAIN_DIR).with_suffix("").parts)
-        is_package = parts[-1] == "__init__"
-        module_name = ".".join(parts[:-1] if is_package else parts)
-        violations = _boundary_violations(module.read_text(encoding="utf-8"), module_name, is_package=is_package)
-        assert violations == [], f"{module} imports {violations}"

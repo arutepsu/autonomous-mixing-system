@@ -4,8 +4,8 @@ import dataclasses
 
 import pytest
 
-from autonomous_mixing.domain.project import MixRecipe, SummingPolicy
-from autonomous_mixing.domain.shared import TrackId, VersionRef
+from autonomous_mixing.core.records.identifiers import TrackId, VersionRef
+from autonomous_mixing.core.records.mix import MixRecipe, SummingPolicy
 
 REF = VersionRef("full-mix-recipe", "1")
 

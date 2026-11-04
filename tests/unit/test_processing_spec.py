@@ -7,8 +7,8 @@ import dataclasses
 
 import pytest
 
-import autonomous_mixing.domain.project as project
-from autonomous_mixing.domain.project import (
+from autonomous_mixing.core.records.identifiers import VersionRef
+from autonomous_mixing.core.records.mix import (
     GainRule,
     LevelPolicy,
     NumericalPrecision,
@@ -18,7 +18,6 @@ from autonomous_mixing.domain.project import (
     SummationOrder,
     SummingPolicy,
 )
-from autonomous_mixing.domain.shared import VersionRef
 
 REF = VersionRef("gain-mix-processing", "1")
 FIELDS = {
@@ -95,21 +94,3 @@ def test_specification_is_frozen():
     spec = _spec()
     with pytest.raises(dataclasses.FrozenInstanceError):
         spec.reference = VersionRef("other", "1")
-
-
-def test_specification_is_owned_by_the_project_component():
-    # Root compatibility-export identity is asserted in test_domain_component_compatibility.py,
-    # the only test module allowed to import the root interface.
-    for name in (
-        "ProcessingSpec",
-        "NumericalPrecision",
-        "GainRule",
-        "SummationOrder",
-        "LevelPolicy",
-        "OutputContainer",
-        "SampleEncoding",
-    ):
-        obj = getattr(project, name)
-        assert name in project.__all__
-        assert obj.__module__ == "autonomous_mixing.domain.project.processing_spec", name
-        assert obj is globals()[name]

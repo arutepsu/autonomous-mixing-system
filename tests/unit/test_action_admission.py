@@ -3,44 +3,35 @@
 Permission bounds and gain values are explicit test configuration, not recommended or researched limits.
 """
 
-import ast
 import copy
 import dataclasses
 import math
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
-from autonomous_mixing.application.admission import (
+from autonomous_mixing.core.admission.admission import admit_action
+from autonomous_mixing.core.records.actions import Action, SetTrackGain
+from autonomous_mixing.core.records.admission import (
     ActionAdmissionPolicy,
     ActionAdmissionRequest,
     AdmissionRejectionCode,
     AdmittedAction,
     RejectedAction,
     TrackGainPermission,
-    admit_action,
 )
-from autonomous_mixing.application.decision import DecisionRequest
-from autonomous_mixing.domain.action import Action, SetTrackGain
-from autonomous_mixing.domain.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.domain.decision import Abstain, AbstentionReason, ControllerIdentity, Decision, ProposeAction
-from autonomous_mixing.domain.observation import MeasuredScalar, Observation
-from autonomous_mixing.domain.project import (
-    AnalysisScope,
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    TimeRange,
-    Track,
-    TrackGainState,
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
+from autonomous_mixing.core.records.decision import (
+    Abstain,
+    AbstentionReason,
+    ControllerIdentity,
+    Decision,
+    ProposeAction,
+    Situation,
 )
-from autonomous_mixing.domain.run import BudgetLimits, BudgetUsage
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     CheckpointId,
@@ -51,6 +42,15 @@ from autonomous_mixing.domain.shared import (
     Revision,
     TrackId,
     VersionRef,
+)
+from autonomous_mixing.core.records.observation import AnalysisScope, MeasuredScalar, Observation, TimeRange
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
 )
 
 UTC_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
@@ -89,7 +89,7 @@ def _context(protected=frozenset(), roles=None) -> MusicalContext:
     return MusicalContext(ContextId("c1"), "1", track_roles, (), frozenset(TrackId(t) for t in protected))
 
 
-def _decision_request(protected=frozenset(), roles=None, project="p1", revision="r2") -> DecisionRequest:
+def _decision_request(protected=frozenset(), roles=None, project="p1", revision="r2") -> Situation:
     snapshot = _snapshot(project, revision)
     mix = _artifact("a-mix", ("t1", "t2", "t3"), revision, project)
     checkpoint = ArtifactCheckpoint(CheckpointId("cp"), ProjectId(project), Revision(revision), (mix,))
@@ -115,7 +115,7 @@ def _decision_request(protected=frozenset(), roles=None, project="p1", revision=
         VersionRef("analyzer", "0.1"),
         UTC_NOW,
     )
-    return DecisionRequest(
+    return Situation(
         state,
         _context(protected, roles),
         CONTROLLER,
@@ -315,7 +315,7 @@ def test_admission_does_not_mutate_request_or_action():
 
 def test_programming_errors_are_not_converted_into_rejections(monkeypatch):
     # Patch the global that admit_action actually resolves: its implementation module, not the interface.
-    import autonomous_mixing.application.admission.admission as admission
+    import autonomous_mixing.core.admission.admission as admission  # behavior moved in ADR-027 step M2
 
     def broken(request, response):
         raise TypeError("programming error")
@@ -411,28 +411,3 @@ def test_records_are_immutable():
 
 
 # --- architecture --------------------------------------------------------------------
-
-
-def test_admission_module_imports_only_stdlib_application_and_component_interfaces():
-    # The recursive real-tree checks in test_domain_component_boundaries.py and
-    # test_application_infrastructure_boundaries.py also scan this package.
-    package_dir = Path(__file__).resolve().parents[2] / "src" / "autonomous_mixing" / "application" / "admission"
-    paths = sorted(package_dir.glob("*.py"))
-    assert {path.name for path in paths} == {"__init__.py", "policy.py", "contracts.py", "admission.py"}
-    components = {"shared", "project", "context", "observation", "action", "decision", "validation", "run"}
-    nodes = [node for path in paths for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))]
-    for node in nodes:
-        if isinstance(node, ast.ImportFrom):
-            assert node.level == 0, "use absolute imports"
-            name = node.module or ""
-        elif isinstance(node, ast.Import):
-            name = node.names[0].name
-        else:
-            continue
-        parts = name.split(".")
-        allowed = (
-            parts[0] in sys.stdlib_module_names
-            or (parts[:2] == ["autonomous_mixing", "application"])
-            or (len(parts) == 3 and parts[:2] == ["autonomous_mixing", "domain"] and parts[2] in components)
-        )
-        assert allowed, name

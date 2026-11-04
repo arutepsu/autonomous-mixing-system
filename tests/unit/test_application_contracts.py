@@ -4,47 +4,29 @@ All records are metadata fixtures; the analyzer and controller below are minimal
 not product features. Metric names, units and budgets are structural examples only.
 """
 
-import ast
 import dataclasses
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from autonomous_mixing.application.decision import (
-    DecisionController,
-    DecisionRequest,
+from autonomous_mixing.core.ports.analysis import AudioAnalyzer, validate_analysis_response
+from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
+from autonomous_mixing.core.records.actions import Action, SetTrackGain
+from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
+from autonomous_mixing.core.records.decision import (
+    Abstain,
+    AbstentionReason,
+    ControllerIdentity,
+    Decision,
     DecisionResponse,
-    validate_decision_response,
+    ProposeAction,
+    Situation,
 )
-from autonomous_mixing.application.observation import (
-    AnalysisRequest,
-    AnalysisResponse,
-    AudioAnalyzer,
-    validate_analysis_response,
-)
-from autonomous_mixing.application.shared import PortFailure, PortFailureCode, PortResult, Success
-from autonomous_mixing.domain.action import Action, SetTrackGain
-from autonomous_mixing.domain.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.domain.decision import Abstain, AbstentionReason, ControllerIdentity, Decision, ProposeAction
-from autonomous_mixing.domain.observation import AnalysisSpec, MeasuredScalar, Observation, Unavailable
-from autonomous_mixing.domain.project import (
-    AnalysisScope,
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    FrequencyRange,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    TimeRange,
-    Track,
-    TrackGainState,
-)
-from autonomous_mixing.domain.run import BudgetLimits, BudgetUsage
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     CheckpointId,
@@ -56,15 +38,30 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.observation import (
+    AnalysisScope,
+    AnalysisSpec,
+    FrequencyRange,
+    MeasuredScalar,
+    Observation,
+    TimeRange,
+    Unavailable,
+)
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
+)
+from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult, Success
 
 UTC_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 METRIC_A, METRIC_B, METRIC_C = VersionRef("metric-a", "1"), VersionRef("metric-b", "1"), VersionRef("metric-c", "1")
 SPEC = AnalysisSpec(VersionRef("spec", "1"), (METRIC_A, METRIC_B))
 CONTROLLER = ControllerIdentity("deterministic-baseline", "0.1")
 SRC_DIR = Path(__file__).resolve().parents[2] / "src" / "autonomous_mixing"
-APPLICATION_DIR = SRC_DIR / "application"
-
-
 # --- fixtures ----------------------------------------------------------------------
 
 
@@ -153,7 +150,7 @@ def _context(protected: frozenset = frozenset(), context_id: str = "c1") -> Musi
     return MusicalContext(ContextId(context_id), "1", roles, (), protected)
 
 
-def _decision_request(**overrides) -> DecisionRequest:
+def _decision_request(**overrides) -> Situation:
     fields = dict(
         state=_state(),
         context=_context(),
@@ -163,7 +160,7 @@ def _decision_request(**overrides) -> DecisionRequest:
         limits=BudgetLimits(4, 2, 6, 1, 300.0),
     )
     fields.update(overrides)
-    return DecisionRequest(**fields)
+    return Situation(**fields)
 
 
 def _decision(outcome=None, evidence=("o-a",), *, context=("c1", "1"), controller=CONTROLLER, target="t2"):
@@ -202,7 +199,7 @@ class _InMemoryController:
         self.result = result
         self.calls = 0
 
-    def decide(self, request: DecisionRequest) -> PortResult[DecisionResponse]:
+    def decide(self, request: Situation) -> PortResult[DecisionResponse]:
         self.calls += 1
         return self.result
 
@@ -211,7 +208,7 @@ def _call_analyzer(analyzer: AudioAnalyzer, request: AnalysisRequest) -> PortRes
     return analyzer.analyze(request)
 
 
-def _call_controller(controller: DecisionController, request: DecisionRequest) -> PortResult[DecisionResponse]:
+def _call_controller(controller: DecisionMaker, request: Situation) -> PortResult[DecisionResponse]:
     return controller.decide(request)
 
 
@@ -273,7 +270,7 @@ def test_analysis_request_accepts_state_with_older_production_artifacts():
 
 
 def test_requests_have_one_state_field_instead_of_snapshot_and_checkpoint():
-    for record in (AnalysisRequest, DecisionRequest):
+    for record in (AnalysisRequest, Situation):
         names = {f.name for f in dataclasses.fields(record)}
         assert "state" in names and not names & {"snapshot", "checkpoint"}
 
@@ -521,136 +518,3 @@ def test_retryable_failure_is_advisory_and_triggers_no_retry():
 
 
 # --- dependency boundaries -------------------------------------------------------------
-
-APPLICATION_PACKAGE = "autonomous_mixing.application"
-ALLOWED_INTERNAL = ("autonomous_mixing.application", "autonomous_mixing.domain")
-
-
-def _application_boundary_violations(source: str, module_name: str, *, is_package: bool = False) -> list[str]:
-    """Imports in ``source`` that are neither standard library, domain nor application.
-
-    Relative imports are resolved against the module's package; package prefixes must match exactly.
-    """
-    package = module_name.split(".") if is_package else module_name.split(".")[:-1]
-    violations = []
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Import):
-            names, relative = [alias.name for alias in node.names], False
-        elif isinstance(node, ast.ImportFrom):
-            relative = node.level > 0
-            if relative:
-                if node.level - 1 >= len(package):
-                    violations.append("." * node.level + (node.module or ""))
-                    continue
-                base = package[: len(package) - (node.level - 1)]
-                names = [".".join(base + ([node.module] if node.module else []))]
-            else:
-                names = [node.module or ""]
-        else:
-            continue
-        for name in names:
-            internal = any(name == p or name.startswith(p + ".") for p in ALLOWED_INTERNAL)
-            stdlib = not relative and name.split(".")[0] in sys.stdlib_module_names
-            if not (internal or stdlib):
-                violations.append(name)
-    return violations
-
-
-@pytest.mark.parametrize(
-    "source, module",
-    [
-        ("import typing", "contracts"),
-        ("from dataclasses import dataclass", "contracts"),
-        ("from autonomous_mixing.domain import Decision", "contracts"),
-        ("from autonomous_mixing.domain.values import require_text", "results"),
-        ("from autonomous_mixing.application.results import Success", "ports.analysis"),
-        ("from .results import Success", "contracts"),
-        ("from ..contracts import AnalysisRequest", "ports.analysis"),
-        ("from ..domain import Decision", "contracts"),
-        ("from ...domain.run import BudgetUsage", "ports.decision"),
-    ],
-)
-def test_application_boundary_checker_allows_stdlib_domain_and_application(source, module):
-    assert _application_boundary_violations(source, f"{APPLICATION_PACKAGE}.{module}") == []
-
-
-@pytest.mark.parametrize(
-    "source, module",
-    [
-        ("import numpy", "contracts"),
-        ("import anthropic", "contracts"),
-        ("import autonomous_mixing", "contracts"),
-        ("from autonomous_mixing import cli", "contracts"),
-        ("from autonomous_mixing.audio.io import load_stem", "contracts"),
-        ("import autonomous_mixing.infrastructure", "contracts"),
-        ("from autonomous_mixing.application_extra import x", "contracts"),
-        ("from autonomous_mixing.domain_extra import x", "contracts"),
-        ("from ..audio.io import load_stem", "contracts"),
-        ("from .. import cli", "contracts"),
-        ("from ...audio import features", "ports.analysis"),
-        ("from ..... import x", "ports.analysis"),
-    ],
-)
-def test_application_boundary_checker_rejects_escapes_and_lookalike_packages(source, module):
-    assert _application_boundary_violations(source, f"{APPLICATION_PACKAGE}.{module}") != []
-
-
-def test_application_modules_import_only_stdlib_domain_and_application():
-    modules = sorted(APPLICATION_DIR.rglob("*.py"))
-    names = {m.relative_to(APPLICATION_DIR).as_posix() for m in modules}
-    assert names >= {
-        "__init__.py",
-        "results.py",
-        "contracts.py",
-        "ports/__init__.py",
-        "ports/analysis.py",
-        "ports/decision.py",
-        # Application component packages; the legacy modules above remain as compatibility facades.
-        "shared/__init__.py",
-        "shared/results.py",
-        "observation/__init__.py",
-        "observation/contracts.py",
-        "observation/validation.py",
-        "observation/ports.py",
-        "decision/__init__.py",
-        "decision/contracts.py",
-        "decision/validation.py",
-        "decision/ports.py",
-    }
-    for module in modules:
-        parts = module.relative_to(SRC_DIR.parent).with_suffix("").parts
-        is_package = parts[-1] == "__init__"
-        module_name = ".".join(parts[:-1] if is_package else parts)
-        violations = _application_boundary_violations(
-            module.read_text(encoding="utf-8"), module_name, is_package=is_package
-        )
-        assert violations == [], f"{module} imports {violations}"
-
-
-def _modules_loaded_by(import_statement: str) -> list[str]:
-    script = (
-        "import sys\n"
-        "before = set(sys.modules)\n"
-        f"{import_statement}\n"
-        "print('\\n'.join(sorted(set(sys.modules) - before)))\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-    return [line for line in result.stdout.splitlines() if line]
-
-
-def test_application_runtime_imports_stay_within_stdlib_domain_and_application():
-    components = ", ".join(
-        f"{APPLICATION_PACKAGE}.{c}" for c in ("shared", "observation", "decision", "admission", "execution")
-    )
-    for name in _modules_loaded_by(f"import {components}"):
-        internal = name == "autonomous_mixing" or any(name == p or name.startswith(p + ".") for p in ALLOWED_INTERNAL)
-        assert internal or name.split(".")[0] in sys.stdlib_module_names, name
-
-
-def test_domain_remains_independent_of_application():
-    loaded = _modules_loaded_by("import autonomous_mixing.domain")
-    assert not [name for name in loaded if name.startswith(APPLICATION_PACKAGE)]
-    domain_modules = sorted(m for m in (SRC_DIR / "domain").rglob("*.py") if "__pycache__" not in m.parts)
-    assert any(m.parent.name == "project" and m.name == "checkpoint.py" for m in domain_modules)
-    for module in domain_modules:
-        assert APPLICATION_PACKAGE not in module.read_text(encoding="utf-8"), module

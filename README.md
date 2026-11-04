@@ -58,6 +58,7 @@ This table is the canonical topic-ownership list; change rules are in [`docs/pro
 | `docs/decisions/` | Architectural decision records, one immutable file per ADR, indexed in [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `docs/research/research-log.md` | Append-only research and implementation observations |
 | `docs/project/documentation-policy.md` | Which documents may change and how |
+| `docs/project/engineering-conventions.md` | Package layout, import rules, immutability rules and code vocabulary for all contributors (ADR-027) |
 
 ## Current development order
 

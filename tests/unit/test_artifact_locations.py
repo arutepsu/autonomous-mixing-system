@@ -18,15 +18,15 @@ from pathlib import Path
 
 import pytest
 
-import autonomous_mixing.infrastructure.filesystem.locations as locations
-from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
-from autonomous_mixing.domain.shared import ArtifactId, ProjectId, Revision, TrackId, VersionRef
-from autonomous_mixing.infrastructure.filesystem import (
+import autonomous_mixing.adapters.rendering.locations as locations  # moved in ADR-027 step M3; tests patch or inspect its internals
+from autonomous_mixing.adapters.rendering.locations import (
     LocationResolutionError,
     LocationResolutionFailureCode,
     ResolvedArtifactLocation,
     resolve_artifact_location,
 )
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import ArtifactId, ProjectId, Revision, TrackId, VersionRef
 
 Code = LocationResolutionFailureCode
 WINDOWS = os.name == "nt"
@@ -95,23 +95,6 @@ def tree(tmp_path):
 
 
 # --- public interface ----------------------------------------------------------------------
-
-
-def test_public_interface_exports_exactly_the_four_definitions():
-    import autonomous_mixing.infrastructure.filesystem as filesystem
-
-    assert sorted(filesystem.__all__) == sorted(
-        [
-            "ResolvedArtifactLocation",
-            "LocationResolutionFailureCode",
-            "LocationResolutionError",
-            "resolve_artifact_location",
-        ]
-    )
-    assert filesystem.ResolvedArtifactLocation is locations.ResolvedArtifactLocation
-    assert filesystem.LocationResolutionFailureCode is locations.LocationResolutionFailureCode
-    assert filesystem.LocationResolutionError is locations.LocationResolutionError
-    assert filesystem.resolve_artifact_location is locations.resolve_artifact_location
 
 
 def test_failure_codes_are_exactly_the_specified_members_with_lowercase_values():

@@ -5,25 +5,21 @@ Gain values and identifiers are arbitrary structural fixtures, not mixing parame
 
 import dataclasses
 import math
-import subprocess
-import sys
 from datetime import datetime, timezone
 
 import pytest
 
-from autonomous_mixing.domain.action import Action, SetTrackGain
-from autonomous_mixing.domain.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.domain.decision import (
+from autonomous_mixing.core.ports.decision import validate_decision_references
+from autonomous_mixing.core.records.actions import Action, SetTrackGain
+from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
+from autonomous_mixing.core.records.decision import (
     Abstain,
     AbstentionReason,
     ControllerIdentity,
     Decision,
     ProposeAction,
-    validate_decision_references,
 )
-from autonomous_mixing.domain.observation import MeasuredScalar, Observation
-from autonomous_mixing.domain.project import AnalysisScope, ProjectSnapshot, TimeRange, Track
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     ContextId,
@@ -34,6 +30,8 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.observation import AnalysisScope, MeasuredScalar, Observation, TimeRange
+from autonomous_mixing.core.records.project import ProjectSnapshot, Track
 
 UTC_NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 INVALID_NUMBERS = [True, False, math.nan, math.inf, -math.inf, "-3.0", None]
@@ -327,19 +325,3 @@ def test_references_do_not_enforce_protection_or_gain_policy():
 
 
 # --- dependency boundary --------------------------------------------------------
-
-
-def test_new_modules_load_only_standard_library_and_domain_modules():
-    # Complements the AST scan in test_domain_foundation.py, which covers every module in the domain package.
-    script = (
-        "import sys\n"
-        "before = set(sys.modules)\n"
-        "import autonomous_mixing.domain.action, autonomous_mixing.domain.decision\n"
-        "for name in sorted(set(sys.modules) - before):\n"
-        "    top = name.split('.')[0]\n"
-        "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
-        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.')\n"
-        "    if not ok: print(name)\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-    assert result.stdout == ""

@@ -1,13 +1,15 @@
 import errno
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-from autonomous_mixing.cli import main
+from autonomous_mixing.drivers.cli import main
 
 SR = 44100
 
@@ -278,3 +280,27 @@ def test_injected_unexpected_parent_creation_error_propagates(tmp_path, capsys, 
     assert not report.exists()
     for path, digest in protected.items():
         assert _sha256(path) == digest
+
+
+# Module execution in a real subprocess (ADR-027 steps M3/M4): calling ``main`` directly would not catch a
+# lost ``__main__`` guard, as happened to the M3 shim. The console script is checked in tests/architecture.
+MODULE_PATHS = ["autonomous_mixing.drivers.cli"]
+
+
+def _run_module(module, *args):
+    return subprocess.run([sys.executable, "-m", module, *args], capture_output=True, text=True, check=False)
+
+
+@pytest.mark.parametrize("module", MODULE_PATHS)
+def test_module_execution_prints_help(module):
+    result = _run_module(module, "--help")
+    assert result.returncode == 0
+    assert result.stdout.startswith("usage: autonomous-mixing")
+
+
+@pytest.mark.parametrize("module", MODULE_PATHS)
+def test_module_execution_rejects_an_unknown_command(module):
+    result = _run_module(module, "no-such-command")
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr
+    assert result.stdout == ""

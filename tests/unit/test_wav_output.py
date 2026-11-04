@@ -30,28 +30,24 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.infrastructure.wav_output as wav_output
-import autonomous_mixing.infrastructure.wav_output.writing as writing
-from autonomous_mixing.application.execution import ExecutionWorkspace
-from autonomous_mixing.domain.observation import RenderSpec
-from autonomous_mixing.domain.project import (
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    GainRule,
-    LevelPolicy,
-    NumericalPrecision,
-    OutputContainer,
-    ProcessingSpec,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    SampleEncoding,
-    SummationOrder,
-    Track,
-    TrackGainState,
+import autonomous_mixing.adapters.rendering.wav_output as writing  # moved in ADR-027 step M3; tests patch or inspect its internals
+from autonomous_mixing.adapters.rendering.locations import resolve_artifact_location
+from autonomous_mixing.adapters.rendering.wav_output import (
+    WavOutputError,
+    WavOutputFailureCode,
+    WrittenWav,
+    write_wav_output,
 )
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.adapters.rendering.workspaces import (
+    AllocatedWorkspace,
+    WorkspaceAllocationError,
+    WorkspaceAllocationFailureCode,
+    WorkspaceAllocationRequest,
+    WorkspaceRoot,
+    allocate_workspace,
+)
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import (
     ArtifactId,
     CheckpointId,
     ExecutionId,
@@ -60,21 +56,25 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
-from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location
-from autonomous_mixing.infrastructure.wav_output import (
-    WavOutputError,
-    WavOutputFailureCode,
-    WrittenWav,
-    write_wav_output,
+from autonomous_mixing.core.records.mix import (
+    GainRule,
+    LevelPolicy,
+    NumericalPrecision,
+    OutputContainer,
+    ProcessingSpec,
+    SampleEncoding,
+    SummationOrder,
 )
-from autonomous_mixing.infrastructure.workspaces import (
-    AllocatedWorkspace,
-    WorkspaceAllocationError,
-    WorkspaceAllocationFailureCode,
-    WorkspaceAllocationRequest,
-    WorkspaceRoot,
-    allocate_workspace,
+from autonomous_mixing.core.records.observation import RenderSpec
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
 )
+from autonomous_mixing.core.records.rendering import ExecutionWorkspace
 
 Code = WavOutputFailureCode
 WINDOWS = os.name == "nt"
@@ -215,14 +215,6 @@ FILESYSTEM = [
 
 
 # --- Task 2: public surface, records and errors ----------------------------------------------------
-
-
-def test_facade_exports_exactly_the_four_writer_definitions():
-    expected = {"WrittenWav", "WavOutputFailureCode", "WavOutputError", "write_wav_output"}
-    assert set(wav_output.__all__) == expected and len(wav_output.__all__) == 4
-    for name in expected:
-        assert getattr(wav_output, name) is getattr(writing, name)
-        assert getattr(writing, name).__module__ == writing.__name__
 
 
 def test_failure_codes_are_exactly_the_specified_members_with_lowercase_values():

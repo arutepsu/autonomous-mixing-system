@@ -2,7 +2,7 @@
 
 Fixtures are tiny analytical arrays written with soundfile to ``tmp_path``; no project media or
 evaluation audio is used. Shared verifier guarantees are exercised through both entry points: the
-original absolute-path ``verify_wav_artifact`` and ``verify_resolved_wav_artifact``. Failures the host
+original absolute-path ``check_wav_integrity`` and ``check_resolved_wav_integrity``. Failures the host
 cannot produce reliably are simulated with focused doubles of the verifier module's ``open`` or of its
 reference to ``resolve_artifact_location``; those doubles do not validate real permission behaviour.
 """
@@ -18,24 +18,24 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.infrastructure.audio.verification as verification
-from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
-from autonomous_mixing.domain.shared import ArtifactId, ProjectId, Revision, TrackId, VersionRef
-from autonomous_mixing.infrastructure.audio import (
-    ArtifactVerificationError,
-    VerificationFailureCode,
-    VerifiedAudio,
-    verify_resolved_wav_artifact,
-    verify_wav_artifact,
+import autonomous_mixing.adapters.rendering.integrity as verification  # moved in ADR-027 step M3; tests patch or inspect its internals
+from autonomous_mixing.adapters.rendering.integrity import (
+    CheckedAudio,
+    IntegrityError,
+    IntegrityFailureCode,
+    check_resolved_wav_integrity,
+    check_wav_integrity,
 )
-from autonomous_mixing.infrastructure.filesystem import (
+from autonomous_mixing.adapters.rendering.locations import (
     LocationResolutionError,
     LocationResolutionFailureCode,
     ResolvedArtifactLocation,
     resolve_artifact_location,
 )
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import ArtifactId, ProjectId, Revision, TrackId, VersionRef
 
-Code = VerificationFailureCode
+Code = IntegrityFailureCode
 LCode = LocationResolutionFailureCode
 LARGE = 1 << 20  # generous limits for tests that are not about resource limits
 RATE = 48000
@@ -76,12 +76,12 @@ def _declared(location, data: bytes, samples, **overrides) -> AudioArtifact:
     return _artifact(location, **{**fields, **overrides})
 
 
-def _verify_resolved(record, *, max_file_bytes=LARGE, max_decoded_bytes=LARGE) -> VerifiedAudio:
-    return verify_resolved_wav_artifact(record, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
+def _verify_resolved(record, *, max_file_bytes=LARGE, max_decoded_bytes=LARGE) -> CheckedAudio:
+    return check_resolved_wav_integrity(record, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
 
 
-def _audio_failure(call, code) -> ArtifactVerificationError:
-    with pytest.raises(ArtifactVerificationError) as info:
+def _audio_failure(call, code) -> IntegrityError:
+    with pytest.raises(IntegrityError) as info:
         call()
     assert info.value.code is code, info.value
     return info.value
@@ -137,13 +137,6 @@ def _spy_open(monkeypatch, calls, *, after_close=None):
 # --- the new entry point: success and identity -----------------------------------------------
 
 
-def test_public_audio_interface_exports_the_new_entry_point():
-    import autonomous_mixing.infrastructure.audio as audio
-
-    assert audio.verify_resolved_wav_artifact is verification.verify_resolved_wav_artifact
-    assert len(audio.__all__) == 7 and "verify_resolved_wav_artifact" in audio.__all__
-
-
 @pytest.mark.parametrize("samples", [MONO, STEREO], ids=["mono", "stereo"])
 def test_relative_artifact_is_verified_and_keeps_its_identity_and_metadata(root, samples):
     data = _write(root / "outputs" / "stem.wav", samples, subtype="DOUBLE")
@@ -151,7 +144,7 @@ def test_relative_artifact_is_verified_and_keeps_its_identity_and_metadata(root,
     fields_before = tuple(getattr(artifact, f) for f in artifact.__dataclass_fields__)
     record = resolve_artifact_location(artifact, root=str(root))
     result = _verify_resolved(record)
-    assert type(result) is VerifiedAudio
+    assert type(result) is CheckedAudio
     assert result.artifact is artifact and record.artifact is artifact
     assert artifact.location == "outputs/stem.wav"
     assert tuple(getattr(artifact, f) for f in artifact.__dataclass_fields__) == fields_before
@@ -195,15 +188,15 @@ def _forbid_resolution_and_capture(monkeypatch) -> list:
 def test_record_must_be_a_resolved_location_before_any_access(monkeypatch, root, bad):
     touched = _forbid_resolution_and_capture(monkeypatch)
     with pytest.raises(ValueError) as info:
-        verify_resolved_wav_artifact(bad, max_file_bytes=LARGE, max_decoded_bytes=LARGE)
-    assert not isinstance(info.value, (ArtifactVerificationError, LocationResolutionError))
+        check_resolved_wav_integrity(bad, max_file_bytes=LARGE, max_decoded_bytes=LARGE)
+    assert not isinstance(info.value, (IntegrityError, LocationResolutionError))
     assert touched == []
 
 
 def test_artifact_in_place_of_a_record_is_rejected_before_any_access(monkeypatch, root):
     touched = _forbid_resolution_and_capture(monkeypatch)
     with pytest.raises(ValueError):
-        verify_resolved_wav_artifact(_artifact("outputs/stem.wav"), max_file_bytes=LARGE, max_decoded_bytes=LARGE)
+        check_resolved_wav_integrity(_artifact("outputs/stem.wav"), max_file_bytes=LARGE, max_decoded_bytes=LARGE)
     assert touched == []
 
 
@@ -214,17 +207,17 @@ def test_invalid_limits_raise_before_resolution_or_capture(monkeypatch, root, wh
     touched = _forbid_resolution_and_capture(monkeypatch)
     limits = {"max_file_bytes": LARGE, "max_decoded_bytes": LARGE, which: bad}
     with pytest.raises(ValueError) as info:
-        verify_resolved_wav_artifact(record, **limits)
-    assert not isinstance(info.value, (ArtifactVerificationError, LocationResolutionError))
+        check_resolved_wav_integrity(record, **limits)
+    assert not isinstance(info.value, (IntegrityError, LocationResolutionError))
     assert touched == []
 
 
 def test_limits_are_keyword_only_without_defaults(root):
     record = ResolvedArtifactLocation(_artifact("outputs/stem.wav"), str(root), str(root), str(root / "x"))
     with pytest.raises(TypeError):
-        verify_resolved_wav_artifact(record)  # type: ignore[call-arg]
+        check_resolved_wav_integrity(record)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
-        verify_resolved_wav_artifact(record, LARGE, LARGE)  # type: ignore[misc]
+        check_resolved_wav_integrity(record, LARGE, LARGE)  # type: ignore[misc]
 
 
 # --- fresh re-resolution and stale records ---------------------------------------------------
@@ -428,7 +421,7 @@ def test_original_entry_point_still_rejects_relative_locations(monkeypatch, root
     opened = []
     _spy_open(monkeypatch, opened)
     _audio_failure(
-        lambda: verify_wav_artifact(_artifact(location), max_file_bytes=LARGE, max_decoded_bytes=LARGE),
+        lambda: check_wav_integrity(_artifact(location), max_file_bytes=LARGE, max_decoded_bytes=LARGE),
         Code.UNSUPPORTED_PATH,
     )
     assert opened == []
@@ -437,7 +430,7 @@ def test_original_entry_point_still_rejects_relative_locations(monkeypatch, root
 def test_original_entry_point_has_no_root_confinement(tmp_path):
     path = tmp_path / "anywhere" / "stem.wav"
     data = _write(path, MONO)
-    result = verify_wav_artifact(_declared(str(path), data, MONO), max_file_bytes=LARGE, max_decoded_bytes=LARGE)
+    result = check_wav_integrity(_declared(str(path), data, MONO), max_file_bytes=LARGE, max_decoded_bytes=LARGE)
     assert result.verified_sha256 == _sha(data)
 
 
@@ -454,16 +447,16 @@ class Entry:
         location = path.relative_to(self.root).as_posix() if self.kind == "resolved" else str(path)
         return _declared(location, data, samples, **overrides)
 
-    def run(self, artifact, *, max_file_bytes=LARGE, max_decoded_bytes=LARGE) -> VerifiedAudio:
+    def run(self, artifact, *, max_file_bytes=LARGE, max_decoded_bytes=LARGE) -> CheckedAudio:
         if self.kind == "absolute":
-            return verify_wav_artifact(artifact, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
+            return check_wav_integrity(artifact, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
         record = resolve_artifact_location(artifact, root=str(self.root))
-        return verify_resolved_wav_artifact(record, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
+        return check_resolved_wav_integrity(record, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
 
     def opened_path(self, path: Path) -> str:
         return str(path) if self.kind == "absolute" else str(path.resolve(strict=True))
 
-    def fail(self, artifact, code, **limits) -> ArtifactVerificationError:
+    def fail(self, artifact, code, **limits) -> IntegrityError:
         return _audio_failure(lambda: self.run(artifact, **limits), code)
 
 
@@ -639,7 +632,7 @@ def test_both_entries_leave_the_tree_unchanged(entry, root, make):
     dirs_before = sorted(str(p) for p in root.parent.rglob("*") if p.is_dir())
     try:
         entry.run(make(entry, path, data))
-    except ArtifactVerificationError:
+    except IntegrityError:
         pass
     after = {str(p): (p.read_bytes(), p.stat().st_mtime_ns) for p in root.parent.rglob("*") if p.is_file()}
     assert after == before

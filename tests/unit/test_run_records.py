@@ -5,26 +5,14 @@ Limits, usage values, metrics and thresholds are arbitrary structural fixtures, 
 
 import dataclasses
 import math
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autonomous_mixing.domain.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.domain.decision import ControllerIdentity
-from autonomous_mixing.domain.observation import AnalysisSpec, MeasuredScalar, RenderSpec
-from autonomous_mixing.domain.project import AnalysisScope, FrequencyRange, ProjectSnapshot, TimeRange, Track
-from autonomous_mixing.domain.run import (
-    BudgetLimits,
-    BudgetUsage,
-    FinalProjectState,
-    Run,
-    RunConfiguration,
-    RunOutcome,
-    RunState,
-)
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
+from autonomous_mixing.core.records.decision import ControllerIdentity
+from autonomous_mixing.core.records.identifiers import (
     ConditionId,
     ContextId,
     CriteriaId,
@@ -34,8 +22,19 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
-from autonomous_mixing.domain.validation import (
+from autonomous_mixing.core.records.observation import (
+    AnalysisScope,
+    AnalysisSpec,
+    FrequencyRange,
+    MeasuredScalar,
+    RenderSpec,
+    TimeRange,
+)
+from autonomous_mixing.core.records.project import ProjectSnapshot, Track
+from autonomous_mixing.core.records.run import FinalProjectState, RunConfiguration, RunOutcome, RunRecord, RunState
+from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
+    AcceptanceCriteria,
     BaselineReference,
     ComparisonOperator,
     DeltaGuard,
@@ -43,7 +42,6 @@ from autonomous_mixing.domain.validation import (
     ImprovementDirection,
     MetricSelector,
     TargetCondition,
-    ValidationCriteria,
 )
 
 UTC_NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
@@ -71,12 +69,12 @@ def _selector(metric=METRIC_A, **scope_kwargs) -> MetricSelector:
     return MetricSelector(metric, _scope(**scope_kwargs))
 
 
-def _criteria(target_selector=_DEFAULT, guard_selector=_DEFAULT) -> ValidationCriteria:
+def _criteria(target_selector=_DEFAULT, guard_selector=_DEFAULT) -> AcceptanceCriteria:
     target_sel = (
         _selector(tracks=("t1", "t2"), start=10.0, end=20.0) if target_selector is _DEFAULT else target_selector
     )
     guard_sel = _selector(METRIC_B, tracks=("t3",)) if guard_selector is _DEFAULT else guard_selector
-    return ValidationCriteria(
+    return AcceptanceCriteria(
         CriteriaId("crit"),
         "1",
         (TargetCondition(ConditionId("target"), target_sel, ComparisonOperator.LE, MeasuredScalar(-6.0, "unit-a")),),
@@ -122,7 +120,7 @@ def _configuration(**overrides) -> RunConfiguration:
     return RunConfiguration(**fields)
 
 
-def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **overrides) -> Run:
+def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **overrides) -> RunRecord:
     fields = dict(
         run_id=RunId("run-1"),
         project_id=ProjectId("p1"),
@@ -136,10 +134,10 @@ def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **over
         termination_reason=reason,
     )
     fields.update(overrides)
-    return Run(**fields)
+    return RunRecord(**fields)
 
 
-def _finished(outcome, final, reason="recorded stop reason") -> Run:
+def _finished(outcome, final, reason="recorded stop reason") -> RunRecord:
     return _run(RunState.FINISHED, outcome, final, reason)
 
 
@@ -253,7 +251,7 @@ def test_condition_scope_starting_before_run_scope_is_rejected():
 
 
 def _band_criteria(target_freq, guard_freq=FrequencyRange(50.0, 500.0), other_freq=FrequencyRange(20.0, 1000.0)):
-    return ValidationCriteria(
+    return AcceptanceCriteria(
         CriteriaId("crit"),
         "1",
         (
@@ -470,7 +468,7 @@ def test_run_rejects_wrong_types_and_non_utc_timestamps(overrides):
 
 
 def test_run_has_no_transition_methods():
-    assert not any(name in dir(Run) for name in ("transition", "finish", "advance"))
+    assert not any(name in dir(RunRecord) for name in ("transition", "finish", "advance"))
 
 
 def test_configuration_and_nested_collections_are_frozen():
@@ -492,19 +490,3 @@ def test_configuration_and_nested_collections_are_frozen():
 
 
 # --- dependency boundary ---------------------------------------------------------
-
-
-def test_run_module_loads_only_standard_library_and_domain_modules():
-    # Complements the AST scan in test_domain_foundation.py, which covers every module in the domain package.
-    script = (
-        "import sys\n"
-        "before = set(sys.modules)\n"
-        "import autonomous_mixing.domain.run\n"
-        "for name in sorted(set(sys.modules) - before):\n"
-        "    top = name.split('.')[0]\n"
-        "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
-        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.')\n"
-        "    if not ok: print(name)\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-    assert result.stdout == ""

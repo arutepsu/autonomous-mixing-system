@@ -16,17 +16,17 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.infrastructure.audio.verification as verification
-from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
-from autonomous_mixing.domain.shared import ArtifactId, ProjectId, Revision, TrackId, VersionRef
-from autonomous_mixing.infrastructure.audio import (
-    ArtifactVerificationError,
-    VerificationFailureCode,
-    VerifiedAudio,
-    verify_wav_artifact,
+import autonomous_mixing.adapters.rendering.integrity as verification  # moved in ADR-027 step M3; tests patch or inspect its internals
+from autonomous_mixing.adapters.rendering.integrity import (
+    CheckedAudio,
+    IntegrityError,
+    IntegrityFailureCode,
+    check_wav_integrity,
 )
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import ArtifactId, ProjectId, Revision, TrackId, VersionRef
 
-Code = VerificationFailureCode
+Code = IntegrityFailureCode
 LARGE = 1 << 20  # generous limits for tests that are not about resource limits
 RATE = 48000
 
@@ -64,12 +64,12 @@ def _declared(path: Path, data: bytes, samples, **overrides) -> AudioArtifact:
     return _artifact(path, **{**fields, **overrides})
 
 
-def _verify(artifact, *, max_file_bytes=LARGE, max_decoded_bytes=LARGE) -> VerifiedAudio:
-    return verify_wav_artifact(artifact, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
+def _verify(artifact, *, max_file_bytes=LARGE, max_decoded_bytes=LARGE) -> CheckedAudio:
+    return check_wav_integrity(artifact, max_file_bytes=max_file_bytes, max_decoded_bytes=max_decoded_bytes)
 
 
-def _failure(artifact, code, **limits) -> ArtifactVerificationError:
-    with pytest.raises(ArtifactVerificationError) as info:
+def _failure(artifact, code, **limits) -> IntegrityError:
+    with pytest.raises(IntegrityError) as info:
         _verify(artifact, **limits)
     assert info.value.code is code, info.value
     assert isinstance(info.value, ValueError) and str(info.value)
@@ -89,7 +89,7 @@ def test_valid_float_wav_is_verified_exactly(tmp_path, samples):
     data = _write(path, samples, subtype="DOUBLE")
     artifact = _declared(path, data, samples)
     result = _verify(artifact)
-    assert type(result) is VerifiedAudio and result.artifact is artifact
+    assert type(result) is CheckedAudio and result.artifact is artifact
     assert (result.container, result.subtype, result.verified_sha256) == ("WAV", "DOUBLE", _sha(data))
     assert type(result.samples) is np.ndarray
     assert result.samples.dtype == np.float64 and result.samples.dtype.isnative
@@ -305,7 +305,7 @@ def test_source_bytes_and_mtime_are_unchanged(tmp_path, make):
     before = os.stat(path)
     try:
         _verify(make(path, data))
-    except ArtifactVerificationError:
+    except IntegrityError:
         pass
     after = os.stat(path)
     assert path.read_bytes() == data
@@ -457,14 +457,14 @@ def test_invalid_limits_raise_before_any_file_operation(tmp_path, monkeypatch, w
     monkeypatch.setattr(os, "stat", lambda *a, **k: touched.append(a))
     limits = {"max_file_bytes": LARGE, "max_decoded_bytes": LARGE, which: bad}
     with pytest.raises(ValueError) as info:
-        verify_wav_artifact(_artifact(tmp_path / "stem.wav"), **limits)
-    assert not isinstance(info.value, ArtifactVerificationError)
+        check_wav_integrity(_artifact(tmp_path / "stem.wav"), **limits)
+    assert not isinstance(info.value, IntegrityError)
     assert touched == []
 
 
 def test_artifact_must_be_an_audio_artifact():
     with pytest.raises(ValueError):
-        verify_wav_artifact("C:/stem.wav", max_file_bytes=LARGE, max_decoded_bytes=LARGE)
+        check_wav_integrity("C:/stem.wav", max_file_bytes=LARGE, max_decoded_bytes=LARGE)
 
 
 # --- filesystem failures -----------------------------------------------------------------

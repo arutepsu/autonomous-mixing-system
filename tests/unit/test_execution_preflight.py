@@ -9,41 +9,18 @@ from datetime import datetime, timezone
 
 import pytest
 
-from autonomous_mixing.application.admission import ActionAdmissionPolicy, TrackGainPermission
-from autonomous_mixing.application.decision import DecisionRequest
-from autonomous_mixing.application.execution import (
-    CandidateIdentity,
+from autonomous_mixing.core.records.actions import Action, SetTrackGain
+from autonomous_mixing.core.records.admission import (
+    ActionAdmissionPolicy,
     ExecutionRequest,
-    ExecutionWorkspace,
     StemBinding,
+    TrackGainPermission,
 )
-from autonomous_mixing.domain.action import Action, SetTrackGain
-from autonomous_mixing.domain.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.domain.decision import ControllerIdentity, Decision, ProposeAction
-from autonomous_mixing.domain.observation import MeasuredScalar, Observation, RenderSpec
-from autonomous_mixing.domain.project import (
-    AnalysisScope,
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    GainRule,
-    LevelPolicy,
-    MixRecipe,
-    NumericalPrecision,
-    OutputContainer,
-    ProcessingSpec,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    SampleEncoding,
-    SummationOrder,
-    SummingPolicy,
-    TimeRange,
-    Track,
-    TrackGainState,
-)
-from autonomous_mixing.domain.run import BudgetLimits, BudgetUsage
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
+from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, ProposeAction, Situation
+from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     CheckpointId,
@@ -56,6 +33,27 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.mix import (
+    GainRule,
+    LevelPolicy,
+    MixRecipe,
+    NumericalPrecision,
+    OutputContainer,
+    ProcessingSpec,
+    SampleEncoding,
+    SummationOrder,
+    SummingPolicy,
+)
+from autonomous_mixing.core.records.observation import AnalysisScope, MeasuredScalar, Observation, RenderSpec, TimeRange
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
+)
+from autonomous_mixing.core.records.rendering import CandidateIdentity, ExecutionWorkspace
 
 UTC_NOW = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 CONTROLLER = ControllerIdentity("deterministic-baseline", "0.1")
@@ -108,7 +106,7 @@ def _state(audio=_D, gains=_D) -> ProjectState:
     )
 
 
-def _decision_request(state=None, protected=frozenset(), observation_source="c-mix") -> DecisionRequest:
+def _decision_request(state=None, protected=frozenset(), observation_source="c-mix") -> Situation:
     source = AssertionSource("producer", UTC_NOW)
     roles = tuple(TrackRole(TrackId(t), r, source) for t, r in [("t1", "ambience"), ("t2", "lead"), ("t3", "texture")])
     context = MusicalContext(ContextId("c1"), "1", roles, (), frozenset(TrackId(t) for t in protected))
@@ -122,7 +120,7 @@ def _decision_request(state=None, protected=frozenset(), observation_source="c-m
         VersionRef("analyzer", "0.1"),
         UTC_NOW,
     )
-    return DecisionRequest(
+    return Situation(
         state if state is not None else _state(),
         context,
         CONTROLLER,
@@ -301,20 +299,18 @@ def test_request_construction_does_not_check_cross_record_consistency():
 import copy  # noqa: E402
 import inspect  # noqa: E402
 
-from autonomous_mixing.application.admission import (  # noqa: E402
+from autonomous_mixing.core.admission.admission import admit_action  # noqa: E402
+from autonomous_mixing.core.admission.preflight import preflight_execution  # noqa: E402
+from autonomous_mixing.core.records.admission import (  # noqa: E402
     ActionAdmissionRequest,
     AdmissionRejectionCode,
-    RejectedAction,
-    admit_action,
-)
-from autonomous_mixing.application.execution import (  # noqa: E402
     MetadataReady,
     PreflightCode,
     PreflightRejected,
-    ProcessingPlan,
-    preflight_execution,
+    RejectedAction,
 )
-from autonomous_mixing.domain.decision import Abstain, AbstentionReason  # noqa: E402
+from autonomous_mixing.core.records.decision import Abstain, AbstentionReason  # noqa: E402
+from autonomous_mixing.core.records.rendering import RenderPlan  # noqa: E402
 
 
 def _with(artifact: AudioArtifact, **changes) -> AudioArtifact:
@@ -618,8 +614,8 @@ def test_preflight_is_pure_and_invokes_no_processor():
     preflight_execution(_request(decision=_decision(3.0)))
     assert request == before
     assert list(inspect.signature(preflight_execution).parameters) == ["request"]
-    # Inspect the implementation module itself; the legacy execution_preflight path is only a re-export shim.
-    import autonomous_mixing.application.execution.preflight as module
+    # Inspect the implementation module itself (moved to core.admission.preflight in ADR-027 step M2).
+    import autonomous_mixing.core.admission.preflight as module
 
     source = inspect.getsource(module)
     assert "ports" not in source and "process(" not in source
@@ -666,7 +662,7 @@ def test_processing_plan_rejects_inconsistent_structure():
     ]:
         with pytest.raises(ValueError):
             dataclasses.replace(plan, **changes)
-    assert isinstance(plan, ProcessingPlan)
+    assert isinstance(plan, RenderPlan)
 
 
 # --- audit F5: candidate revisions must not reuse locally known revisions ------------------
