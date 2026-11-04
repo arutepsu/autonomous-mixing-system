@@ -274,7 +274,7 @@ def test_records_checker_allows_planned_imports(source):
 
 
 def test_the_records_package_initializer_contains_only_a_docstring():
-    # ADR-027 step M4: no convenience re-exports, so every record has exactly one import path (G6).
+    # ADR-027 step M4: no convenience re-exports, so every record has one canonical owner module (G6).
     body = ast.parse((RECORDS_DIR / "__init__.py").read_text(encoding="utf-8")).body
     assert len(body) == 1 and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
     assert isinstance(body[0].value.value, str)
