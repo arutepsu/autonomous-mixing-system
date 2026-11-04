@@ -1,0 +1,99 @@
+% !TEX root = ../thesis.tex
+% Sources: docs/research/project-scope.md (v1.0), docs/project/requirements.md (v1.1),
+% docs/research/methodology.md, ADR-004, ADR-006, ADR-008, ADR-010, ADR-027.
+% Statements about the literature carry \todo{cite} until a verified source is added.
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Motivation}
+\label{sec:intro-motivation}
+
+Mixing turns a set of separately recorded or produced tracks into a single coherent piece of music. Alongside its creative side, mixing involves technical problems that can be described in terms of the audio signal: tracks that compete for the same frequency range at the same time, energy that accumulates in narrow frequency regions, or stereo content that partly cancels when the mix is reproduced in mono \todo{cite a mixing textbook or survey}. Finding and correcting such problems takes time and experience, which makes them a natural target for automation \todo{cite work on automatic or intelligent mixing}.
+
+\Acp{LLM} are increasingly used as decision-making components that select actions from structured information and call external tools \todo{cite work on LLM agents and tool use}. This raises the question of whether such a component can decide how to correct technical mixing problems when it is given deterministic measurements of the audio, the declared role of each track and the producer's intent. At the same time, the outputs of an \ac{LLM} are not guaranteed to be correct or reproducible \todo{cite}. Letting an \ac{LLM} change audio directly would make its errors hard to detect and its results hard to attribute.
+
+This thesis therefore treats the \ac{AI} agent as one component of a larger system rather than as the system itself. The agent only proposes corrections. A deterministic control loop decides whether a proposal is admitted, renders the correction without modifying the source audio, measures the result again and either accepts the change or rolls it back. Whether this combination actually improves technical mixing problems, and under which conditions, is the subject of the evaluation.
+
+\section{Problem Statement}
+\label{sec:intro-problem}
+
+Three difficulties make the task more than an engineering exercise.
+
+First, the problems must be measurable. A deterministic measurement can show, for example, that two tracks contain energy in the same frequency band at the same time. Such overlap is at most an indication of possible masking; it is not proof that a listener perceives one track as masked by the other \todo{cite psychoacoustic masking literature}. The thesis keeps this distinction explicit throughout: measurement overlap, spectral peaks or phase correlation are never presented as proof of an audible problem.
+
+Second, corrections must be safe. A proposed correction may be outside sensible parameter ranges, conflict with the producer's intent or make other parts of the mix worse. The system must reject such proposals before they are executed, detect regressions after a correction and restore the previously accepted state exactly.
+
+Third, the evaluation must be fair and must not leak the answer. If the decision process or the runtime checks could see the clean reference audio or the parameters of an injected defect, they would have information that is not available in real use, and the results would be inflated. The agent-guided approach must also be compared with a credible deterministic baseline under otherwise equal conditions, so that observed differences can be attributed to the decision process.
+
+\section{Research Questions and Hypotheses}
+\label{sec:intro-rq}
+
+The main research question of this thesis is:
+
+\begin{quote}
+\textit{To what extent can an AI agent autonomously detect, correct and verify selected technical mixing problems in multitrack music using deterministic audio analysis while respecting producer intent?}
+\end{quote}
+
+It is divided into four subquestions:
+
+\begin{description}
+	\item[RQ1] How can selected mixing problems be represented as measurable observations?
+	\item[RQ2] Can an \ac{LLM} agent choose appropriate actions from measurements, context and producer intent?
+	\item[RQ3] Does iterative correction outperform an otherwise comparable one-pass approach?
+	\item[RQ4] Can validation and rollback prevent unsafe or unsuccessful interventions?
+\end{description}
+
+The following working hypotheses are tested, not assumed:
+
+\begin{description}
+	\item[H1] On controlled cases, agent-guided corrections improve predetermined technical objectives.
+	\item[H2] Re-analysis and revision increase success or reduce unresolved defects compared with a single pass.
+	\item[H3] Constraints and verification reduce undesirable or out-of-intent interventions.
+\end{description}
+
+Negative, partial and failed outcomes are reported as results in their own right.
+
+\section{Scope}
+\label{sec:intro-scope}
+
+The thesis addresses three families of technical mixing problems:
+
+\begin{description}
+	\item[P1] spectral and temporal masking between tracks,
+	\item[P2] frequency buildup and resonance,
+	\item[P3] stereo and phase compatibility.
+\end{description}
+
+The interaction between kick drum and bass is the primary use case for P1, but it is not meant to be an assumption built into the system: the architecture is designed for any number of tracks with declared roles. \todo{State how far the final implementation meets this; the current analyser still takes exactly two stems labelled kick and bass, a known deviation under review (ADR-006).} All three families are research targets. Their measurement methods and implementation effort are expected to differ and are defined per family after a literature review. As a contingency, the minimum scientifically meaningful result is P1 implemented end-to-end and evaluated under all comparison conditions; the depth reached for P2 and P3 is reported as achieved.
+
+The system works offline on synchronised \ac{WAV} stems exported from multitrack projects, with track roles declared manually. Audio analysis and corrections are deterministic \ac{DSP} written in Python. The decision agent uses the Claude \ac{API} and returns structured proposals. Source audio is never modified, and every correction is reversible.
+
+Outside the scope are the training of new models, comprehensive automatic mixing or mastering, real-time or plug-in operation, a graphical user interface, direct manipulation of \ac{DAW} project files, systems with several cooperating agents, and any claim of guaranteed perceptual superiority. The study material covers house and techno, trap, phonk and wave, and drum and bass; comparisons between genres are exploratory unless the data supports them.
+
+\section{Approach}
+\label{sec:intro-approach}
+
+The prototype is a feedback control loop inspired by the \ac{MAPE-K} reference model \todo{cite Kephart and Chess or a self-adaptive systems source}. Each iteration measures the stems, identifies plausible problem candidates together with the strength of the evidence for them, asks the decision agent for a proposal, admits or rejects that proposal, renders the admitted correction, and verifies whether the targeted problem improved without making other measurements worse. Depending on the outcome, the loop accepts the new state or rolls back to the last accepted one. Iterations, actions, \ac{AI} requests and runtime are bounded, and every stop has a recorded reason.
+
+The decision agent cannot access files, execute processing or bypass admission. All analysis, admission, rendering and verification are deterministic and can be tested without network access. The software is organised as a hexagonal modular monolith: the control loop and its rules form the core, while audio analysis, rendering and the connection to Claude are adapters behind interfaces defined by the core.
+
+The evaluation compares four conditions on the same material: the unprocessed input (B0), a deterministic rule-based correction (B1), a single pass guided by the agent (B2) and iterative correction guided by the agent (B3). The test material consists of real stems from self-created projects into which defects are injected in a controlled and documented way. The clean reference audio and the injection parameters are stored separately and are used only after a run, for research evaluation. Thresholds and parameters are chosen on a calibration split and frozen before the evaluation split is used. Because the agent's outputs vary between calls, the agent-guided conditions are repeated, and the spread of results is reported.
+
+\section{Contributions}
+\label{sec:intro-contributions}
+
+The thesis aims to contribute:
+
+\begin{itemize}
+	\item a measurable representation of selected technical mixing problems, with an explicit statement of evidence strength and of the gap between measurement and perception;
+	\item the design and implementation of a control loop in which an \ac{AI} agent proposes corrections and deterministic components admit, render, verify and, if needed, roll them back;
+	\item an evaluation design that separates runtime information from hidden ground truth and compares the agent with a deterministic baseline under declared, otherwise equal conditions;
+	\item an empirical assessment of H1--H3 on controlled cases, including negative and failed outcomes.
+\end{itemize}
+
+\todo{Revise this list once the results are known; state only contributions that were delivered.}
+
+\section{Structure of the Thesis}
+\label{sec:intro-structure}
+
+\autoref{ch:background} introduces the technical mixing problems, prior work on automatic mixing and the use of \acsp{LLM} as decision makers. \autoref{ch:requirements} derives the requirements and the research design from the research questions. \autoref{ch:architecture} presents the architecture of the system and \autoref{ch:implementation} its implementation. \autoref{ch:evaluation} describes the dataset, the comparison conditions and the measures, and \autoref{ch:results} reports the results. \autoref{ch:discussion} answers the research questions and discusses limitations, and \autoref{ch:conclusion} concludes with an outlook.

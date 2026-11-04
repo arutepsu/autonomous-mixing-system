@@ -1,0 +1,178 @@
+% !TEX root = ../thesis.tex
+\documentclass[11pt,a4paper,oneside]{report}		                     
+
+% Mathe
+\usepackage{marvosym}		% Package für Euro&Co.
+\usepackage{amsfonts}		% Package für Mengensymbole (IN, IR, ...)
+\usepackage{amsmath}		% Package für restlichen Mathekram
+\usepackage{amssymb}        % math. Symbole und Umgebungen
+\usepackage{graphicx}
+\usepackage{mathtools}
+\usepackage{unicode-math}   % Erlaubt die Mathe Schrift zu setzen
+\newtheorem{definition}{Definition}		% Umgebung für Definitionen
+\newcommand{\definitionautorefname}{Definition}		% Autoref für Definitionen
+
+\usepackage{algorithm}		% Pseudocode listings
+\usepackage{algpseudocode}
+\algrenewcommand{\algorithmiccomment}[1]{\hskip3em$//$ #1}	% Kommentarformat
+\newcommand{\algorithmautorefname}{Algorithmus}		% Autoref für Pseudocode listings
+
+\usepackage{caption}
+% Customizing figure numbering to make it bold
+\captionsetup[figure]{labelfont=bf}
+% Use german umlaute
+%\usepackage{ngerman}
+% \usepackage[ngerman]{babel}
+%\usepackage[T1]{fontenc}
+%\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+
+% Zitierung und Literaturverzeichnis
+%\usepackage{cite}
+%\usepackage{apacite}		% Zitierstil
+%\usepackage{natbib} 		% Erweiterte zitiermöglichkeiten 
+%\usepackage{babelbib}		% Übersetzung des Literaturverzeichnisses und der Zitate
+\usepackage[%
+%,style=authoryear    % Alphabeticalsch
+ ,style=ieee  % numerical-compressed
+ ,citestyle=numeric-comp
+ ,sorting=none        % no sorting
+ ,sortcites=true      % some other example options ...
+ ,block=none
+ ,indexing=false
+ ,citereset=none
+ ,isbn=true
+ ,url=true
+ ,doi=true            % prints doi
+ ,natbib=true         % if you need natbib functions
+,backend=biber]{biblatex}
+\addbibresource{bib/references.bib}
+
+% Fonts
+\usepackage{fontspec}
+% \setmainfont[Path=./fonts/, BoldFont=swis721-Bold.ttf, ItalicFont=swis721-Italic.ttf, BoldItalicFont=swis721-Bold-Italic.ttf]{swis721.ttf}
+% \setmonofont[Path=./fonts/, BoldFont=CourierNew-Bold.ttf, ItalicFont=CourierNew-Italic.ttf, BoldItalicFont=CourierNew-Bold-Italic.ttf]{CourierNew.ttf}
+% \setmathfont[Path=./fonts/]{CambriaMath.ttf}
+
+
+% formatting
+\usepackage{a4}
+
+% PDF als Cover Hintergrund
+\usepackage[firstpage=true]{background}
+\usepackage{geometry}
+\usepackage{tikz}
+\usepackage[export]{adjustbox} %outline around images
+
+
+%%%%%%%%%%%%
+%% HTWG CI Colors
+%%%%%%%%%%%%
+\definecolor{htwg-white}{cmyk}{0.0,0.0,0.0,0.0}
+\definecolor{htwg-black}{cmyk}{0.0,0.0,0.0,1.0}
+\definecolor{htwg-black-90}{cmyk}{0.0,0.0,0.0,0.9}
+\definecolor{htwg-black-80}{cmyk}{0.0,0.0,0.0,0.8}
+\definecolor{htwg-black-70}{cmyk}{0.0,0.0,0.0,0.7}
+\definecolor{htwg-black-60}{cmyk}{0.0,0.0,0.0,0.6}
+\definecolor{htwg-black-50}{cmyk}{0.0,0.0,0.0,0.5}
+\definecolor{htwg-black-40}{cmyk}{0.0,0.0,0.0,0.4}
+\definecolor{htwg-black-30}{cmyk}{0.0,0.0,0.0,0.3}
+\definecolor{htwg-black-20}{cmyk}{0.0,0.0,0.0,0.2}
+\definecolor{htwg-black-10}{cmyk}{0.0,0.0,0.0,0.1}
+\definecolor{htwg-soft-blue}{cmyk}{0.1,0.0,0.0,0.1}
+\definecolor{htwg-dark-blue}{rgb}{0.165, 0.22, 0.29}
+\definecolor{htwg-teal}{cmyk}{1.0,0.0,0.5,0.0}
+
+% Listing colours (used by \lstset below)
+\definecolor{lighter-gray}{gray}{0.96}
+\definecolor{ll-gray}{gray}{0.85}
+\definecolor{l-gray}{gray}{0.7}
+
+% Visible writing markers; remove all \todo{} before submission
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+
+% Verbesserte Darstellug der Schriftzeichen und Zwischenräumen
+%\usepackage{lmodern}				% Benutze skalierbare Schriftfamilie
+%\usepackage[activate]{microtype}
+
+% Heading styles
+\usepackage[sf,bf,raggedright]{titlesec}
+\titlespacing*{\section}
+{0pt}{5.5ex plus 1ex minus .2ex}{4.3ex plus .2ex}
+\titlespacing*{\subsection}
+{0pt}{5.5ex plus 1ex minus .2ex}{4.3ex plus .2ex}
+\titleformat{\chapter}[hang]{\Huge\bfseries}{\thechapter.}{15pt}{\Huge\bfseries\color{htwg-teal}}
+\titleformat{\section}[hang]{\Large\bfseries}{\thesection}{15pt}{\Large\bfseries\color{htwg-teal}}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{15pt}{\large\bfseries\color{htwg-teal}}
+\titleformat{\subsubsection}[hang]{\normalsize\bfseries}{\thesubsubsection}{15pt}{\normalsize\bfseries\color{htwg-teal}}
+
+% Header and Footer
+\usepackage{fancyhdr}
+
+\fancypagestyle{fancybody}{
+	\fancyhf{}
+	\fancyhead[L]{\nouppercase{\leftmark}}
+	\fancyfoot[C]{\thepage}
+	\renewcommand{\headrule}{\color{htwg-teal}\hrule}
+}
+
+\fancypagestyle{plain}{
+	\fancyhf{}
+	\fancyfoot[C]{\thepage}
+	\renewcommand{\headrule}{}
+}
+
+\pagestyle{fancybody}
+\renewcommand{\chaptermark}[1]{\markboth{\normalfont\thechapter.\space\color{htwg-teal}#1}{}}
+
+% Absatz einrücken unterdrücken
+\setlength{\parindent}{0pt}
+
+% Listings
+\usepackage{listings}
+\lstset{
+	backgroundcolor=\color{lighter-gray},
+	xleftmargin=\parindent,
+	basicstyle=\ttfamily\footnotesize,
+	breaklines=true,
+	captionpos=b,
+	showspaces=false,
+	showstringspaces=false,
+	frame=shadowbox,
+	rulesepcolor=\color{ll-gray},
+	rulecolor=\color{l-gray},
+	belowskip=11pt,
+}
+
+% Depth of chapters and subsections
+\setcounter{tocdepth}{3}
+\setcounter{secnumdepth}{3}
+
+% Url line break
+\def\UrlBreaks{\do\/\do-}
+\def\UrlBigBreaks{\do\:\do\/}
+
+% Links
+\usepackage[pdfstartview=FitV, 	% start in 'fit size height'-view
+colorlinks=true, 		% Links farbig markieren
+linkcolor=htwg-teal, 	% Interne Links
+citecolor=htwg-teal, 	% Links zur Literatur
+filecolor=black, 		% Links auf lokale Dateien
+urlcolor=htwg-teal,   	% Externe Links blau
+breaklinks=true, 		% Links umbrechen
+linktoc=page 	% Im Inhaltsverzeichnis sind Seitenzahlen UND Text Links
+]{hyperref}
+
+%Move to the right.
+\setlength{\hoffset}{5pt}
+\setlength{\parskip}{\baselineskip}
+
+% Suppress warning of too small headheight
+\headheight13.6pt
+
+% Abkuerzungsverzeichnis
+\usepackage[printonlyused]{acronym}
+\usepackage[mode=buildnew]{standalone}
+
+\usepackage[toc, page]{appendix}

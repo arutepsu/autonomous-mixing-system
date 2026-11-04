@@ -1,0 +1,29 @@
+% !TEX root = ../thesis.tex
+\chapter{System Architecture}
+\label{ch:architecture}
+% Sources: docs/architecture/overview.md, docs/project/engineering-conventions.md,
+% ADR-004, ADR-005, ADR-027 and the ADRs it builds on.
+
+\section{Architectural Drivers}
+\label{sec:arch-drivers}
+\todo{Requirements that shape the architecture: attributable decisions, offline determinism, reversibility, hidden-reference boundary.}
+
+\section{Hexagonal Modular Monolith}
+\label{sec:arch-hexagonal}
+\todo{core, adapters, drivers and evaluation; import rules and their enforcement by architecture tests.}
+
+\section{The Control Loop}
+\label{sec:arch-loop}
+\todo{Measure, diagnose, decide, admit, render, verify, accept or roll back; budgets and stop reasons.}
+
+\section{Ports and Records}
+\label{sec:arch-ports}
+\todo{AudioAnalyzer, DecisionMaker and Renderer; immutable records and stage outcomes.}
+
+\section{Separation of Proposal and Execution}
+\label{sec:arch-proposal}
+\todo{Why the decision agent only proposes (ADR-004, OP-01); admission of proposals.}
+
+\section{Hidden-Reference Boundary}
+\label{sec:arch-hidden}
+\todo{How ADR-010 and SR-10 are reflected in the package structure, and the limits of that (an import rule is not a sandbox).}

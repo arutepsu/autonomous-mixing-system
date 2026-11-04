@@ -1,0 +1,26 @@
+# Personal data (name, student ID, e-mail, birth date and place); the repository is public.
+local/personal.tex
+
+# Old internship report kept locally for reference only
+_archive-internship/
+
+# Licensed font files (not redistributable); the build does not load them
+fonts/*.ttf
+
+# LaTeX build output
+build/
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.xdv
+thesis.pdf
