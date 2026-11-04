@@ -62,6 +62,9 @@
 \usepackage[firstpage=true]{background}
 \usepackage{geometry}
 \usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,calc}
+\usepackage{booktabs}		% table rules
+\usepackage{array}			% column types such as >{\raggedright\arraybackslash}p{...}
 \usepackage[export]{adjustbox} %outline around images
 
 
@@ -163,6 +166,15 @@ urlcolor=htwg-teal,   	% Externe Links blau
 breaklinks=true, 		% Links umbrechen
 linktoc=page 	% Im Inhaltsverzeichnis sind Seitenzahlen UND Text Links
 ]{hyperref}
+
+% Capitalised \autoref names (English babel resets them at \begin{document})
+\addto\extrasenglish{%
+	\def\chapterautorefname{Chapter}%
+	\def\sectionautorefname{Section}%
+	\def\subsectionautorefname{Section}%
+	\def\subsubsectionautorefname{Section}%
+	\def\appendixautorefname{Appendix}%
+}
 
 %Move to the right.
 \setlength{\hoffset}{5pt}
