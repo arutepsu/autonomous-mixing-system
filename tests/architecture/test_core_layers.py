@@ -42,6 +42,7 @@ BEHAVIOR_INVENTORY = {
     "verification.consistency": ("validate_verification_references",),
     "loop.transitions": ("validate_gain_execution", "derive_candidate_project_state"),
     "loop.references": ("validate_attempt_references",),
+    "loop.budgets": ("check_budget",),
 }
 
 

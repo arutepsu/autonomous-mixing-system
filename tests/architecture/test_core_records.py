@@ -129,7 +129,15 @@ INVENTORY = {
         "RollbackReceipt",
         "validate_rollback_references",
     ),
-    "budgets": ("BudgetLimits", "BudgetUsage"),
+    "budgets": (
+        "BudgetLimits",
+        "BudgetUsage",
+        "BudgetOperation",
+        "BudgetBlockReason",
+        "BudgetGrant",
+        "BudgetBlock",
+        "BudgetAssessment",
+    ),
     "results": ("Success", "PortFailureCode", "PortFailure", "PortResult"),
     "decision": (
         "ControllerIdentity",
