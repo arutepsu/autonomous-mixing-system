@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from autonomous_mixing.core.records.actions import Action
-from autonomous_mixing.core.records.decision import Decision, DecisionRequest
+from autonomous_mixing.core.records.decision import Decision, Situation
 from autonomous_mixing.core.records.identifiers import (
     ArtifactId,
     DecisionId,
@@ -16,7 +16,7 @@ from autonomous_mixing.core.records.identifiers import (
 from autonomous_mixing.core.records.invariants import require_finite, require_instance, require_text, require_tuple_of
 from autonomous_mixing.core.records.mix import MixRecipe, ProcessingSpec
 from autonomous_mixing.core.records.observation import RenderSpec
-from autonomous_mixing.core.records.rendering import CandidateIdentity, ExecutionWorkspace, ProcessingPlan
+from autonomous_mixing.core.records.rendering import CandidateIdentity, ExecutionWorkspace, RenderPlan
 
 
 @dataclass(frozen=True)
@@ -65,12 +65,12 @@ class ActionAdmissionPolicy:
 class ActionAdmissionRequest:
     """Inputs for admission. Construction checks field types only; references are assessed by ``admit_action``."""
 
-    decision_request: DecisionRequest
+    decision_request: Situation
     decision: Decision
     policy: ActionAdmissionPolicy
 
     def __post_init__(self) -> None:
-        require_instance(self.decision_request, DecisionRequest, "ActionAdmissionRequest.decision_request")
+        require_instance(self.decision_request, Situation, "ActionAdmissionRequest.decision_request")
         require_instance(self.decision, Decision, "ActionAdmissionRequest.decision")
         require_instance(self.policy, ActionAdmissionPolicy, "ActionAdmissionRequest.policy")
 
@@ -132,7 +132,7 @@ class ExecutionRequest:
     """
 
     execution_id: ExecutionId
-    decision_request: DecisionRequest
+    decision_request: Situation
     decision: Decision
     policy: ActionAdmissionPolicy
     mix_recipe: MixRecipe
@@ -145,7 +145,7 @@ class ExecutionRequest:
 
     def __post_init__(self) -> None:
         require_instance(self.execution_id, ExecutionId, "ExecutionRequest.execution_id")
-        require_instance(self.decision_request, DecisionRequest, "ExecutionRequest.decision_request")
+        require_instance(self.decision_request, Situation, "ExecutionRequest.decision_request")
         require_instance(self.decision, Decision, "ExecutionRequest.decision")
         require_instance(self.policy, ActionAdmissionPolicy, "ExecutionRequest.policy")
         require_instance(self.mix_recipe, MixRecipe, "ExecutionRequest.mix_recipe")
@@ -199,10 +199,10 @@ class PreflightRejected:
 class MetadataReady:
     """Metadata is consistent for processing; not executable authorization (see module docstring)."""
 
-    plan: ProcessingPlan
+    plan: RenderPlan
 
     def __post_init__(self) -> None:
-        require_instance(self.plan, ProcessingPlan, "MetadataReady.plan")
+        require_instance(self.plan, RenderPlan, "MetadataReady.plan")
 
 
 PreflightResult = MetadataReady | PreflightRejected

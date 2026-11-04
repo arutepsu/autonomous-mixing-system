@@ -31,9 +31,10 @@ from autonomous_mixing.core.records.observation import (
     TimeRange,
 )
 from autonomous_mixing.core.records.project import ProjectSnapshot, Track
-from autonomous_mixing.core.records.run import FinalProjectState, Run, RunConfiguration, RunOutcome, RunState
+from autonomous_mixing.core.records.run import FinalProjectState, RunConfiguration, RunOutcome, RunRecord, RunState
 from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
+    AcceptanceCriteria,
     BaselineReference,
     ComparisonOperator,
     DeltaGuard,
@@ -41,7 +42,6 @@ from autonomous_mixing.core.records.verification import (
     ImprovementDirection,
     MetricSelector,
     TargetCondition,
-    ValidationCriteria,
 )
 
 UTC_NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
@@ -69,12 +69,12 @@ def _selector(metric=METRIC_A, **scope_kwargs) -> MetricSelector:
     return MetricSelector(metric, _scope(**scope_kwargs))
 
 
-def _criteria(target_selector=_DEFAULT, guard_selector=_DEFAULT) -> ValidationCriteria:
+def _criteria(target_selector=_DEFAULT, guard_selector=_DEFAULT) -> AcceptanceCriteria:
     target_sel = (
         _selector(tracks=("t1", "t2"), start=10.0, end=20.0) if target_selector is _DEFAULT else target_selector
     )
     guard_sel = _selector(METRIC_B, tracks=("t3",)) if guard_selector is _DEFAULT else guard_selector
-    return ValidationCriteria(
+    return AcceptanceCriteria(
         CriteriaId("crit"),
         "1",
         (TargetCondition(ConditionId("target"), target_sel, ComparisonOperator.LE, MeasuredScalar(-6.0, "unit-a")),),
@@ -120,7 +120,7 @@ def _configuration(**overrides) -> RunConfiguration:
     return RunConfiguration(**fields)
 
 
-def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **overrides) -> Run:
+def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **overrides) -> RunRecord:
     fields = dict(
         run_id=RunId("run-1"),
         project_id=ProjectId("p1"),
@@ -134,10 +134,10 @@ def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **over
         termination_reason=reason,
     )
     fields.update(overrides)
-    return Run(**fields)
+    return RunRecord(**fields)
 
 
-def _finished(outcome, final, reason="recorded stop reason") -> Run:
+def _finished(outcome, final, reason="recorded stop reason") -> RunRecord:
     return _run(RunState.FINISHED, outcome, final, reason)
 
 
@@ -251,7 +251,7 @@ def test_condition_scope_starting_before_run_scope_is_rejected():
 
 
 def _band_criteria(target_freq, guard_freq=FrequencyRange(50.0, 500.0), other_freq=FrequencyRange(20.0, 1000.0)):
-    return ValidationCriteria(
+    return AcceptanceCriteria(
         CriteriaId("crit"),
         "1",
         (
@@ -468,7 +468,7 @@ def test_run_rejects_wrong_types_and_non_utc_timestamps(overrides):
 
 
 def test_run_has_no_transition_methods():
-    assert not any(name in dir(Run) for name in ("transition", "finish", "advance"))
+    assert not any(name in dir(RunRecord) for name in ("transition", "finish", "advance"))
 
 
 def test_configuration_and_nested_collections_are_frozen():

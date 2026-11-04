@@ -46,7 +46,7 @@ from autonomous_mixing.core.records.identifiers import (
     Revision,
     RunId,
     TrackId,
-    ValidationResultId,
+    VerificationResultId,
     VersionRef,
 )
 from autonomous_mixing.core.records.observation import (
@@ -66,8 +66,15 @@ from autonomous_mixing.core.records.project import (
     Track,
     TrackGainState,
 )
-from autonomous_mixing.core.records.run import AttemptDisposition, CorrectionAttempt, Run, RunConfiguration, RunState
+from autonomous_mixing.core.records.run import (
+    AttemptDisposition,
+    CorrectionAttempt,
+    RunConfiguration,
+    RunRecord,
+    RunState,
+)
 from autonomous_mixing.core.records.verification import (
+    AcceptanceCriteria,
     AssessmentMode,
     CheckResult,
     CheckStatus,
@@ -77,11 +84,10 @@ from autonomous_mixing.core.records.verification import (
     MetricSelector,
     TargetCondition,
     TargetStatus,
-    ValidationCriteria,
-    ValidationResult,
-    ValidationVerdict,
+    Verdict,
+    VerificationResult,
 )
-from autonomous_mixing.core.verification.consistency import validate_validation_references
+from autonomous_mixing.core.verification.consistency import validate_verification_references
 
 UTC_NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 HASH = "b" * 64
@@ -194,9 +200,9 @@ def _rollback(status=RollbackStatus.VERIFIED, restored=_D, *, checkpoint="cp1", 
     return RollbackReceipt(ExecutionId(execution), CheckpointId(checkpoint), status, restored, "restoration checked")
 
 
-def _criteria(version="1") -> ValidationCriteria:
+def _criteria(version="1") -> AcceptanceCriteria:
     selector = MetricSelector(METRIC, AnalysisScope((TrackId("t1"), TrackId("t2")), TimeRange(0.0, 60.0)))
-    return ValidationCriteria(
+    return AcceptanceCriteria(
         CriteriaId("crit"),
         version,
         (TargetCondition(ConditionId("target"), selector, ComparisonOperator.LE, MeasuredScalar(-6.0, "unit")),),
@@ -209,12 +215,12 @@ def _criteria(version="1") -> ValidationCriteria:
     )
 
 
-def _validation(verdict=ValidationVerdict.ACCEPTED, version="1") -> ValidationResult:
+def _validation(verdict=Verdict.ACCEPTED, version="1") -> VerificationResult:
     def check(cid):
         return CheckResult(ConditionId(cid), CheckStatus.PASS, "passed", (ObservationId("o-after"),))
 
-    return ValidationResult(
-        ValidationResultId("v1"),
+    return VerificationResult(
+        VerificationResultId("v1"),
         CriteriaId("crit"),
         version,
         AssessmentMode.ATTEMPT,
@@ -224,10 +230,10 @@ def _validation(verdict=ValidationVerdict.ACCEPTED, version="1") -> ValidationRe
     )
 
 
-def _initial_validation() -> ValidationResult:
+def _initial_validation() -> VerificationResult:
     # A consistent INITIAL assessment: target met before any edit; improvement is outside this mode.
-    return ValidationResult(
-        ValidationResultId("v0"),
+    return VerificationResult(
+        VerificationResultId("v0"),
         CriteriaId("crit"),
         "1",
         AssessmentMode.INITIAL,
@@ -235,7 +241,7 @@ def _initial_validation() -> ValidationResult:
             CheckResult(ConditionId("target"), CheckStatus.PASS, "passed", (ObservationId("o-before"),)),
             CheckResult(ConditionId("improve"), CheckStatus.NOT_APPLICABLE, "not assessed initially", ()),
         ),
-        ValidationVerdict.ACCEPTED,
+        Verdict.ACCEPTED,
         TargetStatus.SATISFIED,
     )
 
@@ -269,7 +275,7 @@ CONTEXT = MusicalContext(ContextId("c1"), "1", (), (), frozenset())
 CONTROLLER = ControllerIdentity("deterministic-baseline", "0.1")
 
 
-def _run(project="p1", run_id="run-1", context=CONTEXT, controller=CONTROLLER, criteria_version="1") -> Run:
+def _run(project="p1", run_id="run-1", context=CONTEXT, controller=CONTROLLER, criteria_version="1") -> RunRecord:
     configuration = RunConfiguration(
         scope=AnalysisScope((TrackId("t1"), TrackId("t2"), TrackId("t3")), TimeRange(0.0, 60.0)),
         analysis_spec=AnalysisSpec(VersionRef("spec", "1"), (METRIC,)),
@@ -280,7 +286,7 @@ def _run(project="p1", run_id="run-1", context=CONTEXT, controller=CONTROLLER, c
         budget_limits=BudgetLimits(4, 2, 6, 1, 300.0),
     )
     usage = BudgetUsage(1, 1, 2, 0, 12.5)
-    return Run(
+    return RunRecord(
         RunId(run_id),
         ProjectId(project),
         configuration,
@@ -524,16 +530,14 @@ def test_unsuccessful_rollback_references_need_only_checkpoint_identity(status):
     [
         lambda: _attempt(D.PENDING),
         lambda: _attempt(D.PENDING, _receipt(CR)),
-        lambda: _attempt(D.PENDING, _receipt(CR), _validation(ValidationVerdict.REJECTED)),
+        lambda: _attempt(D.PENDING, _receipt(CR), _validation(Verdict.REJECTED)),
         lambda: _accepted(),
-        lambda: _attempt(D.ROLLED_BACK, _receipt(CR), _validation(ValidationVerdict.REJECTED), _rollback()),
+        lambda: _attempt(D.ROLLED_BACK, _receipt(CR), _validation(Verdict.REJECTED), _rollback()),
         lambda: _attempt(D.ROLLED_BACK, _receipt(UN), None, _rollback()),
         lambda: _attempt(D.FAILED, _receipt(NS)),
         lambda: _attempt(D.FAILED, _receipt(FL)),
         lambda: _attempt(D.UNRESOLVED, _receipt(UN)),
-        lambda: _attempt(
-            D.UNRESOLVED, _receipt(CR), _validation(ValidationVerdict.REJECTED), _rollback(RollbackStatus.FAILED)
-        ),
+        lambda: _attempt(D.UNRESOLVED, _receipt(CR), _validation(Verdict.REJECTED), _rollback(RollbackStatus.FAILED)),
         lambda: _attempt(D.UNRESOLVED, _receipt(CR), None, _rollback(RollbackStatus.UNCERTAIN)),
     ],
     ids=[
@@ -572,8 +576,8 @@ def test_attempt_rejects_receipt_disagreeing_with_attempt_or_checkpoint(build, m
     "build",
     [
         lambda: _attempt(D.PENDING, None, _validation()),
-        lambda: _attempt(D.PENDING, _receipt(FL), _validation(ValidationVerdict.REJECTED)),
-        lambda: _attempt(D.PENDING, _receipt(UN), _validation(ValidationVerdict.INCONCLUSIVE)),
+        lambda: _attempt(D.PENDING, _receipt(FL), _validation(Verdict.REJECTED)),
+        lambda: _attempt(D.PENDING, _receipt(UN), _validation(Verdict.INCONCLUSIVE)),
     ],
     ids=["no-execution", "failed-execution", "uncertain-execution"],
 )
@@ -607,7 +611,7 @@ def test_attempt_mode_assessments_remain_supported():
 
 
 def test_standalone_initial_assessment_remains_valid_outside_attempts():
-    validate_validation_references(_initial_validation(), _criteria())
+    validate_verification_references(_initial_validation(), _criteria())
 
 
 @pytest.mark.parametrize(
@@ -615,8 +619,8 @@ def test_standalone_initial_assessment_remains_valid_outside_attempts():
     [
         lambda: _attempt(D.ACCEPTED),
         lambda: _attempt(D.ACCEPTED, _receipt(CR)),
-        lambda: _attempt(D.ACCEPTED, _receipt(CR), _validation(ValidationVerdict.REJECTED)),
-        lambda: _attempt(D.ACCEPTED, _receipt(CR), _validation(ValidationVerdict.INCONCLUSIVE)),
+        lambda: _attempt(D.ACCEPTED, _receipt(CR), _validation(Verdict.REJECTED)),
+        lambda: _attempt(D.ACCEPTED, _receipt(CR), _validation(Verdict.INCONCLUSIVE)),
         lambda: _attempt(D.ACCEPTED, _receipt(CR), _validation(), _rollback()),
     ],
     ids=["no-execution", "no-validation", "rejected", "inconclusive", "with-rollback"],
@@ -679,7 +683,7 @@ def test_failed_requires_known_unsuccessful_execution_without_rollback(build):
     [
         lambda: _attempt(D.UNRESOLVED),
         lambda: _attempt(D.UNRESOLVED, _receipt(FL)),
-        lambda: _attempt(D.UNRESOLVED, _receipt(CR), _validation(ValidationVerdict.REJECTED), _rollback()),
+        lambda: _attempt(D.UNRESOLVED, _receipt(CR), _validation(Verdict.REJECTED), _rollback()),
     ],
     ids=["no-evidence", "known-failure", "verified-rollback"],
 )
@@ -698,7 +702,7 @@ def test_attempt_rejects_untyped_fields():
 
 
 def test_attempt_records_are_immutable():
-    attempt = _attempt(D.ROLLED_BACK, _receipt(CR), _validation(ValidationVerdict.REJECTED), _rollback())
+    attempt = _attempt(D.ROLLED_BACK, _receipt(CR), _validation(Verdict.REJECTED), _rollback())
     assert isinstance(attempt.before_state.audio.artifacts, tuple)
     assert isinstance(attempt.execution.candidate_artifacts, tuple)
     assert attempt.rollback.restored_state == attempt.before_state

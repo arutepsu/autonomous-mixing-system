@@ -19,7 +19,7 @@ from autonomous_mixing.core.records.admission import (
 )
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.invariants import require_instance
-from autonomous_mixing.core.records.rendering import ProcessingPlan
+from autonomous_mixing.core.records.rendering import RenderPlan
 
 
 def _dimensions(artifact: AudioArtifact) -> tuple[int, int, int, float]:
@@ -149,7 +149,7 @@ def preflight_execution(request: ExecutionRequest) -> PreflightResult:
         )
 
     return MetadataReady(
-        ProcessingPlan(
+        RenderPlan(
             execution_id=execution_id,
             project_id=state.project_id,
             before_revision=state.revision,

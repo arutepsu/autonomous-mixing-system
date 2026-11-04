@@ -49,7 +49,7 @@ class CandidateIdentity:
 
 
 @dataclass(frozen=True)
-class ProcessingPlan:
+class RenderPlan:
     """Bounded, resolved input for a future audio processor (data only; no controller context).
 
     The processor renders ``fixed_target_input`` at ``requested_gain_db`` (absolute additional gain)
@@ -75,47 +75,45 @@ class ProcessingPlan:
     workspace: ExecutionWorkspace
 
     def __post_init__(self) -> None:
-        require_instance(self.execution_id, ExecutionId, "ProcessingPlan.execution_id")
-        require_instance(self.project_id, ProjectId, "ProcessingPlan.project_id")
-        require_instance(self.before_revision, Revision, "ProcessingPlan.before_revision")
-        require_instance(self.candidate, CandidateIdentity, "ProcessingPlan.candidate")
-        require_instance(self.target_track_id, TrackId, "ProcessingPlan.target_track_id")
-        require_instance(self.fixed_target_input, AudioArtifact, "ProcessingPlan.fixed_target_input")
-        require_finite(self.requested_gain_db, "ProcessingPlan.requested_gain_db")
-        require_tuple_of(
-            self.current_stems, AudioArtifact, "ProcessingPlan.current_stems", nonempty=True, distinct=True
-        )
-        require_instance(self.target_current_artifact_id, ArtifactId, "ProcessingPlan.target_current_artifact_id")
-        require_instance(self.current_mix_artifact_id, ArtifactId, "ProcessingPlan.current_mix_artifact_id")
-        require_instance(self.recipe, MixRecipe, "ProcessingPlan.recipe")
-        require_instance(self.render_spec, RenderSpec, "ProcessingPlan.render_spec")
-        require_instance(self.processing_spec, ProcessingSpec, "ProcessingPlan.processing_spec")
-        require_instance(self.workspace, ExecutionWorkspace, "ProcessingPlan.workspace")
+        require_instance(self.execution_id, ExecutionId, "RenderPlan.execution_id")
+        require_instance(self.project_id, ProjectId, "RenderPlan.project_id")
+        require_instance(self.before_revision, Revision, "RenderPlan.before_revision")
+        require_instance(self.candidate, CandidateIdentity, "RenderPlan.candidate")
+        require_instance(self.target_track_id, TrackId, "RenderPlan.target_track_id")
+        require_instance(self.fixed_target_input, AudioArtifact, "RenderPlan.fixed_target_input")
+        require_finite(self.requested_gain_db, "RenderPlan.requested_gain_db")
+        require_tuple_of(self.current_stems, AudioArtifact, "RenderPlan.current_stems", nonempty=True, distinct=True)
+        require_instance(self.target_current_artifact_id, ArtifactId, "RenderPlan.target_current_artifact_id")
+        require_instance(self.current_mix_artifact_id, ArtifactId, "RenderPlan.current_mix_artifact_id")
+        require_instance(self.recipe, MixRecipe, "RenderPlan.recipe")
+        require_instance(self.render_spec, RenderSpec, "RenderPlan.render_spec")
+        require_instance(self.processing_spec, ProcessingSpec, "RenderPlan.processing_spec")
+        require_instance(self.workspace, ExecutionWorkspace, "RenderPlan.workspace")
 
         if self.workspace.execution_id != self.execution_id:
-            raise ValueError("ProcessingPlan workspace belongs to another execution")
+            raise ValueError("RenderPlan workspace belongs to another execution")
         if self.candidate.revision == self.before_revision:
-            raise ValueError("ProcessingPlan candidate revision must differ from the before revision")
+            raise ValueError("RenderPlan candidate revision must differ from the before revision")
         stem_tracks = tuple(stem.source_track_ids for stem in self.current_stems)
         if stem_tracks != tuple((track,) for track in self.recipe.track_ids) or any(
             stem.kind is not ArtifactKind.STEM for stem in self.current_stems
         ):
-            raise ValueError("ProcessingPlan.current_stems must be one STEM per recipe track, in recipe order")
+            raise ValueError("RenderPlan.current_stems must be one STEM per recipe track, in recipe order")
         if self.target_track_id not in self.recipe.track_ids:
-            raise ValueError("ProcessingPlan target track is not a recipe contributor")
+            raise ValueError("RenderPlan target track is not a recipe contributor")
         target_stem = self.current_stems[self.recipe.track_ids.index(self.target_track_id)]
         if target_stem.artifact_id != self.target_current_artifact_id:
-            raise ValueError("ProcessingPlan.target_current_artifact_id must be the target's current stem")
+            raise ValueError("RenderPlan.target_current_artifact_id must be the target's current stem")
         fixed = self.fixed_target_input
         if fixed.kind is not ArtifactKind.STEM or fixed.source_track_ids != (self.target_track_id,):
-            raise ValueError("ProcessingPlan.fixed_target_input must be a STEM of exactly the target track")
+            raise ValueError("RenderPlan.fixed_target_input must be a STEM of exactly the target track")
         used = {stem.artifact_id for stem in self.current_stems} | {fixed.artifact_id, self.current_mix_artifact_id}
         if {self.candidate.target_artifact_id, self.candidate.mix_artifact_id} & used:
-            raise ValueError("ProcessingPlan candidate artifact IDs must not reuse input artifact IDs")
+            raise ValueError("RenderPlan candidate artifact IDs must not reuse input artifact IDs")
 
 
 @dataclass(frozen=True)
-class ArtifactProcessingEvidence:
+class RenderEvidence:
     """Adapter claims about one produced artifact; recorded claims, not independent proof.
 
     ``processor`` identifies the implementation; ``processing_spec`` records the numerical and encoding
@@ -132,46 +130,44 @@ class ArtifactProcessingEvidence:
     processing_spec: ProcessingSpec
 
     def __post_init__(self) -> None:
-        require_instance(self.artifact_id, ArtifactId, "ArtifactProcessingEvidence.artifact_id")
+        require_instance(self.artifact_id, ArtifactId, "RenderEvidence.artifact_id")
         require_tuple_of(
             self.verified_input_ids,
             ArtifactId,
-            "ArtifactProcessingEvidence.verified_input_ids",
+            "RenderEvidence.verified_input_ids",
             nonempty=True,
             distinct=True,
         )
         for name in ("input_hashes_verified", "finite_samples"):
             if not isinstance(getattr(self, name), bool):
-                raise ValueError(f"ArtifactProcessingEvidence.{name} must be a bool")
-        if require_finite(self.peak_linear, "ArtifactProcessingEvidence.peak_linear") < 0:
-            raise ValueError("ArtifactProcessingEvidence.peak_linear must be non-negative")
-        require_instance(self.processor, VersionRef, "ArtifactProcessingEvidence.processor")
-        require_instance(self.processing_spec, ProcessingSpec, "ArtifactProcessingEvidence.processing_spec")
+                raise ValueError(f"RenderEvidence.{name} must be a bool")
+        if require_finite(self.peak_linear, "RenderEvidence.peak_linear") < 0:
+            raise ValueError("RenderEvidence.peak_linear must be non-negative")
+        require_instance(self.processor, VersionRef, "RenderEvidence.processor")
+        require_instance(self.processing_spec, ProcessingSpec, "RenderEvidence.processing_spec")
 
 
 @dataclass(frozen=True)
-class ProcessedCandidate:
+class RenderedCandidate:
     """A processor's successful outputs: new target stem, new full mix and their evidence."""
 
     target_artifact: AudioArtifact
     mix_artifact: AudioArtifact
-    evidence: tuple[ArtifactProcessingEvidence, ...]
+    evidence: tuple[RenderEvidence, ...]
 
     def __post_init__(self) -> None:
-        require_instance(self.target_artifact, AudioArtifact, "ProcessedCandidate.target_artifact")
-        require_instance(self.mix_artifact, AudioArtifact, "ProcessedCandidate.mix_artifact")
+        require_instance(self.target_artifact, AudioArtifact, "RenderedCandidate.target_artifact")
+        require_instance(self.mix_artifact, AudioArtifact, "RenderedCandidate.mix_artifact")
         if self.target_artifact.artifact_id == self.mix_artifact.artifact_id:
-            raise ValueError("ProcessedCandidate outputs must have distinct artifact IDs")
-        require_tuple_of(
-            self.evidence, ArtifactProcessingEvidence, "ProcessedCandidate.evidence", nonempty=True, distinct=False
-        )
+            raise ValueError("RenderedCandidate outputs must have distinct artifact IDs")
+        require_tuple_of(self.evidence, RenderEvidence, "RenderedCandidate.evidence", nonempty=True, distinct=False)
         ids = [record.artifact_id for record in self.evidence]
         if len(set(ids)) != len(ids):
-            raise ValueError("ProcessedCandidate.evidence must have one record per artifact")
+            raise ValueError("RenderedCandidate.evidence must have one record per artifact")
 
 
 @dataclass(frozen=True)
-class ProcessingFailure:
+class RenderFailure:
     """A processor outcome without registered candidate outputs: FAILED (established) or UNCERTAIN.
 
     Unlike a generic port failure, this keeps known and uncertain outcomes distinct once processing
@@ -182,10 +178,10 @@ class ProcessingFailure:
     issue: ExecutionIssue
 
     def __post_init__(self) -> None:
-        require_instance(self.status, ExecutionStatus, "ProcessingFailure.status")
+        require_instance(self.status, ExecutionStatus, "RenderFailure.status")
         if self.status not in (ExecutionStatus.FAILED, ExecutionStatus.UNCERTAIN):
-            raise ValueError("ProcessingFailure.status must be FAILED or UNCERTAIN")
-        require_instance(self.issue, ExecutionIssue, "ProcessingFailure.issue")
+            raise ValueError("RenderFailure.status must be FAILED or UNCERTAIN")
+        require_instance(self.issue, ExecutionIssue, "RenderFailure.issue")
 
 
-ProcessingOutcome = ProcessedCandidate | ProcessingFailure
+RenderOutcome = RenderedCandidate | RenderFailure

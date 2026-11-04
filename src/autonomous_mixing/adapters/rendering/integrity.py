@@ -7,10 +7,10 @@ pathname still holds those bytes afterwards, and it is not file-write protection
 later processor must consume the returned samples or reverify what it reads. Contributes to QR-01,
 QR-02, QR-03, FR-02 and FR-17 without completing them; nothing is written, renamed or removed.
 
-Two entry points share one private capture/hash/decode pipeline. ``verify_wav_artifact`` accepts only
+Two entry points share one private capture/hash/decode pipeline. ``check_wav_integrity`` accepts only
 explicit absolute local paths: its lexical checks reject relative, URI-style and UNC/device-namespace
 locations; they do not confine access to any directory and do not rule out aliases, symbolic links,
-junctions or other reparse points. ``verify_resolved_wav_artifact`` takes a ``ResolvedArtifactLocation``,
+junctions or other reparse points. ``check_resolved_wav_integrity`` takes a ``ResolvedArtifactLocation``,
 resolves its original artifact afresh against the record's configured root, requires the fresh root
 and path to equal the record's exactly, and then verifies at the freshly resolved path. That recheck
 precedes the single content open but is not race-free. Regular-file checks are made on the pathname
@@ -55,7 +55,7 @@ _SEPARATORS = ("/", "\\")
 _READ_CHUNK_BYTES = 1 << 20
 
 
-class VerificationFailureCode(Enum):
+class IntegrityFailureCode(Enum):
     UNSUPPORTED_PATH = "unsupported_path"
     NOT_FOUND = "not_found"
     NOT_READABLE = "not_readable"
@@ -67,16 +67,16 @@ class VerificationFailureCode(Enum):
     NONFINITE_SAMPLES = "nonfinite_samples"
 
 
-class ArtifactVerificationError(ValueError):
+class IntegrityError(ValueError):
     """An expected file or content failure; ``code`` names which verification step rejected it."""
 
-    def __init__(self, code: VerificationFailureCode, message: str) -> None:
+    def __init__(self, code: IntegrityFailureCode, message: str) -> None:
         super().__init__(f"{code.value}: {message}")
         self.code = code
 
 
 @dataclass(frozen=True, eq=False)
-class VerifiedAudio:
+class CheckedAudio:
     """Decoded samples of a payload whose hash and format metadata matched ``artifact``.
 
     ``samples`` is a native float64 ``(frames, channels)`` array returned with ``writeable=False``.
@@ -98,12 +98,12 @@ def _require_limit(value: Any, field: str) -> int:
     return value
 
 
-def _fail(code: VerificationFailureCode, message: str) -> ArtifactVerificationError:
-    return ArtifactVerificationError(code, message)
+def _fail(code: IntegrityFailureCode, message: str) -> IntegrityError:
+    return IntegrityError(code, message)
 
 
 def _local_absolute_path(location: str) -> str:
-    unsupported = VerificationFailureCode.UNSUPPORTED_PATH
+    unsupported = IntegrityFailureCode.UNSUPPORTED_PATH
     if "\x00" in location:
         raise _fail(unsupported, "location contains a NUL character")
     if location[:1] in _SEPARATORS and location[1:2] in _SEPARATORS:
@@ -118,7 +118,7 @@ def _local_absolute_path(location: str) -> str:
 
 def _require_regular(mode: int, location: str, what: str) -> None:
     if not stat.S_ISREG(mode):
-        raise _fail(VerificationFailureCode.NOT_REGULAR_FILE, f"{what} is not a regular file: {location}")
+        raise _fail(IntegrityFailureCode.NOT_REGULAR_FILE, f"{what} is not a regular file: {location}")
 
 
 def _capture(location: str, limit: int) -> bytes:
@@ -139,27 +139,27 @@ def _capture(location: str, limit: int) -> bytes:
                 chunks.append(chunk)
                 remaining -= len(chunk)
     except (FileNotFoundError, NotADirectoryError) as exc:
-        raise _fail(VerificationFailureCode.NOT_FOUND, f"no file at {location}") from exc
+        raise _fail(IntegrityFailureCode.NOT_FOUND, f"no file at {location}") from exc
     except IsADirectoryError as exc:
-        raise _fail(VerificationFailureCode.NOT_REGULAR_FILE, f"path is a directory: {location}") from exc
+        raise _fail(IntegrityFailureCode.NOT_REGULAR_FILE, f"path is a directory: {location}") from exc
     except PermissionError as exc:
-        raise _fail(VerificationFailureCode.NOT_READABLE, f"cannot read {location}: {exc.strerror}") from exc
+        raise _fail(IntegrityFailureCode.NOT_READABLE, f"cannot read {location}: {exc.strerror}") from exc
     payload = b"".join(chunks)
     if len(payload) > limit:
-        raise _fail(VerificationFailureCode.RESOURCE_LIMIT, f"file exceeds max_file_bytes={limit}: {location}")
+        raise _fail(IntegrityFailureCode.RESOURCE_LIMIT, f"file exceeds max_file_bytes={limit}: {location}")
     return payload
 
 
 def _decode(artifact: AudioArtifact, payload: bytes, max_decoded_bytes: int) -> tuple[np.ndarray, str, str]:
     location = artifact.location
     # libsndfile reports unreadable or unrecognized content as LibsndfileError, a RuntimeError subclass
-    # specific to soundfile; ArtifactVerificationError raised inside the block is not caught here.
+    # specific to soundfile; IntegrityError raised inside the block is not caught here.
     try:
         with sf.SoundFile(io.BytesIO(payload)) as handle:
             container, subtype = handle.format, handle.subtype
             frames, channels, rate = handle.frames, handle.channels, handle.samplerate
             if container not in WAV_CONTAINERS:
-                raise _fail(VerificationFailureCode.INVALID_WAV, f"not a WAV container (detected {container})")
+                raise _fail(IntegrityFailureCode.INVALID_WAV, f"not a WAV container (detected {container})")
             mismatches = [
                 f"{name} declared {declared}, file has {actual}"
                 for name, declared, actual in (
@@ -170,30 +170,30 @@ def _decode(artifact: AudioArtifact, payload: bytes, max_decoded_bytes: int) -> 
                 if declared != actual
             ]
             if mismatches:
-                raise _fail(VerificationFailureCode.METADATA_MISMATCH, f"{location}: " + "; ".join(mismatches))
+                raise _fail(IntegrityFailureCode.METADATA_MISMATCH, f"{location}: " + "; ".join(mismatches))
             if frames < 1 or channels not in _CHANNEL_COUNTS:
                 raise _fail(
-                    VerificationFailureCode.INVALID_WAV,
+                    IntegrityFailureCode.INVALID_WAV,
                     f"{location}: need at least one frame and 1 or 2 channels, got {frames} x {channels}",
                 )
             decoded_bytes = frames * channels * _FLOAT64_BYTES
             if decoded_bytes > max_decoded_bytes:
                 raise _fail(
-                    VerificationFailureCode.RESOURCE_LIMIT,
+                    IntegrityFailureCode.RESOURCE_LIMIT,
                     f"{location}: {decoded_bytes} decoded bytes exceed max_decoded_bytes={max_decoded_bytes}",
                 )
             samples = handle.read(frames, dtype="float64", always_2d=True)
     except sf.LibsndfileError as exc:
-        raise _fail(VerificationFailureCode.INVALID_WAV, f"{location}: {exc.error_string}") from exc
+        raise _fail(IntegrityFailureCode.INVALID_WAV, f"{location}: {exc.error_string}") from exc
     if samples.shape != (frames, channels):
         raise _fail(
-            VerificationFailureCode.INVALID_WAV,
+            IntegrityFailureCode.INVALID_WAV,
             f"{location}: decoded {samples.shape}, expected {(frames, channels)} (truncated data?)",
         )
     return samples, container, subtype
 
 
-def verify_wav_artifact(artifact: AudioArtifact, *, max_file_bytes: int, max_decoded_bytes: int) -> VerifiedAudio:
+def check_wav_integrity(artifact: AudioArtifact, *, max_file_bytes: int, max_decoded_bytes: int) -> CheckedAudio:
     """Verify the file at ``artifact.location`` against ``artifact`` and return its decoded samples.
 
     Steps: bounded single read of a regular file; SHA-256 of the captured payload against
@@ -201,7 +201,7 @@ def verify_wav_artifact(artifact: AudioArtifact, *, max_file_bytes: int, max_dec
     count and frame count; at least one frame and mono/stereo; decoded-size limit; float64 decode of
     exactly the inspected frames; finite samples. Samples are not normalized, clipped, resampled,
     padded or folded down. Invalid arguments raise ValueError before any file access; expected file
-    and content failures raise ``ArtifactVerificationError``.
+    and content failures raise ``IntegrityError``.
     """
     if not isinstance(artifact, AudioArtifact):
         raise ValueError(f"artifact must be an AudioArtifact, got {type(artifact).__name__}")
@@ -211,17 +211,17 @@ def verify_wav_artifact(artifact: AudioArtifact, *, max_file_bytes: int, max_dec
     return _verify_at(artifact, location, max_file_bytes, max_decoded_bytes)
 
 
-def verify_resolved_wav_artifact(
+def check_resolved_wav_integrity(
     location: ResolvedArtifactLocation, *, max_file_bytes: int, max_decoded_bytes: int
-) -> VerifiedAudio:
+) -> CheckedAudio:
     """Verify ``location.artifact`` at a fresh resolution of its location and return its decoded samples.
 
     Invalid arguments raise ValueError before any filesystem access. The original artifact is resolved
     again against ``location.configured_root``; resolution failures propagate as
     ``LocationResolutionError``. If the fresh resolved root or absolute path differs from the record's,
     ``STALE_RESOLUTION`` is raised before any content is opened. Otherwise the file at the fresh path is
-    verified exactly as by ``verify_wav_artifact`` against the original artifact's declared hash and
-    metadata. The returned ``VerifiedAudio.artifact`` is ``location.artifact`` itself; the record is not
+    verified exactly as by ``check_wav_integrity`` against the original artifact's declared hash and
+    metadata. The returned ``CheckedAudio.artifact`` is ``location.artifact`` itself; the record is not
     retained in the result.
     """
     if not isinstance(location, ResolvedArtifactLocation):
@@ -238,17 +238,17 @@ def verify_resolved_wav_artifact(
     return _verify_at(location.artifact, fresh.absolute_path, max_file_bytes, max_decoded_bytes)
 
 
-def _verify_at(artifact: AudioArtifact, location: str, max_file_bytes: int, max_decoded_bytes: int) -> VerifiedAudio:
+def _verify_at(artifact: AudioArtifact, location: str, max_file_bytes: int, max_decoded_bytes: int) -> CheckedAudio:
     """Shared pipeline: bounded single capture at ``location``, hash check, then decode of the captured bytes."""
     payload = _capture(location, max_file_bytes)
     digest = hashlib.sha256(payload).hexdigest()
     if digest != artifact.content_hash:
         raise _fail(
-            VerificationFailureCode.HASH_MISMATCH,
+            IntegrityFailureCode.HASH_MISMATCH,
             f"{location}: SHA-256 {digest} does not match declared {artifact.content_hash}",
         )
     samples, container, subtype = _decode(artifact, payload, max_decoded_bytes)
     if not np.isfinite(samples).all():
-        raise _fail(VerificationFailureCode.NONFINITE_SAMPLES, f"{location}: contains NaN or infinite samples")
+        raise _fail(IntegrityFailureCode.NONFINITE_SAMPLES, f"{location}: contains NaN or infinite samples")
     samples.setflags(write=False)
-    return VerifiedAudio(artifact, samples, container, subtype, digest)
+    return CheckedAudio(artifact, samples, container, subtype, digest)

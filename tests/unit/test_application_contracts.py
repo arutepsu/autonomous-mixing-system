@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from autonomous_mixing.core.ports.analysis import AudioAnalyzer, validate_analysis_response
-from autonomous_mixing.core.ports.decision import DecisionController, validate_decision_response
+from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
 from autonomous_mixing.core.records.actions import Action, SetTrackGain
 from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
@@ -22,9 +22,9 @@ from autonomous_mixing.core.records.decision import (
     AbstentionReason,
     ControllerIdentity,
     Decision,
-    DecisionRequest,
     DecisionResponse,
     ProposeAction,
+    Situation,
 )
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
@@ -150,7 +150,7 @@ def _context(protected: frozenset = frozenset(), context_id: str = "c1") -> Musi
     return MusicalContext(ContextId(context_id), "1", roles, (), protected)
 
 
-def _decision_request(**overrides) -> DecisionRequest:
+def _decision_request(**overrides) -> Situation:
     fields = dict(
         state=_state(),
         context=_context(),
@@ -160,7 +160,7 @@ def _decision_request(**overrides) -> DecisionRequest:
         limits=BudgetLimits(4, 2, 6, 1, 300.0),
     )
     fields.update(overrides)
-    return DecisionRequest(**fields)
+    return Situation(**fields)
 
 
 def _decision(outcome=None, evidence=("o-a",), *, context=("c1", "1"), controller=CONTROLLER, target="t2"):
@@ -199,7 +199,7 @@ class _InMemoryController:
         self.result = result
         self.calls = 0
 
-    def decide(self, request: DecisionRequest) -> PortResult[DecisionResponse]:
+    def decide(self, request: Situation) -> PortResult[DecisionResponse]:
         self.calls += 1
         return self.result
 
@@ -208,7 +208,7 @@ def _call_analyzer(analyzer: AudioAnalyzer, request: AnalysisRequest) -> PortRes
     return analyzer.analyze(request)
 
 
-def _call_controller(controller: DecisionController, request: DecisionRequest) -> PortResult[DecisionResponse]:
+def _call_controller(controller: DecisionMaker, request: Situation) -> PortResult[DecisionResponse]:
     return controller.decide(request)
 
 
@@ -270,7 +270,7 @@ def test_analysis_request_accepts_state_with_older_production_artifacts():
 
 
 def test_requests_have_one_state_field_instead_of_snapshot_and_checkpoint():
-    for record in (AnalysisRequest, DecisionRequest):
+    for record in (AnalysisRequest, Situation):
         names = {f.name for f in dataclasses.fields(record)}
         assert "state" in names and not names & {"snapshot", "checkpoint"}
 

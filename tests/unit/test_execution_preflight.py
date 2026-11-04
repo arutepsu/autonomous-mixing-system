@@ -19,7 +19,7 @@ from autonomous_mixing.core.records.admission import (
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
 from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, DecisionRequest, ProposeAction
+from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, ProposeAction, Situation
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
@@ -106,7 +106,7 @@ def _state(audio=_D, gains=_D) -> ProjectState:
     )
 
 
-def _decision_request(state=None, protected=frozenset(), observation_source="c-mix") -> DecisionRequest:
+def _decision_request(state=None, protected=frozenset(), observation_source="c-mix") -> Situation:
     source = AssertionSource("producer", UTC_NOW)
     roles = tuple(TrackRole(TrackId(t), r, source) for t, r in [("t1", "ambience"), ("t2", "lead"), ("t3", "texture")])
     context = MusicalContext(ContextId("c1"), "1", roles, (), frozenset(TrackId(t) for t in protected))
@@ -120,7 +120,7 @@ def _decision_request(state=None, protected=frozenset(), observation_source="c-m
         VersionRef("analyzer", "0.1"),
         UTC_NOW,
     )
-    return DecisionRequest(
+    return Situation(
         state if state is not None else _state(),
         context,
         CONTROLLER,
@@ -310,7 +310,7 @@ from autonomous_mixing.core.records.admission import (  # noqa: E402
     RejectedAction,
 )
 from autonomous_mixing.core.records.decision import Abstain, AbstentionReason  # noqa: E402
-from autonomous_mixing.core.records.rendering import ProcessingPlan  # noqa: E402
+from autonomous_mixing.core.records.rendering import RenderPlan  # noqa: E402
 
 
 def _with(artifact: AudioArtifact, **changes) -> AudioArtifact:
@@ -662,7 +662,7 @@ def test_processing_plan_rejects_inconsistent_structure():
     ]:
         with pytest.raises(ValueError):
             dataclasses.replace(plan, **changes)
-    assert isinstance(plan, ProcessingPlan)
+    assert isinstance(plan, RenderPlan)
 
 
 # --- audit F5: candidate revisions must not reuse locally known revisions ------------------

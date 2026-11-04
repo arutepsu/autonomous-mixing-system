@@ -1,4 +1,4 @@
-"""Gain/full-mix processor: the first ``AudioProcessor`` implementation (ADR-020 §5, ADR-026).
+"""Gain/full-mix processor: the first ``Renderer`` implementation (ADR-020 §5, ADR-026).
 
 One instance is bound to one pre-allocated workspace. The caller (a future execution service) holds
 the project state and the protected-location inventory, allocates the workspace and constructs the
@@ -8,13 +8,13 @@ allocation requires to cover every current audio member and fixed baseline.
 ``process(plan)`` verifies every input it reads before anything is written, renders the fixed target
 input at the requested absolute gain, sums the mix in recipe order with the new target stem in place
 of the obsolete one, writes ``target.wav`` and then ``mix.wav`` through the exclusive WAV writer and
-describes both as a ``ProcessedCandidate``. It composes existing components and adds no numerical
+describes both as a ``RenderedCandidate``. It composes existing components and adds no numerical
 behaviour. The obsolete current target stem and the current mix are never opened.
 
 Wiring errors (types, a plan that does not belong to the bound workspace or state, missing or
 differing input locations, inputs incompatible with the render settings, an input location string equal
 to a planned output location) raise plain ``ValueError``
-before any file access. Expected failures return ``ProcessingFailure(FAILED, ...)``; files already
+before any file access. Expected failures return ``RenderFailure(FAILED, ...)``; files already
 created are retained and named in the message. Unexpected exceptions propagate unchanged, and the
 caller records the outcome as uncertain. Nothing is deleted, renamed, retried, normalized, clipped or
 limited. Contributes to FR-08, FR-17, QR-01, QR-02 and OP-02 without completing them; no perceptual
@@ -28,9 +28,9 @@ import numpy as np
 
 from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
 from autonomous_mixing.adapters.rendering.integrity import (
-    ArtifactVerificationError,
-    VerifiedAudio,
-    verify_resolved_wav_artifact,
+    CheckedAudio,
+    IntegrityError,
+    check_resolved_wav_integrity,
 )
 from autonomous_mixing.adapters.rendering.locations import LocationResolutionError, ResolvedArtifactLocation
 from autonomous_mixing.adapters.rendering.wav_output import WavOutputError, WrittenWav, write_wav_output
@@ -39,11 +39,11 @@ from autonomous_mixing.core.records.actions import ExecutionIssue, ExecutionStat
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.identifiers import ArtifactId, ProjectId, VersionRef
 from autonomous_mixing.core.records.rendering import (
-    ArtifactProcessingEvidence,
-    ProcessedCandidate,
-    ProcessingFailure,
-    ProcessingOutcome,
-    ProcessingPlan,
+    RenderedCandidate,
+    RenderEvidence,
+    RenderFailure,
+    RenderOutcome,
+    RenderPlan,
 )
 
 # Fixed identity of this implementation; increase the version whenever numerical or file behaviour changes.
@@ -89,7 +89,7 @@ class _Failed(Exception):
 
 
 class GainMixProcessor:
-    """Renders one plan's target stem and full mix into the bound workspace (structural ``AudioProcessor``)."""
+    """Renders one plan's target stem and full mix into the bound workspace (structural ``Renderer``)."""
 
     def __init__(self, workspace: AllocatedWorkspace, limits: ProcessingLimits) -> None:
         if not isinstance(workspace, AllocatedWorkspace):
@@ -107,7 +107,7 @@ class GainMixProcessor:
     def limits(self) -> ProcessingLimits:
         return self._limits
 
-    def process(self, plan: ProcessingPlan) -> ProcessingOutcome:
+    def process(self, plan: RenderPlan) -> RenderOutcome:
         fixed_location, stem_locations = self._bind(plan)
         try:
             fixed = self._verify(fixed_location)
@@ -116,15 +116,15 @@ class GainMixProcessor:
             target_written = self._write(plan, TARGET_FILENAME, target_samples, retained=None)
             mix_written = self._write(plan, MIX_FILENAME, mix_samples, retained=target_written.path)
         except _Failed as failure:
-            return ProcessingFailure(ExecutionStatus.FAILED, failure.issue)
+            return RenderFailure(ExecutionStatus.FAILED, failure.issue)
         return _candidate(plan, self._workspace, (target_samples, target_written), (mix_samples, mix_written))
 
     # --- steps -------------------------------------------------------------------------------------
 
-    def _bind(self, plan: ProcessingPlan) -> tuple[ResolvedArtifactLocation, dict[Any, ResolvedArtifactLocation]]:
+    def _bind(self, plan: RenderPlan) -> tuple[ResolvedArtifactLocation, dict[Any, ResolvedArtifactLocation]]:
         """Wiring checks without file access; returns the input locations to verify, in recipe order."""
-        if not isinstance(plan, ProcessingPlan):
-            raise ValueError(f"plan must be a ProcessingPlan, got {type(plan).__name__}")
+        if not isinstance(plan, RenderPlan):
+            raise ValueError(f"plan must be a RenderPlan, got {type(plan).__name__}")
         request = self._workspace.request
         if plan.workspace != request.workspace:
             raise ValueError("plan workspace differs from the bound allocated workspace")
@@ -154,17 +154,17 @@ class GainMixProcessor:
         }
         return fixed, others
 
-    def _verify(self, location: ResolvedArtifactLocation) -> VerifiedAudio:
+    def _verify(self, location: ResolvedArtifactLocation) -> CheckedAudio:
         try:
-            return verify_resolved_wav_artifact(
+            return check_resolved_wav_integrity(
                 location,
                 max_file_bytes=self._limits.max_file_bytes,
                 max_decoded_bytes=self._limits.max_decoded_bytes,
             )
-        except (ArtifactVerificationError, LocationResolutionError) as exc:
+        except (IntegrityError, LocationResolutionError) as exc:
             raise _Failed(INPUT_VERIFICATION_FAILED, f"input {location.artifact.artifact_id}: {exc}") from None
 
-    def _write(self, plan: ProcessingPlan, filename: str, samples: np.ndarray, *, retained: str | None) -> WrittenWav:
+    def _write(self, plan: RenderPlan, filename: str, samples: np.ndarray, *, retained: str | None) -> WrittenWav:
         try:
             return write_wav_output(
                 self._workspace,
@@ -181,7 +181,7 @@ class GainMixProcessor:
             raise _Failed(f"{OUTPUT_FAILED}:{exc.code.value}", f"{filename}: {exc}{note}") from None
 
 
-def _require_compatible(plan: ProcessingPlan) -> None:
+def _require_compatible(plan: RenderPlan) -> None:
     """Preflight guarantees this; a plan built without it is a wiring error, not a processing failure."""
     fixed = plan.fixed_target_input
     expected = (plan.render_spec.sample_rate_hz, plan.render_spec.channel_count, fixed.frame_count)
@@ -198,8 +198,8 @@ def _output_location(token: str, filename: str) -> str:
     return f"{token}/{filename}"
 
 
-def _require_distinct_output_locations(plan: ProcessingPlan, token: str) -> None:
-    """Rejects a layout the caller's lexical ``validate_processed_candidate`` check would reject after rendering.
+def _require_distinct_output_locations(plan: RenderPlan, token: str) -> None:
+    """Rejects a layout the caller's lexical ``validate_rendered_candidate`` check would reject after rendering.
 
     Location strings carry no root, so an input recorded as ``<token>/target.wav`` under its source root
     equals the planned output string although the files are distinct. This mirrors exactly the input
@@ -216,9 +216,7 @@ def _require_distinct_output_locations(plan: ProcessingPlan, token: str) -> None
             )
 
 
-def _render(
-    plan: ProcessingPlan, fixed: VerifiedAudio, others: dict[Any, VerifiedAudio]
-) -> tuple[np.ndarray, np.ndarray]:
+def _render(plan: RenderPlan, fixed: CheckedAudio, others: dict[Any, CheckedAudio]) -> tuple[np.ndarray, np.ndarray]:
     try:
         target = apply_absolute_gain(fixed.samples, plan.requested_gain_db)
         stems = tuple(
@@ -230,11 +228,11 @@ def _render(
 
 
 def _candidate(
-    plan: ProcessingPlan,
+    plan: RenderPlan,
     workspace: AllocatedWorkspace,
     target: tuple[np.ndarray, WrittenWav],
     mix: tuple[np.ndarray, WrittenWav],
-) -> ProcessedCandidate:
+) -> RenderedCandidate:
     token = workspace.request.workspace.directory_token
     fixed = plan.fixed_target_input
     candidate = plan.candidate
@@ -256,7 +254,7 @@ def _candidate(
         )
 
     def evidence(artifact_id: ArtifactId, inputs: tuple[ArtifactId, ...], samples: np.ndarray):
-        return ArtifactProcessingEvidence(
+        return RenderEvidence(
             artifact_id=artifact_id,
             verified_input_ids=inputs,
             input_hashes_verified=True,
@@ -272,7 +270,7 @@ def _candidate(
     mix_artifact = artifact(candidate.mix_artifact_id, plan.recipe.track_ids, ArtifactKind.MIX, MIX_FILENAME, mix[1])
     # The new target enters the mix as the in-memory array whose bit-exact readback the writer confirmed.
     non_target = tuple(s.artifact_id for s in plan.current_stems if s.artifact_id != plan.target_current_artifact_id)
-    return ProcessedCandidate(
+    return RenderedCandidate(
         target_artifact,
         mix_artifact,
         (

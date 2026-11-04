@@ -2,17 +2,17 @@
 
 from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
+    AcceptanceCriteria,
     AssessmentMode,
     CheckStatus,
     DeltaGuard,
     TargetStatus,
-    ValidationCriteria,
-    ValidationResult,
-    ValidationVerdict,
+    Verdict,
+    VerificationResult,
 )
 
 
-def validate_validation_references(result: ValidationResult, criteria: ValidationCriteria) -> None:
+def validate_verification_references(result: VerificationResult, criteria: AcceptanceCriteria) -> None:
     """Check that a result's checks are consistent with a criteria definition.
 
     Record consistency only: no improvement calculation, threshold comparison, audio inspection,
@@ -50,7 +50,7 @@ def validate_validation_references(result: ValidationResult, criteria: Validatio
             if check.status is na:
                 raise ValueError(f"ATTEMPT assessment cannot mark {check.condition_id} NOT_APPLICABLE")
 
-    if result.verdict is ValidationVerdict.ACCEPTED:
+    if result.verdict is Verdict.ACCEPTED:
         # Acceptance: every guard passes, and either targets are SATISFIED or, for an UNMET target
         # (intermediate improvement), every improvement condition passes.
         for guard in criteria.guards:

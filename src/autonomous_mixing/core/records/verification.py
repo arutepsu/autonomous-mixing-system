@@ -7,7 +7,7 @@ from autonomous_mixing.core.records.identifiers import (
     ConditionId,
     CriteriaId,
     ObservationId,
-    ValidationResultId,
+    VerificationResultId,
     VersionRef,
 )
 from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of
@@ -109,7 +109,7 @@ class DeltaGuard:
 
 
 @dataclass(frozen=True)
-class ValidationCriteria:
+class AcceptanceCriteria:
     """A versioned criteria definition. Guards may be empty here; configuration may require them later."""
 
     criteria_id: CriteriaId
@@ -119,16 +119,16 @@ class ValidationCriteria:
     guards: tuple[AbsoluteGuard | DeltaGuard, ...]
 
     def __post_init__(self) -> None:
-        require_instance(self.criteria_id, CriteriaId, "ValidationCriteria.criteria_id")
-        require_text(self.version, "ValidationCriteria.version")
-        require_tuple_of(self.targets, TargetCondition, "ValidationCriteria.targets", nonempty=True, distinct=False)
+        require_instance(self.criteria_id, CriteriaId, "AcceptanceCriteria.criteria_id")
+        require_text(self.version, "AcceptanceCriteria.version")
+        require_tuple_of(self.targets, TargetCondition, "AcceptanceCriteria.targets", nonempty=True, distinct=False)
         require_tuple_of(
-            self.improvements, ImprovementCondition, "ValidationCriteria.improvements", nonempty=True, distinct=False
+            self.improvements, ImprovementCondition, "AcceptanceCriteria.improvements", nonempty=True, distinct=False
         )
         if not isinstance(self.guards, tuple):
-            raise ValueError(f"ValidationCriteria.guards must be a tuple, got {type(self.guards).__name__}")
+            raise ValueError(f"AcceptanceCriteria.guards must be a tuple, got {type(self.guards).__name__}")
         for guard in self.guards:
-            require_instance(guard, (AbsoluteGuard, DeltaGuard), "ValidationCriteria.guards element")
+            require_instance(guard, (AbsoluteGuard, DeltaGuard), "AcceptanceCriteria.guards element")
         seen: set[ConditionId] = set()
         for condition in (*self.targets, *self.improvements, *self.guards):
             if condition.condition_id in seen:
@@ -148,7 +148,7 @@ class CheckStatus(Enum):
     NOT_APPLICABLE = "not_applicable"  # intentionally outside the assessment mode, not missing evidence
 
 
-class ValidationVerdict(Enum):
+class Verdict(Enum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     INCONCLUSIVE = "inconclusive"
@@ -177,35 +177,35 @@ class CheckResult:
 
 
 @dataclass(frozen=True)
-class ValidationResult:
+class VerificationResult:
     """A recorded validation outcome. The verdict is supplied, not computed here.
 
     Construction rejects only combinations that are contradictory without the criteria. Whether
     a FAIL check is consistent with ACCEPTED depends on its category (target, improvement or
-    guard) and is checked by ``validate_validation_references``.
+    guard) and is checked by ``validate_verification_references``.
     """
 
-    validation_result_id: ValidationResultId
+    validation_result_id: VerificationResultId
     criteria_id: CriteriaId
     criteria_version: str
     mode: AssessmentMode
     checks: tuple[CheckResult, ...]
-    verdict: ValidationVerdict
+    verdict: Verdict
     target_status: TargetStatus
 
     def __post_init__(self) -> None:
-        require_instance(self.validation_result_id, ValidationResultId, "ValidationResult.validation_result_id")
-        require_instance(self.criteria_id, CriteriaId, "ValidationResult.criteria_id")
-        require_text(self.criteria_version, "ValidationResult.criteria_version")
-        require_instance(self.mode, AssessmentMode, "ValidationResult.mode")
-        require_tuple_of(self.checks, CheckResult, "ValidationResult.checks", nonempty=True, distinct=False)
+        require_instance(self.validation_result_id, VerificationResultId, "VerificationResult.validation_result_id")
+        require_instance(self.criteria_id, CriteriaId, "VerificationResult.criteria_id")
+        require_text(self.criteria_version, "VerificationResult.criteria_version")
+        require_instance(self.mode, AssessmentMode, "VerificationResult.mode")
+        require_tuple_of(self.checks, CheckResult, "VerificationResult.checks", nonempty=True, distinct=False)
         ids = [check.condition_id for check in self.checks]
         if len(set(ids)) != len(ids):
-            raise ValueError("ValidationResult.checks must have unique condition IDs")
-        require_instance(self.verdict, ValidationVerdict, "ValidationResult.verdict")
-        require_instance(self.target_status, TargetStatus, "ValidationResult.target_status")
+            raise ValueError("VerificationResult.checks must have unique condition IDs")
+        require_instance(self.verdict, Verdict, "VerificationResult.verdict")
+        require_instance(self.target_status, TargetStatus, "VerificationResult.target_status")
 
-        if self.verdict is ValidationVerdict.ACCEPTED:
+        if self.verdict is Verdict.ACCEPTED:
             statuses = {check.status for check in self.checks}
             if self.target_status is TargetStatus.UNKNOWN:
                 raise ValueError("ACCEPTED result cannot have UNKNOWN target status")

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Protocol
 
 from autonomous_mixing.core.records.context import MusicalContext
-from autonomous_mixing.core.records.decision import Decision, DecisionRequest, DecisionResponse, ProposeAction
+from autonomous_mixing.core.records.decision import Decision, DecisionResponse, ProposeAction, Situation
 from autonomous_mixing.core.records.identifiers import ObservationId
 from autonomous_mixing.core.records.invariants import require_instance
 from autonomous_mixing.core.records.observation import Observation
@@ -12,7 +12,7 @@ from autonomous_mixing.core.records.project import ProjectSnapshot
 from autonomous_mixing.core.records.results import PortResult
 
 
-class DecisionController(Protocol):
+class DecisionMaker(Protocol):
     """Proposes one action or an abstention for a decision request.
 
     Implementations return expected failures as ``PortFailure``; callers validate successful
@@ -20,12 +20,12 @@ class DecisionController(Protocol):
     execute.
     """
 
-    def decide(self, request: DecisionRequest) -> PortResult[DecisionResponse]: ...
+    def decide(self, request: Situation) -> PortResult[DecisionResponse]: ...
 
 
-def validate_decision_response(request: DecisionRequest, response: DecisionResponse) -> None:
+def validate_decision_response(request: Situation, response: DecisionResponse) -> None:
     """Check a decision's structural references and controller identity against its request."""
-    require_instance(request, DecisionRequest, "request")
+    require_instance(request, Situation, "request")
     require_instance(response, DecisionResponse, "response")
     decision = response.decision
     validate_decision_references(decision, request.state.snapshot, request.context, request.observations)

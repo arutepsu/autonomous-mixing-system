@@ -97,7 +97,7 @@ def _require_unique_observations(observations: tuple[Observation, ...], field: s
 
 
 @dataclass(frozen=True)
-class DecisionRequest:
+class Situation:
     """Runtime-visible inputs for one decision.
 
     Usage may exceed limits (the record describes, it does not enforce). Artifact locations are
@@ -112,12 +112,12 @@ class DecisionRequest:
     limits: BudgetLimits
 
     def __post_init__(self) -> None:
-        require_instance(self.state, ProjectState, "DecisionRequest.state")
-        require_instance(self.context, MusicalContext, "DecisionRequest.context")
-        require_instance(self.controller, ControllerIdentity, "DecisionRequest.controller")
-        _require_unique_observations(self.observations, "DecisionRequest.observations")
-        require_instance(self.usage, BudgetUsage, "DecisionRequest.usage")
-        require_instance(self.limits, BudgetLimits, "DecisionRequest.limits")
+        require_instance(self.state, ProjectState, "Situation.state")
+        require_instance(self.context, MusicalContext, "Situation.context")
+        require_instance(self.controller, ControllerIdentity, "Situation.controller")
+        _require_unique_observations(self.observations, "Situation.observations")
+        require_instance(self.usage, BudgetUsage, "Situation.usage")
+        require_instance(self.limits, BudgetLimits, "Situation.limits")
         snapshot, audio = self.state.snapshot, self.state.audio
         self.context.validate_against(snapshot)
         for observation in self.observations:

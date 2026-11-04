@@ -35,11 +35,11 @@ ALLOWED_PACKAGES = {
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
-    "ports.decision": ("DecisionController", "validate_decision_response", "validate_decision_references"),
-    "ports.rendering": ("AudioProcessor", "validate_processed_candidate"),
+    "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
+    "ports.rendering": ("Renderer", "validate_rendered_candidate"),
     "admission.admission": ("admit_action",),
     "admission.preflight": ("preflight_execution",),
-    "verification.consistency": ("validate_validation_references",),
+    "verification.consistency": ("validate_verification_references",),
     "loop.transitions": ("validate_gain_execution", "derive_candidate_project_state"),
     "loop.references": ("validate_attempt_references",),
 }

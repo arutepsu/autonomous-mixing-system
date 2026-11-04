@@ -12,8 +12,8 @@ import typing
 from inspect import Parameter
 
 from autonomous_mixing.core.ports.analysis import AudioAnalyzer
-from autonomous_mixing.core.ports.decision import DecisionController
-from autonomous_mixing.core.ports.rendering import AudioProcessor
+from autonomous_mixing.core.ports.decision import DecisionMaker
+from autonomous_mixing.core.ports.rendering import Renderer
 from autonomous_mixing.core.records.admission import (
     AdmissionResult,
     AdmittedAction,
@@ -22,7 +22,7 @@ from autonomous_mixing.core.records.admission import (
     PreflightResult,
     RejectedAction,
 )
-from autonomous_mixing.core.records.rendering import ProcessedCandidate, ProcessingFailure, ProcessingOutcome
+from autonomous_mixing.core.records.rendering import RenderedCandidate, RenderFailure, RenderOutcome
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult, Success
 
 
@@ -41,10 +41,10 @@ def test_shared_result_types_keep_their_generic_shape_and_codes():
 
 
 def test_port_protocols_and_outcome_unions_keep_their_shape():
-    for port in (AudioAnalyzer, DecisionController, AudioProcessor):
+    for port in (AudioAnalyzer, DecisionMaker, Renderer):
         assert typing.Protocol in port.__mro__, port.__name__
     assert typing.get_args(AdmissionResult) == (AdmittedAction, RejectedAction)
-    assert typing.get_args(ProcessingOutcome) == (ProcessedCandidate, ProcessingFailure)
+    assert typing.get_args(RenderOutcome) == (RenderedCandidate, RenderFailure)
     assert typing.get_args(PreflightResult) == (MetadataReady, PreflightRejected)
 
 
@@ -69,11 +69,11 @@ def _method(*pairs, returns):
 
 def test_task1_constructor_function_and_protocol_signatures_match_the_baseline():
     from autonomous_mixing.core.ports.analysis import AudioAnalyzer, validate_analysis_response
-    from autonomous_mixing.core.ports.decision import DecisionController, validate_decision_response
+    from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
     from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
     from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
     from autonomous_mixing.core.records.context import MusicalContext
-    from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, DecisionRequest, DecisionResponse
+    from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, DecisionResponse, Situation
     from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, Observation
     from autonomous_mixing.core.records.project import ProjectState
     from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult
@@ -84,7 +84,7 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
             ("state", ProjectState), ("scope", AnalysisScope), ("specification", AnalysisSpec), returns=None
         ),
         AnalysisResponse: _fields(("observations", tuple[Observation, ...]), returns=None),
-        DecisionRequest: _fields(
+        Situation: _fields(
             ("state", ProjectState),
             ("context", MusicalContext),
             ("controller", ControllerIdentity),
@@ -95,9 +95,9 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
         ),
         DecisionResponse: _fields(("decision", Decision), returns=None),
         validate_analysis_response: _fields(("request", AnalysisRequest), ("response", AnalysisResponse), returns=None),
-        validate_decision_response: _fields(("request", DecisionRequest), ("response", DecisionResponse), returns=None),
+        validate_decision_response: _fields(("request", Situation), ("response", DecisionResponse), returns=None),
         AudioAnalyzer.analyze: _method(("request", AnalysisRequest), returns=PortResult[AnalysisResponse]),
-        DecisionController.decide: _method(("request", DecisionRequest), returns=PortResult[DecisionResponse]),
+        DecisionMaker.decide: _method(("request", Situation), returns=PortResult[DecisionResponse]),
     }
     for obj, signature in expected.items():
         assert _params(obj) == signature, obj.__qualname__
@@ -115,7 +115,7 @@ def test_admission_signatures_match_the_baseline():
         RejectedAction,
         TrackGainPermission,
     )
-    from autonomous_mixing.core.records.decision import Decision, DecisionRequest
+    from autonomous_mixing.core.records.decision import Decision, Situation
     from autonomous_mixing.core.records.identifiers import DecisionId, ProjectId, TrackId, VersionRef
 
     expected = {
@@ -127,7 +127,7 @@ def test_admission_signatures_match_the_baseline():
             returns=None,
         ),
         ActionAdmissionRequest: _fields(
-            ("decision_request", DecisionRequest),
+            ("decision_request", Situation),
             ("decision", Decision),
             ("policy", ActionAdmissionPolicy),
             returns=None,
@@ -152,7 +152,7 @@ def test_admission_signatures_match_the_baseline():
 
 def test_execution_signatures_match_the_baseline():
     from autonomous_mixing.core.admission.preflight import preflight_execution
-    from autonomous_mixing.core.ports.rendering import AudioProcessor, validate_processed_candidate
+    from autonomous_mixing.core.ports.rendering import Renderer, validate_rendered_candidate
     from autonomous_mixing.core.records.actions import ExecutionIssue, ExecutionStatus
     from autonomous_mixing.core.records.admission import (
         ActionAdmissionPolicy,
@@ -165,7 +165,7 @@ def test_execution_signatures_match_the_baseline():
         StemBinding,
     )
     from autonomous_mixing.core.records.artifacts import AudioArtifact
-    from autonomous_mixing.core.records.decision import Decision, DecisionRequest
+    from autonomous_mixing.core.records.decision import Decision, Situation
     from autonomous_mixing.core.records.identifiers import (
         ArtifactId,
         ExecutionId,
@@ -177,13 +177,13 @@ def test_execution_signatures_match_the_baseline():
     from autonomous_mixing.core.records.mix import MixRecipe, ProcessingSpec
     from autonomous_mixing.core.records.observation import RenderSpec
     from autonomous_mixing.core.records.rendering import (
-        ArtifactProcessingEvidence,
         CandidateIdentity,
         ExecutionWorkspace,
-        ProcessedCandidate,
-        ProcessingFailure,
-        ProcessingOutcome,
-        ProcessingPlan,
+        RenderedCandidate,
+        RenderEvidence,
+        RenderFailure,
+        RenderOutcome,
+        RenderPlan,
     )
 
     expected = {
@@ -196,7 +196,7 @@ def test_execution_signatures_match_the_baseline():
         ),
         ExecutionRequest: _fields(
             ("execution_id", ExecutionId),
-            ("decision_request", DecisionRequest),
+            ("decision_request", Situation),
             ("decision", Decision),
             ("policy", ActionAdmissionPolicy),
             ("mix_recipe", MixRecipe),
@@ -208,7 +208,7 @@ def test_execution_signatures_match_the_baseline():
             ("candidate", CandidateIdentity),
             returns=None,
         ),
-        ProcessingPlan: _fields(
+        RenderPlan: _fields(
             ("execution_id", ExecutionId),
             ("project_id", ProjectId),
             ("before_revision", Revision),
@@ -225,7 +225,7 @@ def test_execution_signatures_match_the_baseline():
             ("workspace", ExecutionWorkspace),
             returns=None,
         ),
-        ArtifactProcessingEvidence: _fields(
+        RenderEvidence: _fields(
             ("artifact_id", ArtifactId),
             ("verified_input_ids", tuple[ArtifactId, ...]),
             ("input_hashes_verified", bool),
@@ -235,13 +235,13 @@ def test_execution_signatures_match_the_baseline():
             ("processing_spec", ProcessingSpec),
             returns=None,
         ),
-        ProcessedCandidate: _fields(
+        RenderedCandidate: _fields(
             ("target_artifact", AudioArtifact),
             ("mix_artifact", AudioArtifact),
-            ("evidence", tuple[ArtifactProcessingEvidence, ...]),
+            ("evidence", tuple[RenderEvidence, ...]),
             returns=None,
         ),
-        ProcessingFailure: _fields(("status", ExecutionStatus), ("issue", ExecutionIssue), returns=None),
+        RenderFailure: _fields(("status", ExecutionStatus), ("issue", ExecutionIssue), returns=None),
         PreflightRejected: _fields(
             ("execution_id", ExecutionId),
             ("code", PreflightCode),
@@ -249,10 +249,10 @@ def test_execution_signatures_match_the_baseline():
             ("admission_rejection", RejectedAction | None),
             returns=None,
         ),
-        MetadataReady: _fields(("plan", ProcessingPlan), returns=None),
-        validate_processed_candidate: _fields(("plan", ProcessingPlan), ("response", ProcessedCandidate), returns=None),
+        MetadataReady: _fields(("plan", RenderPlan), returns=None),
+        validate_rendered_candidate: _fields(("plan", RenderPlan), ("response", RenderedCandidate), returns=None),
         preflight_execution: _fields(("request", ExecutionRequest), returns=PreflightResult),
-        AudioProcessor.process: _method(("plan", ProcessingPlan), returns=ProcessingOutcome),
+        Renderer.process: _method(("plan", RenderPlan), returns=RenderOutcome),
     }
     for obj, signature in expected.items():
         assert _params(obj) == signature, obj.__qualname__
@@ -299,9 +299,9 @@ def test_cross_record_and_derivation_signatures_are_preserved():
     from autonomous_mixing.core.records.identifiers import CheckpointId
     from autonomous_mixing.core.records.observation import Observation, validate_observation_sources
     from autonomous_mixing.core.records.project import ArtifactCheckpoint, ProjectSnapshot, ProjectState
-    from autonomous_mixing.core.records.run import CorrectionAttempt, Run
-    from autonomous_mixing.core.records.verification import ValidationCriteria, ValidationResult
-    from autonomous_mixing.core.verification.consistency import validate_validation_references
+    from autonomous_mixing.core.records.run import CorrectionAttempt, RunRecord
+    from autonomous_mixing.core.records.verification import AcceptanceCriteria, VerificationResult
+    from autonomous_mixing.core.verification.consistency import validate_verification_references
 
     pos, empty = Parameter.POSITIONAL_OR_KEYWORD, Parameter.empty
 
@@ -321,7 +321,7 @@ def test_cross_record_and_derivation_signatures_are_preserved():
             ("context", MusicalContext),
             ("observations", Iterable[Observation]),
         ),
-        validate_validation_references: params(("result", ValidationResult), ("criteria", ValidationCriteria)),
+        validate_verification_references: params(("result", VerificationResult), ("criteria", AcceptanceCriteria)),
         # Intentionally changed by the processing-state migration (ADR-019): complete-state rollback.
         validate_rollback_references: params(("receipt", RollbackReceipt), ("before_state", ProjectState)),
         validate_receipt_against_checkpoint: params(("receipt", ExecutionReceipt), ("before", ArtifactCheckpoint)),
@@ -340,7 +340,7 @@ def test_cross_record_and_derivation_signatures_are_preserved():
             ("captured_at", datetime),
             returns=ProjectState,
         ),
-        validate_attempt_references: params(("attempt", CorrectionAttempt), ("run", Run), ("decision", Decision)),
+        validate_attempt_references: params(("attempt", CorrectionAttempt), ("run", RunRecord), ("decision", Decision)),
     }
     for function, signature in expected.items():
         assert _signature(function) == signature, function.__name__

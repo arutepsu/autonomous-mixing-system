@@ -5,21 +5,21 @@ from typing import Protocol
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.identifiers import ArtifactId
 from autonomous_mixing.core.records.invariants import require_instance
-from autonomous_mixing.core.records.rendering import ProcessedCandidate, ProcessingOutcome, ProcessingPlan
+from autonomous_mixing.core.records.rendering import RenderedCandidate, RenderOutcome, RenderPlan
 
 
-class AudioProcessor(Protocol):
+class Renderer(Protocol):
     """Renders a plan's fixed target input at the requested gain and the full mix from current stems.
 
-    Returns a ``ProcessedCandidate`` or a typed ``ProcessingFailure``; callers check candidates with
-    ``validate_processed_candidate``. It must not choose actions, read hidden evaluation data, accept
+    Returns a ``RenderedCandidate`` or a typed ``RenderFailure``; callers check candidates with
+    ``validate_rendered_candidate``. It must not choose actions, read hidden evaluation data, accept
     audio or change policy. No implementation exists in the application layer.
     """
 
-    def process(self, plan: ProcessingPlan) -> ProcessingOutcome: ...
+    def process(self, plan: RenderPlan) -> RenderOutcome: ...
 
 
-def _check_output(artifact: AudioArtifact, plan: ProcessingPlan, expected_id: ArtifactId, kind: ArtifactKind) -> None:
+def _check_output(artifact: AudioArtifact, plan: RenderPlan, expected_id: ArtifactId, kind: ArtifactKind) -> None:
     label = f"output {artifact.artifact_id}"
     if artifact.artifact_id != expected_id:
         raise ValueError(f"{label} must use the assigned candidate ID {expected_id}")
@@ -40,15 +40,15 @@ def _check_output(artifact: AudioArtifact, plan: ProcessingPlan, expected_id: Ar
         raise ValueError(f"{label} render spec {artifact.render_spec} differs from the plan's {plan.render_spec.ref}")
 
 
-def validate_processed_candidate(plan: ProcessingPlan, response: ProcessedCandidate) -> None:
+def validate_rendered_candidate(plan: RenderPlan, response: RenderedCandidate) -> None:
     """Check a processor's outputs and evidence against the plan (structure only).
 
     Does not verify files, hashes, sample values, workspace membership or path/alias safety, and
     assembles no receipt or state; evidence flags are adapter claims. Location checks are lexical and
     cover the plan's inputs only (the plan carries the current mix's ID, not its location).
     """
-    require_instance(plan, ProcessingPlan, "plan")
-    require_instance(response, ProcessedCandidate, "response")
+    require_instance(plan, RenderPlan, "plan")
+    require_instance(response, RenderedCandidate, "response")
     target, mix = response.target_artifact, response.mix_artifact
     _check_output(target, plan, plan.candidate.target_artifact_id, ArtifactKind.STEM)
     _check_output(mix, plan, plan.candidate.mix_artifact_id, ArtifactKind.MIX)

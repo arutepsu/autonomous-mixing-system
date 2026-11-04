@@ -13,12 +13,13 @@ from autonomous_mixing.core.records.identifiers import (
     CriteriaId,
     ObservationId,
     TrackId,
-    ValidationResultId,
+    VerificationResultId,
     VersionRef,
 )
 from autonomous_mixing.core.records.observation import AnalysisScope, MeasuredScalar, TimeRange
 from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
+    AcceptanceCriteria,
     AssessmentMode,
     BaselineReference,
     CheckResult,
@@ -30,11 +31,10 @@ from autonomous_mixing.core.records.verification import (
     MetricSelector,
     TargetCondition,
     TargetStatus,
-    ValidationCriteria,
-    ValidationResult,
-    ValidationVerdict,
+    Verdict,
+    VerificationResult,
 )
-from autonomous_mixing.core.verification.consistency import validate_validation_references
+from autonomous_mixing.core.verification.consistency import validate_verification_references
 
 PASS, FAIL, UNAVAILABLE, NA = CheckStatus.PASS, CheckStatus.FAIL, CheckStatus.UNAVAILABLE, CheckStatus.NOT_APPLICABLE
 
@@ -63,7 +63,7 @@ def _delta(cid: str = "delta-guard", limit: float = 2.0, baseline=BaselineRefere
     return DeltaGuard(ConditionId(cid), _selector("metric-c", "t3"), baseline, MeasuredScalar(limit, "unit-c"))
 
 
-def _criteria(**overrides) -> ValidationCriteria:
+def _criteria(**overrides) -> AcceptanceCriteria:
     fields = dict(
         criteria_id=CriteriaId("crit"),
         version="1",
@@ -72,7 +72,7 @@ def _criteria(**overrides) -> ValidationCriteria:
         guards=(_absolute(), _delta()),
     )
     fields.update(overrides)
-    return ValidationCriteria(**fields)
+    return AcceptanceCriteria(**fields)
 
 
 def _check(cid: str, status: CheckStatus, evidence: tuple[str, ...] | None = None) -> CheckResult:
@@ -81,9 +81,9 @@ def _check(cid: str, status: CheckStatus, evidence: tuple[str, ...] | None = Non
     return CheckResult(ConditionId(cid), status, f"{status.name} for {cid}", tuple(ObservationId(o) for o in evidence))
 
 
-def _result(statuses: dict[str, CheckStatus], mode, verdict, target_status, **overrides) -> ValidationResult:
+def _result(statuses: dict[str, CheckStatus], mode, verdict, target_status, **overrides) -> VerificationResult:
     fields = dict(
-        validation_result_id=ValidationResultId("v1"),
+        validation_result_id=VerificationResultId("v1"),
         criteria_id=CriteriaId("crit"),
         criteria_version="1",
         mode=mode,
@@ -92,7 +92,7 @@ def _result(statuses: dict[str, CheckStatus], mode, verdict, target_status, **ov
         target_status=target_status,
     )
     fields.update(overrides)
-    return ValidationResult(**fields)
+    return VerificationResult(**fields)
 
 
 def _attempt(target=PASS, improve=PASS, abs_guard=PASS, delta_guard=PASS) -> dict[str, CheckStatus]:
@@ -105,9 +105,9 @@ def _initial(target=PASS, abs_guard=PASS) -> dict[str, CheckStatus]:
 
 ATTEMPT, INITIAL = AssessmentMode.ATTEMPT, AssessmentMode.INITIAL
 ACCEPTED, REJECTED, INCONCLUSIVE = (
-    ValidationVerdict.ACCEPTED,
-    ValidationVerdict.REJECTED,
-    ValidationVerdict.INCONCLUSIVE,
+    Verdict.ACCEPTED,
+    Verdict.REJECTED,
+    Verdict.INCONCLUSIVE,
 )
 SATISFIED, UNMET, UNKNOWN = TargetStatus.SATISFIED, TargetStatus.UNMET, TargetStatus.UNKNOWN
 
@@ -115,7 +115,7 @@ SATISFIED, UNMET, UNKNOWN = TargetStatus.SATISFIED, TargetStatus.UNMET, TargetSt
 # --- identifiers and enums -------------------------------------------------------
 
 
-@pytest.mark.parametrize("cls", [CriteriaId, ConditionId, ValidationResultId])
+@pytest.mark.parametrize("cls", [CriteriaId, ConditionId, VerificationResultId])
 @pytest.mark.parametrize("raw", ["", " ", 3, None])
 def test_new_identifiers_reject_blank_and_non_string(cls, raw):
     with pytest.raises(ValueError):
@@ -124,7 +124,7 @@ def test_new_identifiers_reject_blank_and_non_string(cls, raw):
 
 def test_new_identifiers_are_distinct_kinds():
     assert CriteriaId("x") != ConditionId("x")
-    assert ConditionId("x") != ValidationResultId("x")
+    assert ConditionId("x") != VerificationResultId("x")
 
 
 @pytest.mark.parametrize(
@@ -135,7 +135,7 @@ def test_new_identifiers_are_distinct_kinds():
         (BaselineReference, {"ATTEMPT", "INITIAL"}),
         (AssessmentMode, {"INITIAL", "ATTEMPT"}),
         (CheckStatus, {"PASS", "FAIL", "UNAVAILABLE", "NOT_APPLICABLE"}),
-        (ValidationVerdict, {"ACCEPTED", "REJECTED", "INCONCLUSIVE"}),
+        (Verdict, {"ACCEPTED", "REJECTED", "INCONCLUSIVE"}),
         (TargetStatus, {"SATISFIED", "UNMET", "UNKNOWN"}),
     ],
 )
@@ -293,15 +293,15 @@ def test_accepted_target_satisfaction_and_accepted_intermediate_improvement():
     criteria = _criteria()
     satisfied = _result(_attempt(), ATTEMPT, ACCEPTED, SATISFIED)
     intermediate = _result(_attempt(target=FAIL), ATTEMPT, ACCEPTED, UNMET)
-    validate_validation_references(satisfied, criteria)
-    validate_validation_references(intermediate, criteria)
+    validate_verification_references(satisfied, criteria)
+    validate_verification_references(intermediate, criteria)
 
 
 def test_initial_assessment_defers_improvement_and_delta_guard_checks():
     criteria = _criteria()
-    validate_validation_references(_result(_initial(), INITIAL, ACCEPTED, SATISFIED), criteria)
-    validate_validation_references(_result(_initial(target=FAIL), INITIAL, REJECTED, UNMET), criteria)
-    validate_validation_references(_result(_initial(target=UNAVAILABLE), INITIAL, INCONCLUSIVE, UNKNOWN), criteria)
+    validate_verification_references(_result(_initial(), INITIAL, ACCEPTED, SATISFIED), criteria)
+    validate_verification_references(_result(_initial(target=FAIL), INITIAL, REJECTED, UNMET), criteria)
+    validate_verification_references(_result(_initial(target=UNAVAILABLE), INITIAL, INCONCLUSIVE, UNKNOWN), criteria)
 
 
 @pytest.mark.parametrize(
@@ -323,12 +323,12 @@ def test_result_rejects_intrinsically_contradictory_combinations(statuses, mode,
 def test_accepted_satisfied_attempt_may_have_failing_improvement_check():
     # Regression: improvement conditions only gate acceptance when targets are UNMET.
     result = _result(_attempt(improve=FAIL), ATTEMPT, ACCEPTED, SATISFIED)
-    validate_validation_references(result, _criteria())
+    validate_verification_references(result, _criteria())
 
 
 def test_valid_intermediate_improvement_remains_acceptable():
     result = _result(_attempt(target=FAIL), ATTEMPT, ACCEPTED, UNMET)
-    validate_validation_references(result, _criteria())
+    validate_verification_references(result, _criteria())
 
 
 @pytest.mark.parametrize("guard", ["abs-guard", "delta-guard"])
@@ -336,14 +336,14 @@ def test_valid_intermediate_improvement_remains_acceptable():
 def test_references_reject_accepted_attempt_with_failing_guard(guard, target, target_status):
     result = _result(_attempt(target=target, **{guard.replace("-", "_"): FAIL}), ATTEMPT, ACCEPTED, target_status)
     with pytest.raises(ValueError, match="ACCEPTED.*guard"):
-        validate_validation_references(result, _criteria())
+        validate_verification_references(result, _criteria())
 
 
 def test_references_reject_accepted_intermediate_improvement_with_failing_improvement():
     criteria = _criteria(improvements=(_improvement("improve"), _improvement("improve-2")))
     result = _result({**_attempt(target=FAIL), "improve-2": FAIL}, ATTEMPT, ACCEPTED, UNMET)
     with pytest.raises(ValueError, match="ACCEPTED.*improve-2"):
-        validate_validation_references(result, criteria)
+        validate_verification_references(result, criteria)
 
 
 @pytest.mark.parametrize("condition", ["improve", "abs-guard", "delta-guard"])
@@ -389,16 +389,16 @@ def test_rejected_and_inconclusive_results_may_carry_any_check_status():
 def test_references_reject_criteria_identity_or_version_mismatch(overrides, match):
     result = _result(_attempt(), ATTEMPT, ACCEPTED, SATISFIED, **overrides)
     with pytest.raises(ValueError, match=match):
-        validate_validation_references(result, _criteria())
+        validate_verification_references(result, _criteria())
 
 
 def test_references_reject_missing_and_extra_checks():
     missing = {k: v for k, v in _attempt().items() if k != "delta-guard"}
     with pytest.raises(ValueError, match="delta-guard"):
-        validate_validation_references(_result(missing, ATTEMPT, ACCEPTED, SATISFIED), _criteria())
+        validate_verification_references(_result(missing, ATTEMPT, ACCEPTED, SATISFIED), _criteria())
     extra = {**_attempt(), "unknown": PASS}
     with pytest.raises(ValueError, match="unknown"):
-        validate_validation_references(_result(extra, ATTEMPT, ACCEPTED, SATISFIED), _criteria())
+        validate_verification_references(_result(extra, ATTEMPT, ACCEPTED, SATISFIED), _criteria())
 
 
 @pytest.mark.parametrize(
@@ -413,17 +413,17 @@ def test_references_reject_missing_and_extra_checks():
 def test_references_enforce_initial_mode_applicability(statuses):
     result = _result(statuses, INITIAL, INCONCLUSIVE, UNKNOWN if statuses["target"] is NA else SATISFIED)
     with pytest.raises(ValueError, match="INITIAL"):
-        validate_validation_references(result, _criteria())
+        validate_verification_references(result, _criteria())
 
 
 @pytest.mark.parametrize("condition", ["target", "improve", "abs-guard", "delta-guard"])
 def test_references_forbid_not_applicable_in_attempt_mode(condition):
     result = _result({**_attempt(), condition: NA}, ATTEMPT, INCONCLUSIVE, SATISFIED)
     with pytest.raises(ValueError, match="ATTEMPT"):
-        validate_validation_references(result, _criteria())
+        validate_verification_references(result, _criteria())
 
 
-def _two_targets() -> ValidationCriteria:
+def _two_targets() -> AcceptanceCriteria:
     return _criteria(targets=(_target("target"), _target("target-2")))
 
 
@@ -446,10 +446,10 @@ def _two_targets() -> ValidationCriteria:
 def test_references_check_target_status_consistency(t1, t2, target_status, valid):
     result = _result({**_attempt(target=t1), "target-2": t2}, ATTEMPT, INCONCLUSIVE, target_status)
     if valid:
-        validate_validation_references(result, _two_targets())
+        validate_verification_references(result, _two_targets())
     else:
         with pytest.raises(ValueError, match="target"):
-            validate_validation_references(result, _two_targets())
+            validate_verification_references(result, _two_targets())
 
 
 def test_nested_records_and_collections_are_immutable():

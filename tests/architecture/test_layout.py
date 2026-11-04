@@ -77,7 +77,7 @@ GAIN_MIX = f"{PKG}.adapters.rendering.gain_mix"
     [
         "from autonomous_mixing.core.records import nothing_here",
         "import autonomous_mixing.domain.project",
-        "from autonomous_mixing.application.execution import ProcessingPlan",
+        "from autonomous_mixing.application.execution import RenderPlan",
         "from autonomous_mixing import cli",
         "from autonomous_mixing.drivers import cli",
         "import autonomous_mixing.drivers.cli",
@@ -92,7 +92,7 @@ def test_checker_rejects_unresolved_imports_and_driver_imports(source):
     "source",
     [
         "import numpy",
-        "from autonomous_mixing.core.records.rendering import ProcessingPlan",
+        "from autonomous_mixing.core.records.rendering import RenderPlan",
         "from autonomous_mixing.core.records import rendering",
         "import autonomous_mixing_extra",  # look-alike top-level package: not the project
         "from autonomous_mixing_extra.core import loop",

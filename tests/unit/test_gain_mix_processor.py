@@ -18,7 +18,7 @@ import soundfile as sf
 import autonomous_mixing.adapters.rendering.gain_mix as gain_mix  # moved in ADR-027 step M3; patched below
 from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
 from autonomous_mixing.adapters.rendering.gain_mix import GAIN_MIX_PROCESSOR, GainMixProcessor, ProcessingLimits
-from autonomous_mixing.adapters.rendering.integrity import verify_resolved_wav_artifact
+from autonomous_mixing.adapters.rendering.integrity import check_resolved_wav_integrity
 from autonomous_mixing.adapters.rendering.locations import resolve_artifact_location
 from autonomous_mixing.adapters.rendering.workspaces import (
     AllocatedWorkspace,
@@ -26,7 +26,7 @@ from autonomous_mixing.adapters.rendering.workspaces import (
     WorkspaceRoot,
     allocate_workspace,
 )
-from autonomous_mixing.core.ports.rendering import AudioProcessor, validate_processed_candidate
+from autonomous_mixing.core.ports.rendering import Renderer, validate_rendered_candidate
 from autonomous_mixing.core.records.actions import ExecutionStatus
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.identifiers import (
@@ -61,10 +61,10 @@ from autonomous_mixing.core.records.project import (
 from autonomous_mixing.core.records.rendering import (
     CandidateIdentity,
     ExecutionWorkspace,
-    ProcessedCandidate,
-    ProcessingFailure,
-    ProcessingOutcome,
-    ProcessingPlan,
+    RenderedCandidate,
+    RenderFailure,
+    RenderOutcome,
+    RenderPlan,
 )
 
 RATE = 48000
@@ -102,7 +102,7 @@ class Setup:
     output: Path
     artifacts: dict[str, AudioArtifact]
     state: ProjectState
-    plan: ProcessingPlan
+    plan: RenderPlan
     workspace: AllocatedWorkspace
     samples: dict[str, np.ndarray]
 
@@ -162,7 +162,7 @@ def _build(tmp_path: Path, samples=None, *, gain_db=GAIN_DB, token=TOKEN, locati
     )
     channels = samples["a-t2"].shape[1]
     execution_workspace = ExecutionWorkspace(ExecutionId("e1"), ROOT_KEY, token)
-    plan = ProcessingPlan(
+    plan = RenderPlan(
         execution_id=ExecutionId("e1"),
         project_id=project,
         before_revision=revision,
@@ -204,8 +204,8 @@ def _source_hashes(setup: Setup) -> dict[str, str]:
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(setup.source.iterdir())}
 
 
-def _failure(outcome: ProcessingOutcome, code: str) -> ProcessingFailure:
-    assert isinstance(outcome, ProcessingFailure)
+def _failure(outcome: RenderOutcome, code: str) -> RenderFailure:
+    assert isinstance(outcome, RenderFailure)
     assert outcome.status is ExecutionStatus.FAILED
     assert outcome.issue.code == code
     return outcome
@@ -234,8 +234,8 @@ def test_constructor_rejects_wrong_types_without_filesystem_access(tmp_path):
 
 def test_processor_satisfies_the_port_structurally(tmp_path):
     setup = _build(tmp_path)
-    processor: AudioProcessor = setup.processor()  # static check: structural Protocol conformance
-    assert isinstance(processor.process(setup.plan), ProcessedCandidate)
+    processor: Renderer = setup.processor()  # static check: structural Protocol conformance
+    assert isinstance(processor.process(setup.plan), RenderedCandidate)
 
 
 # --- semantics ---------------------------------------------------------------------------------------
@@ -249,8 +249,8 @@ def test_outputs_equal_the_kernels_bit_for_bit_and_pass_contract_validation(tmp_
 
     outcome = setup.processor().process(setup.plan)
 
-    assert isinstance(outcome, ProcessedCandidate)
-    validate_processed_candidate(setup.plan, outcome)
+    assert isinstance(outcome, RenderedCandidate)
+    validate_rendered_candidate(setup.plan, outcome)
     expected_target, expected_mix = _expected(setup)
     assert sorted(p.name for p in setup.directory.iterdir()) == ["mix.wav", "target.wav"]
     assert np.array_equal(_bits(_read(setup.directory / "target.wav")), _bits(expected_target))
@@ -271,7 +271,7 @@ def test_non_target_stems_are_not_gained_again_and_obsolete_target_is_excluded(t
 def test_output_records_describe_the_written_files(tmp_path):
     setup = _build(tmp_path)
     outcome = setup.processor().process(setup.plan)
-    assert isinstance(outcome, ProcessedCandidate)
+    assert isinstance(outcome, RenderedCandidate)
     target, mix = outcome.target_artifact, outcome.mix_artifact
     assert (target.location, mix.location) == (f"{TOKEN}/target.wav", f"{TOKEN}/mix.wav")
     assert target.source_track_ids == (TrackId("t2"),) and target.kind is ArtifactKind.STEM
@@ -280,7 +280,7 @@ def test_output_records_describe_the_written_files(tmp_path):
         assert artifact.revision == Revision("r3") and artifact.render_spec == RENDER_REF
         assert artifact.content_hash == hashlib.sha256((setup.directory / name).read_bytes()).hexdigest()
         # The output resolves against the output root like any other input and verifies against its record.
-        verified = verify_resolved_wav_artifact(
+        verified = check_resolved_wav_integrity(
             resolve_artifact_location(artifact, root=str(setup.output)),
             max_file_bytes=1 << 20,
             max_decoded_bytes=1 << 20,
@@ -304,14 +304,14 @@ def test_obsolete_target_stem_and_current_mix_are_never_opened(tmp_path):
     # Corrupt both after allocation: any read would fail its hash check.
     (setup.source / "c-t2.wav").write_bytes(b"not a wav")
     (setup.source / "c-mix.wav").write_bytes(b"not a wav")
-    assert isinstance(setup.processor().process(setup.plan), ProcessedCandidate)
+    assert isinstance(setup.processor().process(setup.plan), RenderedCandidate)
 
 
 def test_repeating_a_plan_in_a_fresh_workspace_gives_identical_samples(tmp_path):
     first = _build(tmp_path)
     first.processor().process(first.plan)
     second = _build(tmp_path, token="e1_run-02")
-    assert isinstance(second.processor().process(second.plan), ProcessedCandidate)
+    assert isinstance(second.processor().process(second.plan), RenderedCandidate)
     for name in ("target.wav", "mix.wav"):
         assert np.array_equal(_bits(_read(first.directory / name)), _bits(_read(second.directory / name)))
     # Hashes are not compared: libsndfile's PEAK chunk carries a timestamp (ADR-025).
@@ -328,7 +328,7 @@ def _assert_rejected_without_output(setup: Setup, processor: GainMixProcessor, p
 
 def test_non_plan_is_rejected(tmp_path):
     setup = _build(tmp_path)
-    _assert_rejected_without_output(setup, setup.processor(), object(), "ProcessingPlan")
+    _assert_rejected_without_output(setup, setup.processor(), object(), "RenderPlan")
 
 
 def test_plan_for_another_workspace_is_rejected(tmp_path):
@@ -374,7 +374,7 @@ def test_inputs_incompatible_with_render_settings_are_rejected(tmp_path):
 
 
 # Equal relative strings under different roots: the files are distinct, but the caller's lexical
-# validate_processed_candidate would reject the rendered result (MD-6, Codex architecture audit 2026-11-03).
+# validate_rendered_candidate would reject the rendered result (MD-6, Codex architecture audit 2026-11-03).
 @pytest.mark.parametrize(
     "aid, filename",
     [("a-t2", "target.wav"), ("a-t1", "mix.wav"), ("c-t2", "target.wav")],
@@ -395,8 +395,8 @@ def test_input_location_equal_to_a_planned_output_location_is_rejected_before_an
 def test_layouts_the_lexical_check_accepts_still_process_and_validate(tmp_path, aid, location):
     setup = _build(tmp_path, locations={aid: location})
     outcome = setup.processor().process(setup.plan)
-    assert isinstance(outcome, ProcessedCandidate)
-    validate_processed_candidate(setup.plan, outcome)
+    assert isinstance(outcome, RenderedCandidate)
+    validate_rendered_candidate(setup.plan, outcome)
 
 
 # --- expected failures ---------------------------------------------------------------------------------

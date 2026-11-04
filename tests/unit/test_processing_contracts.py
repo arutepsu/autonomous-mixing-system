@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from autonomous_mixing.core.ports.rendering import AudioProcessor, validate_processed_candidate
+from autonomous_mixing.core.ports.rendering import Renderer, validate_rendered_candidate
 from autonomous_mixing.core.records.actions import ExecutionIssue, ExecutionStatus
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.identifiers import ArtifactId, ExecutionId, ProjectId, Revision, TrackId, VersionRef
@@ -26,13 +26,13 @@ from autonomous_mixing.core.records.mix import (
 )
 from autonomous_mixing.core.records.observation import RenderSpec
 from autonomous_mixing.core.records.rendering import (
-    ArtifactProcessingEvidence,
     CandidateIdentity,
     ExecutionWorkspace,
-    ProcessedCandidate,
-    ProcessingFailure,
-    ProcessingOutcome,
-    ProcessingPlan,
+    RenderedCandidate,
+    RenderEvidence,
+    RenderFailure,
+    RenderOutcome,
+    RenderPlan,
 )
 
 FRAMES = 48000 * 60
@@ -77,8 +77,8 @@ A_T1, C_T2, A_T3 = _artifact("a-t1", ("t1",), "r1"), _artifact("c-t2", ("t2",), 
 A_T2_BASELINE = _artifact("a-t2", ("t2",), "r0")
 
 
-def _plan() -> ProcessingPlan:
-    return ProcessingPlan(
+def _plan() -> RenderPlan:
+    return RenderPlan(
         execution_id=ExecutionId("e1"),
         project_id=ProjectId("p1"),
         before_revision=Revision("r2"),
@@ -106,20 +106,16 @@ def _mix(tracks=("t1", "t2", "t3"), location="workspace/e1_run-01/c3-mix.wav", *
     return _artifact("c3-mix", tracks, "r3", kind=ArtifactKind.MIX, location=location, **changes)
 
 
-def _evidence(
-    aid, inputs, *, hashes=True, finite=True, peak=0.8, processor=PROCESSOR, spec=SPEC
-) -> ArtifactProcessingEvidence:
-    return ArtifactProcessingEvidence(
-        ArtifactId(aid), tuple(ArtifactId(i) for i in inputs), hashes, finite, peak, processor, spec
-    )
+def _evidence(aid, inputs, *, hashes=True, finite=True, peak=0.8, processor=PROCESSOR, spec=SPEC) -> RenderEvidence:
+    return RenderEvidence(ArtifactId(aid), tuple(ArtifactId(i) for i in inputs), hashes, finite, peak, processor, spec)
 
 
 TARGET_EVIDENCE = _evidence("c3-t2", ("a-t2",))
 MIX_EVIDENCE = _evidence("c3-mix", ("c3-t2", "a-t1", "a-t3"), peak=1.25)  # over-range peak is descriptive only
 
 
-def _response(target=None, mix=None, evidence=None) -> ProcessedCandidate:
-    return ProcessedCandidate(
+def _response(target=None, mix=None, evidence=None) -> RenderedCandidate:
+    return RenderedCandidate(
         target or _target(), mix or _mix(), evidence if evidence is not None else (TARGET_EVIDENCE, MIX_EVIDENCE)
     )
 
@@ -128,11 +124,11 @@ def _response(target=None, mix=None, evidence=None) -> ProcessedCandidate:
 
 
 def test_valid_processed_candidate_passes():
-    validate_processed_candidate(_plan(), _response())
+    validate_rendered_candidate(_plan(), _response())
 
 
 def test_mix_sources_are_compared_as_a_set_not_by_order():
-    validate_processed_candidate(_plan(), _response(mix=_mix(tracks=("t3", "t1", "t2"))))
+    validate_rendered_candidate(_plan(), _response(mix=_mix(tracks=("t3", "t1", "t2"))))
 
 
 # --- output metadata ---------------------------------------------------------------------
@@ -180,14 +176,14 @@ def test_mix_sources_are_compared_as_a_set_not_by_order():
 )
 def test_output_metadata_must_match_the_plan(response, match):
     with pytest.raises(ValueError, match=match):
-        validate_processed_candidate(_plan(), response())
+        validate_rendered_candidate(_plan(), response())
 
 
 def test_render_spec_reference_mismatch_is_rejected_even_when_dimensions_match():
     target = _target(render_spec=VersionRef("render", "2"))
     assert (target.sample_rate_hz, target.channel_count, target.frame_count) == (48000, 2, FRAMES)
     with pytest.raises(ValueError, match="render spec"):
-        validate_processed_candidate(_plan(), _response(target=target))
+        validate_rendered_candidate(_plan(), _response(target=target))
 
 
 # --- evidence ------------------------------------------------------------------------------
@@ -227,7 +223,7 @@ def test_render_spec_reference_mismatch_is_rejected_even_when_dimensions_match()
 )
 def test_evidence_must_cover_outputs_with_exact_dependency_citations(evidence, match):
     with pytest.raises(ValueError, match=match):
-        validate_processed_candidate(_plan(), _response(evidence=evidence))
+        validate_rendered_candidate(_plan(), _response(evidence=evidence))
 
 
 # --- lexical location conflicts (not path or alias safety) ----------------------------------
@@ -250,7 +246,7 @@ def test_evidence_must_cover_outputs_with_exact_dependency_citations(evidence, m
 )
 def test_output_locations_must_be_lexically_distinct(target, mix):
     with pytest.raises(ValueError, match="location"):
-        validate_processed_candidate(_plan(), _response(target=target, mix=mix))
+        validate_rendered_candidate(_plan(), _response(target=target, mix=mix))
 
 
 # --- record construction ----------------------------------------------------------------------
@@ -261,7 +257,7 @@ def test_output_locations_must_be_lexically_distinct(target, mix):
     [
         lambda: _evidence("c3-t2", ()),
         lambda: _evidence("c3-t2", ("a-t2", "a-t2")),
-        lambda: ArtifactProcessingEvidence(ArtifactId("c3-t2"), [ArtifactId("a-t2")], True, True, 0.5, PROCESSOR, SPEC),
+        lambda: RenderEvidence(ArtifactId("c3-t2"), [ArtifactId("a-t2")], True, True, 0.5, PROCESSOR, SPEC),
         lambda: _evidence("c3-t2", ("a-t2",), hashes=1),
         lambda: _evidence("c3-t2", ("a-t2",), finite="yes"),
         lambda: _evidence("c3-t2", ("a-t2",), peak=math.nan),
@@ -269,7 +265,7 @@ def test_output_locations_must_be_lexically_distinct(target, mix):
         lambda: _evidence("c3-t2", ("a-t2",), peak=-0.1),
         lambda: _evidence("c3-t2", ("a-t2",), peak=True),
         lambda: _evidence("c3-t2", ("a-t2",), processor="gain-mix-processor@0.1"),
-        lambda: ArtifactProcessingEvidence("c3-t2", (ArtifactId("a-t2"),), True, True, 0.5, PROCESSOR, SPEC),
+        lambda: RenderEvidence("c3-t2", (ArtifactId("a-t2"),), True, True, 0.5, PROCESSOR, SPEC),
     ],
     ids=[
         "no-inputs",
@@ -299,9 +295,9 @@ def test_zero_peak_is_valid_evidence():
     [
         lambda: _response(evidence=(TARGET_EVIDENCE, TARGET_EVIDENCE)),
         lambda: _response(evidence=[TARGET_EVIDENCE, MIX_EVIDENCE]),
-        lambda: ProcessedCandidate(_target(), _target(), (TARGET_EVIDENCE, MIX_EVIDENCE)),
-        lambda: ProcessedCandidate("c3-t2", _mix(), (TARGET_EVIDENCE, MIX_EVIDENCE)),
-        lambda: ProcessedCandidate(_target(), _mix(), ("evidence",)),
+        lambda: RenderedCandidate(_target(), _target(), (TARGET_EVIDENCE, MIX_EVIDENCE)),
+        lambda: RenderedCandidate("c3-t2", _mix(), (TARGET_EVIDENCE, MIX_EVIDENCE)),
+        lambda: RenderedCandidate(_target(), _mix(), ("evidence",)),
     ],
     ids=["duplicate-evidence", "mutable-evidence", "same-output-twice", "untyped-target", "untyped-evidence"],
 )
@@ -312,7 +308,7 @@ def test_processed_candidate_rejects_invalid_records(build):
 
 @pytest.mark.parametrize("status", [ExecutionStatus.FAILED, ExecutionStatus.UNCERTAIN])
 def test_processing_failure_keeps_known_and_uncertain_outcomes_distinct(status):
-    failure = ProcessingFailure(status, ExecutionIssue("render_error", "processor stopped"))
+    failure = RenderFailure(status, ExecutionIssue("render_error", "processor stopped"))
     assert failure.status is status
 
 
@@ -328,15 +324,15 @@ def test_processing_failure_keeps_known_and_uncertain_outcomes_distinct(status):
 )
 def test_processing_failure_rejects_other_statuses_and_missing_issue(status, issue):
     with pytest.raises(ValueError):
-        ProcessingFailure(status, issue)
+        RenderFailure(status, issue)
 
 
 def test_validator_requires_typed_plan_and_successful_response():
-    failure = ProcessingFailure(ExecutionStatus.FAILED, ExecutionIssue("render_error", "stopped"))
+    failure = RenderFailure(ExecutionStatus.FAILED, ExecutionIssue("render_error", "stopped"))
     with pytest.raises(ValueError):
-        validate_processed_candidate(_plan(), failure)
+        validate_rendered_candidate(_plan(), failure)
     with pytest.raises(ValueError):
-        validate_processed_candidate("plan", _response())
+        validate_rendered_candidate("plan", _response())
 
 
 # --- processor port (test doubles only) ----------------------------------------------------
@@ -349,14 +345,14 @@ class _ScriptedProcessor:
         self.outcome = outcome
         self.calls = 0
 
-    def process(self, plan: ProcessingPlan) -> ProcessingOutcome:
+    def process(self, plan: RenderPlan) -> RenderOutcome:
         self.calls += 1
         if isinstance(self.outcome, Exception):
             raise self.outcome
         return self.outcome
 
 
-def _run(processor: AudioProcessor, plan: ProcessingPlan) -> ProcessingOutcome:
+def _run(processor: Renderer, plan: RenderPlan) -> RenderOutcome:
     return processor.process(plan)
 
 
@@ -364,12 +360,12 @@ def test_processor_port_returns_candidate_or_typed_failure_without_retry():
     plan = _plan()
     success = _ScriptedProcessor(_response())
     outcome = _run(success, plan)
-    assert isinstance(outcome, ProcessedCandidate)
-    validate_processed_candidate(plan, outcome)
+    assert isinstance(outcome, RenderedCandidate)
+    validate_rendered_candidate(plan, outcome)
     for status in (ExecutionStatus.FAILED, ExecutionStatus.UNCERTAIN):
-        failing = _ScriptedProcessor(ProcessingFailure(status, ExecutionIssue("render_error", "stopped")))
+        failing = _ScriptedProcessor(RenderFailure(status, ExecutionIssue("render_error", "stopped")))
         result = _run(failing, plan)
-        assert isinstance(result, ProcessingFailure) and result.status is status
+        assert isinstance(result, RenderFailure) and result.status is status
         assert failing.calls == 1
     assert success.calls == 1
 
@@ -394,7 +390,7 @@ def test_unexpected_processor_exceptions_propagate():
 )
 def test_each_output_must_record_the_plan_processing_spec(evidence):
     with pytest.raises(ValueError, match="processing spec"):
-        validate_processed_candidate(_plan(), _response(evidence=evidence))
+        validate_rendered_candidate(_plan(), _response(evidence=evidence))
 
 
 def test_equal_separately_constructed_processing_spec_is_accepted():
@@ -404,14 +400,14 @@ def test_equal_separately_constructed_processing_spec_is_accepted():
         _evidence("c3-t2", ("a-t2",), spec=separate),
         _evidence("c3-mix", ("c3-t2", "a-t1", "a-t3"), spec=_processing_spec("1")),
     )
-    validate_processed_candidate(_plan(), _response(evidence=evidence))
+    validate_rendered_candidate(_plan(), _response(evidence=evidence))
 
 
 def test_processor_identity_is_checked_separately_from_processing_spec():
     # Same specification, different processor: still rejected by the processor-identity check.
     evidence = (TARGET_EVIDENCE, _evidence("c3-mix", ("c3-t2", "a-t1", "a-t3"), processor=VersionRef("other", "1")))
     with pytest.raises(ValueError, match="processor"):
-        validate_processed_candidate(_plan(), _response(evidence=evidence))
+        validate_rendered_candidate(_plan(), _response(evidence=evidence))
 
 
 @pytest.mark.parametrize("spec", [VersionRef("gain-mix-processing", "1"), None, "gain-mix-processing@1"])

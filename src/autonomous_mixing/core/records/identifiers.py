@@ -62,7 +62,7 @@ class ConditionId(_Identifier):
 
 
 @dataclass(frozen=True)
-class ValidationResultId(_Identifier):
+class VerificationResultId(_Identifier):
     pass
 
 

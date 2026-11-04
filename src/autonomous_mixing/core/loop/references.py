@@ -4,8 +4,8 @@ from autonomous_mixing.core.loop.transitions import validate_gain_execution
 from autonomous_mixing.core.records.actions import Action
 from autonomous_mixing.core.records.decision import Decision, ProposeAction
 from autonomous_mixing.core.records.project import ProjectState
-from autonomous_mixing.core.records.run import CorrectionAttempt, Run
-from autonomous_mixing.core.verification.consistency import validate_validation_references
+from autonomous_mixing.core.records.run import CorrectionAttempt, RunRecord
+from autonomous_mixing.core.verification.consistency import validate_verification_references
 
 
 def _validate_candidate_gain_change(before: ProjectState, candidate: ProjectState, action: Action) -> None:
@@ -31,7 +31,7 @@ def _validate_candidate_gain_change(before: ProjectState, candidate: ProjectStat
         )
 
 
-def validate_attempt_references(attempt: CorrectionAttempt, run: Run, decision: Decision) -> None:
+def validate_attempt_references(attempt: CorrectionAttempt, run: RunRecord, decision: Decision) -> None:
     """Check an attempt's references against its run and decision.
 
     Uses the attempt's before state throughout: it may follow earlier accepted attempts, so its
@@ -74,4 +74,4 @@ def validate_attempt_references(attempt: CorrectionAttempt, run: Run, decision: 
         validate_gain_execution(before, attempt.execution, action)
         _validate_candidate_gain_change(before, attempt.candidate_state, action)
     if attempt.validation is not None:
-        validate_validation_references(attempt.validation, configuration.criteria)
+        validate_verification_references(attempt.validation, configuration.criteria)

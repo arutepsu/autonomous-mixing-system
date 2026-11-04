@@ -21,10 +21,10 @@ from autonomous_mixing.core.records.invariants import require_instance, require_
 from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, RenderSpec
 from autonomous_mixing.core.records.project import ProjectSnapshot, ProjectState
 from autonomous_mixing.core.records.verification import (
+    AcceptanceCriteria,
     AssessmentMode,
-    ValidationCriteria,
-    ValidationResult,
-    ValidationVerdict,
+    Verdict,
+    VerificationResult,
 )
 
 
@@ -36,7 +36,7 @@ class RunConfiguration:
     analysis_spec: AnalysisSpec
     render_spec: RenderSpec
     context: MusicalContext
-    criteria: ValidationCriteria
+    criteria: AcceptanceCriteria
     controller: ControllerIdentity
     budget_limits: BudgetLimits
 
@@ -45,7 +45,7 @@ class RunConfiguration:
         require_instance(self.analysis_spec, AnalysisSpec, "RunConfiguration.analysis_spec")
         require_instance(self.render_spec, RenderSpec, "RunConfiguration.render_spec")
         require_instance(self.context, MusicalContext, "RunConfiguration.context")
-        require_instance(self.criteria, ValidationCriteria, "RunConfiguration.criteria")
+        require_instance(self.criteria, AcceptanceCriteria, "RunConfiguration.criteria")
         require_instance(self.controller, ControllerIdentity, "RunConfiguration.controller")
         require_instance(self.budget_limits, BudgetLimits, "RunConfiguration.budget_limits")
 
@@ -121,7 +121,7 @@ class FinalProjectState(Enum):
 
 
 @dataclass(frozen=True)
-class Run:
+class RunRecord:
     """Immutable run record. FINISHED runs carry all terminal fields; active runs carry none."""
 
     run_id: RunId
@@ -136,18 +136,18 @@ class Run:
     termination_reason: str | None
 
     def __post_init__(self) -> None:
-        require_instance(self.run_id, RunId, "Run.run_id")
-        require_instance(self.project_id, ProjectId, "Run.project_id")
-        require_instance(self.configuration, RunConfiguration, "Run.configuration")
-        require_instance(self.initial_revision, Revision, "Run.initial_revision")
-        require_utc(self.created_at, "Run.created_at")
-        require_instance(self.state, RunState, "Run.state")
-        require_instance(self.usage, BudgetUsage, "Run.usage")
+        require_instance(self.run_id, RunId, "RunRecord.run_id")
+        require_instance(self.project_id, ProjectId, "RunRecord.project_id")
+        require_instance(self.configuration, RunConfiguration, "RunRecord.configuration")
+        require_instance(self.initial_revision, Revision, "RunRecord.initial_revision")
+        require_utc(self.created_at, "RunRecord.created_at")
+        require_instance(self.state, RunState, "RunRecord.state")
+        require_instance(self.usage, BudgetUsage, "RunRecord.usage")
 
         if self.state is RunState.FINISHED:
-            require_instance(self.outcome, RunOutcome, "Run.outcome")
-            require_instance(self.final_project_state, FinalProjectState, "Run.final_project_state")
-            require_text(self.termination_reason, "Run.termination_reason")
+            require_instance(self.outcome, RunOutcome, "RunRecord.outcome")
+            require_instance(self.final_project_state, FinalProjectState, "RunRecord.final_project_state")
+            require_text(self.termination_reason, "RunRecord.termination_reason")
             if self.outcome is RunOutcome.SUCCEEDED and self.final_project_state is FinalProjectState.UNKNOWN:
                 raise ValueError("SUCCEEDED run cannot have UNKNOWN final project state")
         elif (self.outcome, self.final_project_state, self.termination_reason) != (None, None, None):
@@ -208,7 +208,7 @@ class CorrectionAttempt:
     before_state: ProjectState
     execution: ExecutionReceipt | None
     candidate_state: ProjectState | None
-    validation: ValidationResult | None
+    validation: VerificationResult | None
     rollback: RollbackReceipt | None
     disposition: AttemptDisposition
 
@@ -223,7 +223,7 @@ class CorrectionAttempt:
         if self.candidate_state is not None:
             require_instance(self.candidate_state, ProjectState, "CorrectionAttempt.candidate_state")
         if self.validation is not None:
-            require_instance(self.validation, ValidationResult, "CorrectionAttempt.validation")
+            require_instance(self.validation, VerificationResult, "CorrectionAttempt.validation")
         if self.rollback is not None:
             require_instance(self.rollback, RollbackReceipt, "CorrectionAttempt.rollback")
         require_instance(self.disposition, AttemptDisposition, "CorrectionAttempt.disposition")
@@ -261,7 +261,7 @@ class CorrectionAttempt:
         if disposition is AttemptDisposition.ACCEPTED:
             if status is not ExecutionStatus.CANDIDATE_READY:
                 raise ValueError("ACCEPTED attempt requires a CANDIDATE_READY execution")
-            if self.validation is None or self.validation.verdict is not ValidationVerdict.ACCEPTED:
+            if self.validation is None or self.validation.verdict is not Verdict.ACCEPTED:
                 raise ValueError("ACCEPTED attempt requires an ACCEPTED validation verdict")
             if self.rollback is not None:
                 raise ValueError("ACCEPTED attempt must not carry rollback evidence")

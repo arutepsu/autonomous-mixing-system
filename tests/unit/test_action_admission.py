@@ -28,8 +28,8 @@ from autonomous_mixing.core.records.decision import (
     AbstentionReason,
     ControllerIdentity,
     Decision,
-    DecisionRequest,
     ProposeAction,
+    Situation,
 )
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
@@ -89,7 +89,7 @@ def _context(protected=frozenset(), roles=None) -> MusicalContext:
     return MusicalContext(ContextId("c1"), "1", track_roles, (), frozenset(TrackId(t) for t in protected))
 
 
-def _decision_request(protected=frozenset(), roles=None, project="p1", revision="r2") -> DecisionRequest:
+def _decision_request(protected=frozenset(), roles=None, project="p1", revision="r2") -> Situation:
     snapshot = _snapshot(project, revision)
     mix = _artifact("a-mix", ("t1", "t2", "t3"), revision, project)
     checkpoint = ArtifactCheckpoint(CheckpointId("cp"), ProjectId(project), Revision(revision), (mix,))
@@ -115,7 +115,7 @@ def _decision_request(protected=frozenset(), roles=None, project="p1", revision=
         VersionRef("analyzer", "0.1"),
         UTC_NOW,
     )
-    return DecisionRequest(
+    return Situation(
         state,
         _context(protected, roles),
         CONTROLLER,
