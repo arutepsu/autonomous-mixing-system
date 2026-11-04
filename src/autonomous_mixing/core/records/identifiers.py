@@ -87,6 +87,16 @@ class CheckpointId(_Identifier):
 
 
 @dataclass(frozen=True)
+class ProblemCandidateId(_Identifier):
+    """Identifies one problem candidate within a diagnosis report."""
+
+
+@dataclass(frozen=True)
+class DiagnosisCoverageId(_Identifier):
+    """Identifies one coverage row (family, scope, method) within a diagnosis report."""
+
+
+@dataclass(frozen=True)
 class Revision(_Identifier):
     """Opaque project revision token; only equality is meaningful (no ordering or counter contract)."""
 
