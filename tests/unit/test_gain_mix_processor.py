@@ -16,38 +16,20 @@ import pytest
 import soundfile as sf
 
 import autonomous_mixing.adapters.rendering.gain_mix as gain_mix  # moved in ADR-027 step M3; patched below
-from autonomous_mixing.application.execution import (
-    AudioProcessor,
-    CandidateIdentity,
-    ExecutionWorkspace,
-    ProcessedCandidate,
-    ProcessingFailure,
-    ProcessingOutcome,
-    ProcessingPlan,
-    validate_processed_candidate,
+from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
+from autonomous_mixing.adapters.rendering.gain_mix import GAIN_MIX_PROCESSOR, GainMixProcessor, ProcessingLimits
+from autonomous_mixing.adapters.rendering.integrity import verify_resolved_wav_artifact
+from autonomous_mixing.adapters.rendering.locations import resolve_artifact_location
+from autonomous_mixing.adapters.rendering.workspaces import (
+    AllocatedWorkspace,
+    WorkspaceAllocationRequest,
+    WorkspaceRoot,
+    allocate_workspace,
 )
-from autonomous_mixing.domain.action import ExecutionStatus
-from autonomous_mixing.domain.observation import RenderSpec
-from autonomous_mixing.domain.project import (
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    GainRule,
-    LevelPolicy,
-    MixRecipe,
-    NumericalPrecision,
-    OutputContainer,
-    ProcessingSpec,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    SampleEncoding,
-    SummationOrder,
-    SummingPolicy,
-    Track,
-    TrackGainState,
-)
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.ports.rendering import AudioProcessor, validate_processed_candidate
+from autonomous_mixing.core.records.actions import ExecutionStatus
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import (
     ArtifactId,
     CheckpointId,
     ExecutionId,
@@ -56,14 +38,33 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
-from autonomous_mixing.infrastructure.audio import apply_absolute_gain, sum_stems, verify_resolved_wav_artifact
-from autonomous_mixing.infrastructure.filesystem import resolve_artifact_location
-from autonomous_mixing.infrastructure.processing import GAIN_MIX_PROCESSOR, GainMixProcessor, ProcessingLimits
-from autonomous_mixing.infrastructure.workspaces import (
-    AllocatedWorkspace,
-    WorkspaceAllocationRequest,
-    WorkspaceRoot,
-    allocate_workspace,
+from autonomous_mixing.core.records.mix import (
+    GainRule,
+    LevelPolicy,
+    MixRecipe,
+    NumericalPrecision,
+    OutputContainer,
+    ProcessingSpec,
+    SampleEncoding,
+    SummationOrder,
+    SummingPolicy,
+)
+from autonomous_mixing.core.records.observation import RenderSpec
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
+)
+from autonomous_mixing.core.records.rendering import (
+    CandidateIdentity,
+    ExecutionWorkspace,
+    ProcessedCandidate,
+    ProcessingFailure,
+    ProcessingOutcome,
+    ProcessingPlan,
 )
 
 RATE = 48000

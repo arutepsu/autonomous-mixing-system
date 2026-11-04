@@ -9,22 +9,11 @@ import math
 
 import pytest
 
-from autonomous_mixing.application.execution import (
-    ArtifactProcessingEvidence,
-    AudioProcessor,
-    CandidateIdentity,
-    ExecutionWorkspace,
-    ProcessedCandidate,
-    ProcessingFailure,
-    ProcessingOutcome,
-    ProcessingPlan,
-    validate_processed_candidate,
-)
-from autonomous_mixing.domain.action import ExecutionIssue, ExecutionStatus
-from autonomous_mixing.domain.observation import RenderSpec
-from autonomous_mixing.domain.project import (
-    ArtifactKind,
-    AudioArtifact,
+from autonomous_mixing.core.ports.rendering import AudioProcessor, validate_processed_candidate
+from autonomous_mixing.core.records.actions import ExecutionIssue, ExecutionStatus
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import ArtifactId, ExecutionId, ProjectId, Revision, TrackId, VersionRef
+from autonomous_mixing.core.records.mix import (
     GainRule,
     LevelPolicy,
     MixRecipe,
@@ -35,7 +24,16 @@ from autonomous_mixing.domain.project import (
     SummationOrder,
     SummingPolicy,
 )
-from autonomous_mixing.domain.shared import ArtifactId, ExecutionId, ProjectId, Revision, TrackId, VersionRef
+from autonomous_mixing.core.records.observation import RenderSpec
+from autonomous_mixing.core.records.rendering import (
+    ArtifactProcessingEvidence,
+    CandidateIdentity,
+    ExecutionWorkspace,
+    ProcessedCandidate,
+    ProcessingFailure,
+    ProcessingOutcome,
+    ProcessingPlan,
+)
 
 FRAMES = 48000 * 60
 PROCESSOR = VersionRef("gain-mix-processor", "0.1")

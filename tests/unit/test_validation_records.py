@@ -5,14 +5,10 @@ Metric names, units and thresholds are arbitrary structural fixtures, not scient
 
 import dataclasses
 import math
-import subprocess
-import sys
 
 import pytest
 
-from autonomous_mixing.domain.observation import MeasuredScalar
-from autonomous_mixing.domain.project import AnalysisScope, TimeRange
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.identifiers import (
     ConditionId,
     CriteriaId,
     ObservationId,
@@ -20,7 +16,8 @@ from autonomous_mixing.domain.shared import (
     ValidationResultId,
     VersionRef,
 )
-from autonomous_mixing.domain.validation import (
+from autonomous_mixing.core.records.observation import AnalysisScope, MeasuredScalar, TimeRange
+from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
     AssessmentMode,
     BaselineReference,
@@ -36,8 +33,8 @@ from autonomous_mixing.domain.validation import (
     ValidationCriteria,
     ValidationResult,
     ValidationVerdict,
-    validate_validation_references,
 )
+from autonomous_mixing.core.verification.consistency import validate_validation_references
 
 PASS, FAIL, UNAVAILABLE, NA = CheckStatus.PASS, CheckStatus.FAIL, CheckStatus.UNAVAILABLE, CheckStatus.NOT_APPLICABLE
 
@@ -470,22 +467,3 @@ def test_nested_records_and_collections_are_immutable():
 
 
 # --- dependency boundary ---------------------------------------------------------
-
-
-def test_validation_module_loads_only_standard_library_and_domain_modules():
-    # Complements the AST scan in test_domain_foundation.py, which covers every module in the domain package.
-    script = (
-        "import sys\n"
-        "before = set(sys.modules)\n"
-        "import autonomous_mixing.domain.validation\n"
-        "for name in sorted(set(sys.modules) - before):\n"
-        "    top = name.split('.')[0]\n"
-        "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
-        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.') \\\n"
-        # ADR-027 migration steps M1/M2: domain records and behavior moved to the core package.
-        "        or name == 'autonomous_mixing.core' \\\n"
-        "        or name.startswith('autonomous_mixing.core.')\n"
-        "    if not ok: print(name)\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-    assert result.stdout == ""

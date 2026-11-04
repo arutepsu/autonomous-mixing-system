@@ -10,7 +10,7 @@ import warnings
 import numpy as np
 import pytest
 
-from autonomous_mixing.infrastructure.audio import apply_absolute_gain, sum_stems
+from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
 
 # Non-default caller setting: every floating-point condition raises unless the kernel handles it locally.
 HOSTILE = {"divide": "raise", "over": "raise", "under": "raise", "invalid": "raise"}

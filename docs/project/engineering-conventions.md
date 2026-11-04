@@ -2,7 +2,7 @@
 
 Shared code-structure and coding rules for every contributor, human or AI assistant (Claude Code and Codex read this file through `CLAUDE.md`). The architecture these rules serve is decided in [ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md) (Accepted 2026-11-03). Research and documentation rules stay in `CLAUDE.md`, [`documentation-policy.md`](documentation-policy.md) and [ADR-006](../decisions/0006-research-first-development-policy.md).
 
-Status: the rules below are the **target**. The current source tree still uses the domain/application/infrastructure layout (ADR-017, ADR-022) until the migration steps in ADR-027 land. During migration, do not add new modules to the old layout's compatibility facades or shims, and do not extend the old dependency matrices.
+Status: implemented since migration step M4 (2026-11-04); the domain/application/infrastructure layout and its compatibility paths no longer exist. `core.diagnosis`, `adapters.decision_agent`, `adapters.baselines`, `drivers.experiments` and `evaluation` are created with their first real code. The rules are enforced by `tests/architecture/`.
 
 ## Architecture in one paragraph
 A modular monolith in hexagonal (ports-and-adapters) style. The `core` contains the mixing control loop, structured like a MAPE-K feedback loop (measure → diagnose → decide → admit → render → verify → accept or roll back), plus the pure rules it uses and the immutable records they exchange. Everything that touches audio samples, files or the AI provider is an `adapter` behind a port the core defines. `drivers` (CLI, experiment runner) build the adapters and start runs. `evaluation` holds the hidden reference and is used only by the experiment runner.

@@ -21,6 +21,30 @@ def module_files(src: Path, root: Path) -> dict[str, Path]:
     return files
 
 
+def missing_package_children(
+    source: str, module: str, is_package: bool, packages: frozenset[str], known: frozenset[str]
+) -> list[str]:
+    """``from <package> import name`` targets where ``package`` is in ``packages`` and ``name`` is not a module.
+
+    ``resolve_imports`` maps such a name to its package. For packages whose initializers define nothing
+    (ADR-027 step M4), the name can only be a missing module, so callers report these as unresolved.
+    """
+    package = module.split(".") if is_package else module.split(".")[:-1]
+    missing = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.level:
+            if node.level - 1 >= len(package):
+                continue
+            base = ".".join(package[: len(package) - (node.level - 1)] + ([node.module] if node.module else []))
+        else:
+            base = node.module or ""
+        if base in packages:
+            missing += [f"{base}.{a.name}" for a in node.names if f"{base}.{a.name}" not in known]
+    return missing
+
+
 def resolve_imports(source: str, module: str, is_package: bool, known: frozenset[str]) -> set[str | None]:
     package = module.split(".") if is_package else module.split(".")[:-1]
     targets: set[str | None] = set()

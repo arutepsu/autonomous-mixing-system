@@ -22,21 +22,19 @@ from types import SimpleNamespace
 
 import pytest
 
-import autonomous_mixing.adapters.rendering.revalidation as validation  # moved in ADR-027 step M3; tests patch or inspect its internals
 import autonomous_mixing.adapters.rendering.workspaces as allocation  # moved in ADR-027 step M3; tests patch or inspect its internals
-import autonomous_mixing.infrastructure.workspaces as workspaces
-from autonomous_mixing.application.execution import ExecutionWorkspace
-from autonomous_mixing.domain.project import (
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    Track,
-    TrackGainState,
+from autonomous_mixing.adapters.rendering.locations import LocationResolutionError, resolve_artifact_location
+from autonomous_mixing.adapters.rendering.revalidation import validate_allocated_workspace
+from autonomous_mixing.adapters.rendering.workspaces import (
+    AllocatedWorkspace,
+    WorkspaceAllocationError,
+    WorkspaceAllocationFailureCode,
+    WorkspaceAllocationRequest,
+    WorkspaceRoot,
+    allocate_workspace,
 )
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import (
     ArtifactId,
     CheckpointId,
     ExecutionId,
@@ -45,16 +43,15 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
-from autonomous_mixing.infrastructure.filesystem import LocationResolutionError, resolve_artifact_location
-from autonomous_mixing.infrastructure.workspaces import (
-    AllocatedWorkspace,
-    WorkspaceAllocationError,
-    WorkspaceAllocationFailureCode,
-    WorkspaceAllocationRequest,
-    WorkspaceRoot,
-    allocate_workspace,
-    validate_allocated_workspace,
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
 )
+from autonomous_mixing.core.records.rendering import ExecutionWorkspace
 
 Code = WorkspaceAllocationFailureCode
 TOKEN = "exec-1"
@@ -254,12 +251,6 @@ def _junction(target, link):
 # --- public surface and arguments -------------------------------------------------------------
 
 
-def test_validator_is_exposed_by_the_workspace_facade_and_owned_by_the_validation_module():
-    assert workspaces.validate_allocated_workspace is validation.validate_allocated_workspace
-    assert validation.validate_allocated_workspace.__module__ == validation.__name__
-    assert "validate_allocated_workspace" in workspaces.__all__ and len(workspaces.__all__) == 7
-
-
 @pytest.mark.parametrize("value", [None, "workspace", object(), 1], ids=repr)
 def test_non_record_arguments_are_plain_value_errors_before_filesystem_access(monkeypatch, value):
     touched = _deny_all(monkeypatch, FILESYSTEM)
@@ -288,7 +279,6 @@ def test_fresh_allocation_validates_without_creating_opening_or_mutating_anythin
         raise _Forbidden("allocate_workspace")
 
     monkeypatch.setattr(allocation, "allocate_workspace", no_allocation)
-    monkeypatch.setattr(workspaces, "allocate_workspace", no_allocation)
     assert validate_allocated_workspace(allocated) is None
     monkeypatch.undo()
     assert forbidden == []

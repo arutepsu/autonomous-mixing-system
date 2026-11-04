@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from autonomous_mixing.cli import main
+from autonomous_mixing.drivers.cli import main
 
 SR = 44100
 
@@ -282,10 +282,9 @@ def test_injected_unexpected_parent_creation_error_propagates(tmp_path, capsys, 
         assert _sha256(path) == digest
 
 
-# Module execution through the legacy path must behave exactly like the moved module (ADR-027 step M3;
-# Codex review: the shim had lost its ``__main__`` delegation and exited 0 without output). Calling
-# ``main`` directly would not catch that, so these run real subprocesses.
-MODULE_PATHS = ["autonomous_mixing.cli", "autonomous_mixing.drivers.cli"]
+# Module execution in a real subprocess (ADR-027 steps M3/M4): calling ``main`` directly would not catch a
+# lost ``__main__`` guard, as happened to the M3 shim. The console script is checked in tests/architecture.
+MODULE_PATHS = ["autonomous_mixing.drivers.cli"]
 
 
 def _run_module(module, *args):
@@ -305,9 +304,3 @@ def test_module_execution_rejects_an_unknown_command(module):
     assert result.returncode == 2
     assert "invalid choice" in result.stderr
     assert result.stdout == ""
-
-
-def test_legacy_and_moved_module_execution_give_identical_results():
-    for args in (["--help"], ["no-such-command"], []):
-        legacy, moved = (_run_module(module, *args) for module in MODULE_PATHS)
-        assert (legacy.returncode, legacy.stdout, legacy.stderr) == (moved.returncode, moved.stdout, moved.stderr), args

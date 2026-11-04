@@ -10,17 +10,23 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autonomous_mixing.domain.project import (
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import (
+    ArtifactId,
+    CheckpointId,
+    ProjectId,
+    Revision,
+    TrackId,
+    VersionRef,
+)
+from autonomous_mixing.core.records.project import (
     ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
     ProjectProcessingState,
     ProjectSnapshot,
     ProjectState,
     Track,
     TrackGainState,
 )
-from autonomous_mixing.domain.shared import ArtifactId, CheckpointId, ProjectId, Revision, TrackId, VersionRef
 
 UTC_NOW = datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc)
 TRACKS = (("t1", "Room mic"), ("t2", "Voice"), ("t3", "Synth pad"))
@@ -229,16 +235,16 @@ def test_snapshot_timestamp_is_part_of_state_identity():
 
 # --- candidate state succession (action component) ----------------------------------------
 
-from autonomous_mixing.domain.action import (  # noqa: E402
+from autonomous_mixing.core.loop.transitions import derive_candidate_project_state  # noqa: E402
+from autonomous_mixing.core.records.actions import (  # noqa: E402
     Action,
     ExecutionIssue,
     ExecutionReceipt,
     ExecutionStatus,
     SetTrackGain,
     derive_candidate_checkpoint,
-    derive_candidate_project_state,
 )
-from autonomous_mixing.domain.shared import ActionId, ExecutionId  # noqa: E402
+from autonomous_mixing.core.records.identifiers import ActionId, ExecutionId  # noqa: E402
 
 CANDIDATE_AT = UTC_NOW + timedelta(minutes=1)
 
@@ -366,7 +372,7 @@ def test_derived_state_is_only_a_candidate_record():
 # --- audit F1: gain settings require consistent artifact replacement ------------------------
 # Metadata consistency only: none of this proves that any audio was rendered correctly.
 
-from autonomous_mixing.domain.action import validate_gain_execution  # noqa: E402
+from autonomous_mixing.core.loop.transitions import validate_gain_execution  # noqa: E402
 
 
 def _receipt(state: ProjectState, candidates, superseded, n=2, action="x2") -> ExecutionReceipt:

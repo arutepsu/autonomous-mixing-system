@@ -273,10 +273,23 @@ def test_records_checker_allows_planned_imports(source):
     assert records_violations(source, DECISION) == [], source
 
 
-def test_the_records_interface_imports_only_records_modules():
-    source = (RECORDS_DIR / "__init__.py").read_text(encoding="utf-8")
-    for target in resolve_imports(source, RECORDS, True, KNOWN):
-        assert target in RECORD_FILES, target
+def test_the_records_package_initializer_contains_only_a_docstring():
+    # ADR-027 step M4: no convenience re-exports, so every record has exactly one import path (G6).
+    body = ast.parse((RECORDS_DIR / "__init__.py").read_text(encoding="utf-8")).body
+    assert len(body) == 1 and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+    assert isinstance(body[0].value.value, str)
+
+
+# Public top-level names in records modules that are not records: the type variable of ``Success``.
+NOT_RECORDS = {"T"}
+
+
+def _records():
+    """(name, object) for every inventoried record, read from its owning module."""
+    for short, names in INVENTORY.items():
+        module = importlib.import_module(f"{RECORDS}.{short}")
+        for name in names:
+            yield name, getattr(module, name)
 
 
 def test_the_planned_records_graph_is_acyclic():
@@ -296,17 +309,16 @@ def test_the_planned_records_graph_is_acyclic():
 
 
 def test_every_public_record_is_defined_exactly_once_in_its_listed_module():
-    records = importlib.import_module(RECORDS)
     listed = [name for names in INVENTORY.values() for name in names]
     assert len(listed) == len(set(listed))
-    assert set(records.__all__) == set(listed)
     definitions = {short: _top_level_definitions(RECORDS_DIR / f"{short}.py") for short in INVENTORY}
     for short, names in INVENTORY.items():
-        module = importlib.import_module(f"{RECORDS}.{short}")
+        # Completeness: every public definition of the module is inventoried, so G11 sees every record.
+        public = {name for name in definitions[short] if not name.startswith("_")} - NOT_RECORDS
+        assert public == set(names), short
         for name in names:
             owners = [other for other, defined in definitions.items() if name in defined]
             assert owners == [short], f"{name} defined in {owners}"
-            assert getattr(records, name) is getattr(module, name), name
 
 
 # Inherited exception to G11 (Codex review of M1): ``Success[T]`` is a generic container whose payload
@@ -320,10 +332,8 @@ def _annotation_text(annotation: object) -> str:
 
 
 def test_core_records_are_frozen_dataclasses_with_immutable_field_types():
-    records = importlib.import_module(RECORDS)
     checked = 0
-    for name in records.__all__:
-        obj = getattr(records, name)
+    for name, obj in _records():
         if not (isinstance(obj, type) and dataclasses.is_dataclass(obj)):
             continue
         checked += 1
@@ -352,10 +362,8 @@ def unconstrained_fields(cls: type) -> set[str]:
 
 
 def test_only_the_documented_record_fields_have_an_unconstrained_payload_type():
-    records = importlib.import_module(RECORDS)
     found = set()
-    for name in records.__all__:
-        obj = getattr(records, name)
+    for name, obj in _records():
         if isinstance(obj, type) and dataclasses.is_dataclass(obj):
             found |= {(name, field) for field in unconstrained_fields(obj)}
     assert found == UNCONSTRAINED_PAYLOAD_FIELDS

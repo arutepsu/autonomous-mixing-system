@@ -4,13 +4,13 @@ All artifacts are metadata fixtures (no files are read or written); values are s
 """
 
 import dataclasses
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autonomous_mixing.domain.action import (
+from autonomous_mixing.core.loop.references import validate_attempt_references
+from autonomous_mixing.core.loop.transitions import derive_candidate_project_state
+from autonomous_mixing.core.records.actions import (
     Action,
     ExecutionIssue,
     ExecutionReceipt,
@@ -19,41 +19,19 @@ from autonomous_mixing.domain.action import (
     RollbackStatus,
     SetTrackGain,
     derive_candidate_checkpoint,
-    derive_candidate_project_state,
     validate_rollback_references,
 )
-from autonomous_mixing.domain.context import MusicalContext
-from autonomous_mixing.domain.decision import Abstain, AbstentionReason, ControllerIdentity, Decision, ProposeAction
-from autonomous_mixing.domain.observation import (
-    AnalysisSpec,
-    MeasuredScalar,
-    Observation,
-    RenderSpec,
-    validate_observation_sources,
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.context import MusicalContext
+from autonomous_mixing.core.records.decision import (
+    Abstain,
+    AbstentionReason,
+    ControllerIdentity,
+    Decision,
+    ProposeAction,
 )
-from autonomous_mixing.domain.project import (
-    AnalysisScope,
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    TimeRange,
-    Track,
-    TrackGainState,
-)
-from autonomous_mixing.domain.run import (
-    AttemptDisposition,
-    BudgetLimits,
-    BudgetUsage,
-    CorrectionAttempt,
-    Run,
-    RunConfiguration,
-    RunState,
-    validate_attempt_references,
-)
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     AttemptId,
@@ -71,7 +49,25 @@ from autonomous_mixing.domain.shared import (
     ValidationResultId,
     VersionRef,
 )
-from autonomous_mixing.domain.validation import (
+from autonomous_mixing.core.records.observation import (
+    AnalysisScope,
+    AnalysisSpec,
+    MeasuredScalar,
+    Observation,
+    RenderSpec,
+    TimeRange,
+    validate_observation_sources,
+)
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
+)
+from autonomous_mixing.core.records.run import AttemptDisposition, CorrectionAttempt, Run, RunConfiguration, RunState
+from autonomous_mixing.core.records.verification import (
     AssessmentMode,
     CheckResult,
     CheckStatus,
@@ -84,8 +80,8 @@ from autonomous_mixing.domain.validation import (
     ValidationCriteria,
     ValidationResult,
     ValidationVerdict,
-    validate_validation_references,
 )
+from autonomous_mixing.core.verification.consistency import validate_validation_references
 
 UTC_NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 HASH = "b" * 64
@@ -1110,22 +1106,3 @@ def test_manual_candidate_reusing_a_baseline_only_revision_is_rejected_at_constr
 
 
 # --- dependency boundary ---------------------------------------------------------
-
-
-def test_execution_and_run_modules_load_only_standard_library_and_domain_modules():
-    # Complements the AST scan in test_domain_foundation.py, which covers every module in the domain package.
-    script = (
-        "import sys\n"
-        "before = set(sys.modules)\n"
-        "import autonomous_mixing.domain.action, autonomous_mixing.domain.run\n"
-        "for name in sorted(set(sys.modules) - before):\n"
-        "    top = name.split('.')[0]\n"
-        "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
-        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.') \\\n"
-        # ADR-027 migration steps M1/M2: domain records and behavior moved to the core package.
-        "        or name == 'autonomous_mixing.core' \\\n"
-        "        or name.startswith('autonomous_mixing.core.')\n"
-        "    if not ok: print(name)\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-    assert result.stdout == ""

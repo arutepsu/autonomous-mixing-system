@@ -1,6 +1,6 @@
 import numpy as np
 
-from autonomous_mixing.audio.features import coactivity_proxy, peak_dbfs, rms_dbfs
+from autonomous_mixing.adapters.dsp_analysis.features import coactivity_proxy, peak_dbfs, rms_dbfs
 
 
 def test_silence_levels_are_null():

@@ -27,19 +27,22 @@ import pytest
 import autonomous_mixing.adapters.rendering.locations as locations  # moved in ADR-027 step M3; tests patch or inspect its internals
 import autonomous_mixing.adapters.rendering.workspaces as allocation  # moved in ADR-027 step M3; tests patch or inspect its internals
 import autonomous_mixing.core.records.rendering as identity  # ExecutionWorkspace moved here in ADR-027 step M1
-import autonomous_mixing.infrastructure.workspaces as workspaces
-from autonomous_mixing.application.execution import ExecutionWorkspace
-from autonomous_mixing.domain.project import (
-    ArtifactCheckpoint,
-    ArtifactKind,
-    AudioArtifact,
-    ProjectProcessingState,
-    ProjectSnapshot,
-    ProjectState,
-    Track,
-    TrackGainState,
+from autonomous_mixing.adapters.rendering.locations import (
+    LocationResolutionError,
+    LocationResolutionFailureCode,
+    ResolvedArtifactLocation,
+    resolve_artifact_location,
 )
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.adapters.rendering.workspaces import (
+    AllocatedWorkspace,
+    WorkspaceAllocationError,
+    WorkspaceAllocationFailureCode,
+    WorkspaceAllocationRequest,
+    WorkspaceRoot,
+    allocate_workspace,
+)
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import (
     ArtifactId,
     CheckpointId,
     ExecutionId,
@@ -48,20 +51,15 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
-from autonomous_mixing.infrastructure.filesystem import (
-    LocationResolutionError,
-    LocationResolutionFailureCode,
-    ResolvedArtifactLocation,
-    resolve_artifact_location,
+from autonomous_mixing.core.records.project import (
+    ArtifactCheckpoint,
+    ProjectProcessingState,
+    ProjectSnapshot,
+    ProjectState,
+    Track,
+    TrackGainState,
 )
-from autonomous_mixing.infrastructure.workspaces import (
-    AllocatedWorkspace,
-    WorkspaceAllocationError,
-    WorkspaceAllocationFailureCode,
-    WorkspaceAllocationRequest,
-    WorkspaceRoot,
-    allocate_workspace,
-)
+from autonomous_mixing.core.records.rendering import ExecutionWorkspace
 
 Code = WorkspaceAllocationFailureCode
 TOKEN = "exec-1"
@@ -493,20 +491,6 @@ UNEXPECTED = [
 
 
 # --- public surface ---------------------------------------------------------------------------
-
-
-def test_public_interface_exports_the_six_allocation_definitions_plus_the_validator():
-    expected = {
-        "WorkspaceRoot",
-        "WorkspaceAllocationRequest",
-        "AllocatedWorkspace",
-        "WorkspaceAllocationFailureCode",
-        "WorkspaceAllocationError",
-        "allocate_workspace",
-    }
-    assert set(workspaces.__all__) == expected | {"validate_allocated_workspace"} and len(workspaces.__all__) == 7
-    for name in expected:
-        assert getattr(workspaces, name) is getattr(allocation, name)
 
 
 def test_allocator_rejects_a_non_request_as_a_plain_argument_error(monkeypatch):

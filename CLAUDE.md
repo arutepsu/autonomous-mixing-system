@@ -23,7 +23,7 @@ This repository is a bachelor-thesis research prototype, not a production DAW. R
 ## Architecture and code conventions ([ADR-027](docs/decisions/0027-hexagonal-control-loop-architecture.md), Accepted)
 @docs/project/engineering-conventions.md
 
-That file is the single source for package layout, import rules, immutability rules and vocabulary, shared with Codex. In short: hexagonal modular monolith; `core` holds the control loop, pure stage rules and immutable records; DSP, files and Claude are `adapters` behind `core.ports`; `drivers` start runs; only the experiment runner imports `evaluation`. Keep "validation", "verification" and "evaluation" distinct. Until the migration lands, do not extend the old layout's compatibility facades or dependency matrices.
+That file is the single source for package layout, import rules, immutability rules and vocabulary, shared with Codex. In short: hexagonal modular monolith; `core` holds the control loop, pure stage rules and immutable records; DSP, files and Claude are `adapters` behind `core.ports`; `drivers` start runs; only the experiment runner imports `evaluation`. Keep "validation", "verification" and "evaluation" distinct. Every package initializer contains only a docstring: import from modules.
 
 ## Naming ([ADR-005](docs/decisions/0005-system-oriented-naming.md))
 Repository/distribution `autonomous-mixing-system`, import package `autonomous_mixing`, CLI `autonomous-mixing`. Use "agent" only for the AI decision component (`decision_agent`, planned) and in the thesis title; never rename the thesis title.
@@ -33,4 +33,4 @@ Repository/distribution `autonomous-mixing-system`, import package `autonomous_m
 Never use `pip install` or `uv init` here; change dependencies via `uv add` and keep `uv.lock` in sync. Status labels for docs are defined in `docs/project/documentation-policy.md`.
 
 ## State
-M0 implements descriptive WAV analysis only. Detection, corrections and Claude orchestration are planned, not yet implemented. The M0 interface still labels its inputs kick/bass; this is a known deviation under review (ADR-006), not a pattern to extend. Records, contracts, admission and the gain/mix processor exist in the domain/application/infrastructure layout and are to be migrated to the ADR-027 layout step by step; no control loop exists yet.
+M0 implements descriptive WAV analysis only. Detection, corrections and Claude orchestration are planned, not yet implemented. The M0 interface still labels its inputs kick/bass; this is a known deviation under review (ADR-006), not a pattern to extend. Records, port contracts, admission, preflight and the gain/mix processor live in the ADR-027 layout (`core`, `adapters`, `drivers`; migration M0–M4 done, documentation step M7 pending); no control loop exists yet.

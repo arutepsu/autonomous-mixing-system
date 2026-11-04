@@ -5,26 +5,14 @@ Limits, usage values, metrics and thresholds are arbitrary structural fixtures, 
 
 import dataclasses
 import math
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autonomous_mixing.domain.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.domain.decision import ControllerIdentity
-from autonomous_mixing.domain.observation import AnalysisSpec, MeasuredScalar, RenderSpec
-from autonomous_mixing.domain.project import AnalysisScope, FrequencyRange, ProjectSnapshot, TimeRange, Track
-from autonomous_mixing.domain.run import (
-    BudgetLimits,
-    BudgetUsage,
-    FinalProjectState,
-    Run,
-    RunConfiguration,
-    RunOutcome,
-    RunState,
-)
-from autonomous_mixing.domain.shared import (
+from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
+from autonomous_mixing.core.records.decision import ControllerIdentity
+from autonomous_mixing.core.records.identifiers import (
     ConditionId,
     ContextId,
     CriteriaId,
@@ -34,7 +22,17 @@ from autonomous_mixing.domain.shared import (
     TrackId,
     VersionRef,
 )
-from autonomous_mixing.domain.validation import (
+from autonomous_mixing.core.records.observation import (
+    AnalysisScope,
+    AnalysisSpec,
+    FrequencyRange,
+    MeasuredScalar,
+    RenderSpec,
+    TimeRange,
+)
+from autonomous_mixing.core.records.project import ProjectSnapshot, Track
+from autonomous_mixing.core.records.run import FinalProjectState, Run, RunConfiguration, RunOutcome, RunState
+from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
     BaselineReference,
     ComparisonOperator,
@@ -492,22 +490,3 @@ def test_configuration_and_nested_collections_are_frozen():
 
 
 # --- dependency boundary ---------------------------------------------------------
-
-
-def test_run_module_loads_only_standard_library_and_domain_modules():
-    # Complements the AST scan in test_domain_foundation.py, which covers every module in the domain package.
-    script = (
-        "import sys\n"
-        "before = set(sys.modules)\n"
-        "import autonomous_mixing.domain.run\n"
-        "for name in sorted(set(sys.modules) - before):\n"
-        "    top = name.split('.')[0]\n"
-        "    ok = top in sys.stdlib_module_names or name == 'autonomous_mixing' \\\n"
-        "        or name == 'autonomous_mixing.domain' or name.startswith('autonomous_mixing.domain.') \\\n"
-        # ADR-027 migration steps M1/M2: domain records and behavior moved to the core package.
-        "        or name == 'autonomous_mixing.core' \\\n"
-        "        or name.startswith('autonomous_mixing.core.')\n"
-        "    if not ok: print(name)\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-    assert result.stdout == ""

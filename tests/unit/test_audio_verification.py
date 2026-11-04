@@ -17,14 +17,14 @@ import pytest
 import soundfile as sf
 
 import autonomous_mixing.adapters.rendering.integrity as verification  # moved in ADR-027 step M3; tests patch or inspect its internals
-from autonomous_mixing.domain.project import ArtifactKind, AudioArtifact
-from autonomous_mixing.domain.shared import ArtifactId, ProjectId, Revision, TrackId, VersionRef
-from autonomous_mixing.infrastructure.audio import (
+from autonomous_mixing.adapters.rendering.integrity import (
     ArtifactVerificationError,
     VerificationFailureCode,
     VerifiedAudio,
     verify_wav_artifact,
 )
+from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.identifiers import ArtifactId, ProjectId, Revision, TrackId, VersionRef
 
 Code = VerificationFailureCode
 LARGE = 1 << 20  # generous limits for tests that are not about resource limits
