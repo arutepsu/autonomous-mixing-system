@@ -41,6 +41,7 @@ ALLOWED_RECORD_IMPORTS = {
     "decision": {"identifiers", "invariants", "actions", "budgets", "context", "observation", "project"},
     "analysis": {"identifiers", "invariants", "observation", "project"},
     "diagnosis": {"identifiers", "invariants", "observation", "project"},
+    "capabilities": {"identifiers", "invariants", "observation"},
     "verification": {"identifiers", "invariants", "observation", "project"},
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
@@ -152,6 +153,7 @@ INVENTORY = {
         "DecisionResponse",
     ),
     "analysis": ("AnalysisRequest", "AnalysisResponse"),
+    "capabilities": ("GainBounds", "RendererCapabilities", "AvailableTrackGain", "ActionCapabilityView"),
     "diagnosis": (
         "ProblemFamily",
         "UncertaintyRepresentation",
