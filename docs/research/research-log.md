@@ -428,3 +428,6 @@
 - G8: the restored signature baselines in `tests/unit/test_public_contracts.py` were rebased in the same change; they refer to the renamed objects and no signature changed.
 - Evidence (Claude Code, Windows 11, `uv run`): full suite 2,385 passed, 3 skipped in 2 of 2 runs (same count as before, as expected for a pure rename); `ruff check`, `ruff format --check src tests` and `uv lock --check` pass; `autonomous-mixing --help` works; no old identifier remains in `src` or `tests` (only stale `__pycache__` files and English uses of "Run").
 - Docs outside the code (ADRs, overview, conventions vocabulary) are updated in M7; accepted ADRs keep the names of their time.
+
+## 2026-11-04 — Codex review of the M4 correction and M5: passed
+- Codex reviewed `5860bde` (restored surviving-contract checks) and `a61c5cd` (M5 vocabulary renames) and reported that the review passed; the owner relayed the result without further findings. ADR-027 migration steps M0 to M5 are therefore reviewed. Remaining: M6 (`slots=True`, optional, not decided) and M7 (documentation).
