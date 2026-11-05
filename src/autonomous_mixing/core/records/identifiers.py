@@ -52,6 +52,11 @@ class DecisionId(_Identifier):
 
 
 @dataclass(frozen=True)
+class DecisionCallId(_Identifier):
+    """Identifies one charged decision slot, independent of whether a valid decision was parsed."""
+
+
+@dataclass(frozen=True)
 class CriteriaId(_Identifier):
     """Identifies a criteria definition together with its version."""
 
