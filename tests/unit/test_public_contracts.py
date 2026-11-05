@@ -72,11 +72,16 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
     from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
     from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
     from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+    from autonomous_mixing.core.records.capabilities import ActionCapabilityView
     from autonomous_mixing.core.records.context import MusicalContext
     from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, DecisionResponse, Situation
+    from autonomous_mixing.core.records.diagnosis import DiagnosisReport
+    from autonomous_mixing.core.records.feedback import DecisionHistory
+    from autonomous_mixing.core.records.identifiers import RunId
     from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, Observation
     from autonomous_mixing.core.records.project import ProjectState
     from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult
+    from autonomous_mixing.core.records.verification import AcceptanceCriteria
 
     expected = {
         PortFailure: _fields(("code", PortFailureCode), ("message", str), ("retryable", bool), returns=None),
@@ -91,6 +96,13 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
             ("observations", tuple[Observation, ...]),
             ("usage", BudgetUsage),
             ("limits", BudgetLimits),
+            # Deliberate constructor extension, increment 2D (2026-11-05): six required fields, no defaults.
+            ("run_id", RunId),
+            ("scope", AnalysisScope),
+            ("criteria", AcceptanceCriteria),
+            ("diagnosis", DiagnosisReport),
+            ("capabilities", ActionCapabilityView),
+            ("history", DecisionHistory),
             returns=None,
         ),
         DecisionResponse: _fields(("decision", Decision), returns=None),

@@ -18,18 +18,30 @@ from autonomous_mixing.core.records.admission import (
 )
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
 from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, ProposeAction, Situation
+from autonomous_mixing.core.records.diagnosis import (
+    DiagnosisCoverage,
+    DiagnosisCoverageStatus,
+    DiagnosisReport,
+    ProblemFamily,
+)
+from autonomous_mixing.core.records.feedback import DecisionHistory
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     CheckpointId,
+    ConditionId,
     ContextId,
+    CriteriaId,
     DecisionId,
+    DiagnosisCoverageId,
     ExecutionId,
     ObservationId,
     ProjectId,
     Revision,
+    RunId,
     TrackId,
     VersionRef,
 )
@@ -54,6 +66,14 @@ from autonomous_mixing.core.records.project import (
     TrackGainState,
 )
 from autonomous_mixing.core.records.rendering import CandidateIdentity, ExecutionWorkspace
+from autonomous_mixing.core.records.verification import (
+    AcceptanceCriteria,
+    ComparisonOperator,
+    ImprovementCondition,
+    ImprovementDirection,
+    MetricSelector,
+    TargetCondition,
+)
 
 UTC_NOW = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 CONTROLLER = ControllerIdentity("deterministic-baseline", "0.1")
@@ -106,6 +126,54 @@ def _state(audio=_D, gains=_D) -> ProjectState:
     )
 
 
+def _situation_inputs(state, context) -> dict:
+    """Explicit decision-input records added by increment 2D (Situation fields after ``limits``).
+
+    The diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method exists), the capability
+    view advertises no action and the history is the empty first-call prefix (usage charges one call).
+    None of them states that the mix has no problem, that an action is permitted or that a call
+    succeeded; the code under test in this module does not read them.
+    """
+    scope = AnalysisScope(tuple(sorted(state.snapshot.track_ids, key=str)), TimeRange(0.0, 60.0))
+    selector = MetricSelector(VersionRef("metric-a", "1"), scope)
+    criteria = AcceptanceCriteria(
+        CriteriaId("crit"),
+        "1",
+        (TargetCondition(ConditionId("target"), selector, ComparisonOperator.LE, MeasuredScalar(-10.0, "unit-a")),),
+        (
+            ImprovementCondition(
+                ConditionId("improve"), selector, ImprovementDirection.LOWER, MeasuredScalar(1.0, "unit-a")
+            ),
+        ),
+        (),
+    )
+    coverage = DiagnosisCoverage(
+        DiagnosisCoverageId("cov-1"),
+        ProblemFamily.MASKING,
+        scope,
+        DiagnosisCoverageStatus.UNAVAILABLE,
+        None,
+        "no diagnosis method exists; this fixture asserts nothing about problems",
+    )
+    return dict(
+        run_id=RunId("run-1"),
+        scope=scope,
+        criteria=criteria,
+        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), ()),
+        capabilities=ActionCapabilityView(
+            state.project_id,
+            state.revision,
+            context.context_id,
+            context.version,
+            VersionRef("policy", "1"),
+            VersionRef("renderer", "1"),
+            scope,
+            (),
+        ),
+        history=DecisionHistory(RunId("run-1"), state.project_id, ()),
+    )
+
+
 def _decision_request(state=None, protected=frozenset(), observation_source="c-mix") -> Situation:
     source = AssertionSource("producer", UTC_NOW)
     roles = tuple(TrackRole(TrackId(t), r, source) for t, r in [("t1", "ambience"), ("t2", "lead"), ("t3", "texture")])
@@ -120,13 +188,15 @@ def _decision_request(state=None, protected=frozenset(), observation_source="c-m
         VersionRef("analyzer", "0.1"),
         UTC_NOW,
     )
+    state = state if state is not None else _state()
     return Situation(
-        state if state is not None else _state(),
+        state,
         context,
         CONTROLLER,
         (observation,),
         BudgetUsage(1, 0, 1, 0, 2.0),
         BudgetLimits(4, 2, 6, 1, 300.0),
+        **_situation_inputs(state, context),
     )
 
 
