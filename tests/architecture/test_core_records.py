@@ -70,6 +70,7 @@ ALLOWED_RECORD_IMPORTS = {
     "verification_evidence": {"artifacts", "identifiers", "invariants", "observation", "project", "verification"},
     # Verification-verdict plan, 2026-11-06.
     "verification_assessment": {"identifiers", "invariants", "verification", "verification_evidence"},
+    "verification_routing": set(),  # verification-routing plan, 2026-11-06 (standard library only)
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
     "decision_gate": {"decision", "identifiers", "invariants"},  # decision-gate plan, 2026-11-06
@@ -247,6 +248,7 @@ INVENTORY = {
         "EvidenceMatch",
     ),
     "verification_assessment": ("ConditionMeasurement", "VerificationAssessment"),
+    "verification_routing": ("VerificationRoute",),
     "rendering": (
         "ExecutionWorkspace",
         "CandidateIdentity",

@@ -47,6 +47,7 @@ BEHAVIOR_INVENTORY = {
     "loop.transitions": ("validate_gain_execution", "derive_candidate_project_state"),
     "loop.references": ("validate_attempt_references",),
     "loop.budgets": ("check_budget",),
+    "loop.verification_routing": ("route_verification",),
 }
 
 
