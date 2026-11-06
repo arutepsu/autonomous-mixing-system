@@ -68,6 +68,8 @@ ALLOWED_RECORD_IMPORTS = {
     "verification": {"identifiers", "invariants", "observation", "project"},
     # Verification-evidence plan, 2026-11-06.
     "verification_evidence": {"artifacts", "identifiers", "invariants", "observation", "project", "verification"},
+    # Verification-verdict plan, 2026-11-06.
+    "verification_assessment": {"identifiers", "invariants", "verification", "verification_evidence"},
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
     "decision_gate": {"decision", "identifiers", "invariants"},  # decision-gate plan, 2026-11-06
@@ -244,6 +246,7 @@ INVENTORY = {
         "EvidenceUnavailable",
         "EvidenceMatch",
     ),
+    "verification_assessment": ("ConditionMeasurement", "VerificationAssessment"),
     "rendering": (
         "ExecutionWorkspace",
         "CandidateIdentity",
