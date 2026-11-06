@@ -42,6 +42,7 @@ BEHAVIOR_INVENTORY = {
     "admission.capabilities": ("build_action_capability_view",),
     "admission.decision_gate": ("assess_decision",),
     "verification.consistency": ("validate_verification_references",),
+    "verification.evidence": ("match_evidence",),
     "loop.transitions": ("validate_gain_execution", "derive_candidate_project_state"),
     "loop.references": ("validate_attempt_references",),
     "loop.budgets": ("check_budget",),
