@@ -68,6 +68,7 @@ ALLOWED_RECORD_IMPORTS = {
     "verification": {"identifiers", "invariants", "observation", "project"},
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
+    "decision_gate": {"decision", "identifiers", "invariants"},  # decision-gate plan, 2026-11-06
     "run": {
         "identifiers",
         "invariants",
@@ -177,6 +178,15 @@ INVENTORY = {
         "Decision",
         "Situation",
         "DecisionResponse",
+    ),
+    "decision_gate": (
+        "InvalidResponse",
+        "KeepState",
+        "RequestContext",
+        "DeclineAction",
+        "EvidenceBlocked",
+        "ReadyForAdmission",
+        "DecisionGateResult",
     ),
     "analysis": ("AnalysisRequest", "AnalysisResponse"),
     "capabilities": ("GainBounds", "RendererCapabilities", "AvailableTrackGain", "ActionCapabilityView"),
