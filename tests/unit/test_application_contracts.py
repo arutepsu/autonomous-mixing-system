@@ -21,6 +21,7 @@ from autonomous_mixing.core.records.context import AssertionSource, MusicalConte
 from autonomous_mixing.core.records.decision import (
     Abstain,
     AbstentionReason,
+    ActionJustification,
     ControllerIdentity,
     Decision,
     DecisionResponse,
@@ -31,7 +32,10 @@ from autonomous_mixing.core.records.diagnosis import (
     DiagnosisCoverage,
     DiagnosisCoverageStatus,
     DiagnosisReport,
+    DiagnosticEvidence,
+    ProblemCandidate,
     ProblemFamily,
+    UncertaintyRepresentation,
 )
 from autonomous_mixing.core.records.feedback import DecisionFeedback, DecisionHistory, PortFailureFeedback
 from autonomous_mixing.core.records.identifiers import (
@@ -45,6 +49,7 @@ from autonomous_mixing.core.records.identifiers import (
     DecisionId,
     DiagnosisCoverageId,
     ObservationId,
+    ProblemCandidateId,
     ProjectId,
     Revision,
     RunId,
@@ -171,13 +176,22 @@ def _context(protected: frozenset = frozenset(), context_id: str = "c1") -> Musi
     return MusicalContext(ContextId(context_id), "1", roles, (), protected)
 
 
-def _situation_inputs(state, context) -> dict:
+# Increment 2E: proposals cite the fixture candidate and carry an explicit, labelled justification.
+JUSTIFICATION = ActionJustification(
+    "labelled test-double reasoning", "uncalibrated fixture text, not a confidence", (), ("contract fixture only",)
+)
+CANDIDATES = (ProblemCandidateId("cand-1"),)
+
+
+def _situation_inputs(state, context, evidence=()) -> dict:
     """Explicit decision-input records added by increment 2D (Situation fields after ``limits``).
 
-    The diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method exists), the capability
-    view advertises no action and the history is the empty first-call prefix (usage charges one call).
-    None of them states that the mix has no problem, that an action is permitted or that a call
-    succeeded; the code under test in this module does not read them.
+    Without ``evidence`` the diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method
+    exists). With ``evidence`` (increment 2E) it is one labelled ASSESSED test-double row and a candidate
+    ``cand-1`` citing those actual fixture observations, so proposals can reference a real candidate. The
+    capability view advertises no action and the history is the empty first-call prefix (usage charges
+    one call). None of them states that the mix has a problem or none, that an action is permitted or that
+    a call succeeded.
     """
     scope = AnalysisScope(tuple(sorted(state.snapshot.track_ids, key=str)), TimeRange(0.0, 60.0))
     selector = MetricSelector(VersionRef("metric-a", "1"), scope)
@@ -192,19 +206,47 @@ def _situation_inputs(state, context) -> dict:
         ),
         (),
     )
-    coverage = DiagnosisCoverage(
-        DiagnosisCoverageId("cov-1"),
-        ProblemFamily.MASKING,
-        scope,
-        DiagnosisCoverageStatus.UNAVAILABLE,
-        None,
-        "no diagnosis method exists; this fixture asserts nothing about problems",
-    )
+    candidates = ()
+    if evidence:
+        method = VersionRef("test-double-diagnosis", "0")  # labelled test double; no detection method exists
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.ASSESSED,
+            method,
+            "labelled test-double coverage; this fixture asserts nothing about problems",
+        )
+        statement = DiagnosticEvidence(
+            "test-double strength", "uncalibrated", UncertaintyRepresentation.UNCALIBRATED, False, (), ()
+        )
+        candidates = (
+            ProblemCandidate(
+                ProblemCandidateId("cand-1"),
+                DiagnosisCoverageId("cov-1"),
+                state.project_id,
+                state.revision,
+                ProblemFamily.MASKING,
+                scope,
+                tuple(ObservationId(e) for e in evidence),
+                method,
+                statement,
+            ),
+        )
+    else:
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.UNAVAILABLE,
+            None,
+            "no diagnosis method exists; this fixture asserts nothing about problems",
+        )
     return dict(
         run_id=RunId("run-1"),
         scope=scope,
         criteria=criteria,
-        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), ()),
+        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), candidates),
         capabilities=ActionCapabilityView(
             state.project_id,
             state.revision,
@@ -233,13 +275,17 @@ def _decision_request(**overrides) -> Situation:
     # wrong-type cases below still fail on their own field rather than inside this fixture.
     state = fields["state"] if isinstance(fields["state"], ProjectState) else _state()
     context = fields["context"] if isinstance(fields["context"], MusicalContext) else _context()
-    return Situation(**{**_situation_inputs(state, context), **fields})
+    # Increment 2E: the fixture candidate cites o-a whenever o-a is among the supplied observations.
+    supplied = fields["observations"] if isinstance(fields["observations"], tuple) else ()
+    has_o_a = any(isinstance(o, Observation) and o.observation_id == ObservationId("o-a") for o in supplied)
+    evidence = ("o-a",) if has_o_a else ()
+    return Situation(**{**_situation_inputs(state, context, evidence), **fields})
 
 
 def _decision(outcome=None, evidence=("o-a",), *, context=("c1", "1"), controller=CONTROLLER, target="t2"):
     if outcome is None:
         action = Action(ActionId("x1"), ProjectId("p1"), Revision("r2"), SetTrackGain(TrackId(target), -2.0))
-        outcome = ProposeAction(action, "lower track t2")
+        outcome = ProposeAction(action, "lower track t2", CANDIDATES, JUSTIFICATION)
     return Decision(
         DecisionId("d1"),
         ProjectId("p1"),

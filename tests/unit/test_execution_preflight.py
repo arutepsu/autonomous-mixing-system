@@ -20,12 +20,21 @@ from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
 from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
-from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, ProposeAction, Situation
+from autonomous_mixing.core.records.decision import (
+    ActionJustification,
+    ControllerIdentity,
+    Decision,
+    ProposeAction,
+    Situation,
+)
 from autonomous_mixing.core.records.diagnosis import (
     DiagnosisCoverage,
     DiagnosisCoverageStatus,
     DiagnosisReport,
+    DiagnosticEvidence,
+    ProblemCandidate,
     ProblemFamily,
+    UncertaintyRepresentation,
 )
 from autonomous_mixing.core.records.feedback import DecisionHistory
 from autonomous_mixing.core.records.identifiers import (
@@ -39,6 +48,7 @@ from autonomous_mixing.core.records.identifiers import (
     DiagnosisCoverageId,
     ExecutionId,
     ObservationId,
+    ProblemCandidateId,
     ProjectId,
     Revision,
     RunId,
@@ -126,13 +136,22 @@ def _state(audio=_D, gains=_D) -> ProjectState:
     )
 
 
-def _situation_inputs(state, context) -> dict:
+# Increment 2E: proposals cite the fixture candidate and carry an explicit, labelled justification.
+JUSTIFICATION = ActionJustification(
+    "labelled test-double reasoning", "uncalibrated fixture text, not a confidence", (), ("contract fixture only",)
+)
+CANDIDATES = (ProblemCandidateId("cand-1"),)
+
+
+def _situation_inputs(state, context, evidence=()) -> dict:
     """Explicit decision-input records added by increment 2D (Situation fields after ``limits``).
 
-    The diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method exists), the capability
-    view advertises no action and the history is the empty first-call prefix (usage charges one call).
-    None of them states that the mix has no problem, that an action is permitted or that a call
-    succeeded; the code under test in this module does not read them.
+    Without ``evidence`` the diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method
+    exists). With ``evidence`` (increment 2E) it is one labelled ASSESSED test-double row and a candidate
+    ``cand-1`` citing those actual fixture observations, so proposals can reference a real candidate. The
+    capability view advertises no action and the history is the empty first-call prefix (usage charges
+    one call). None of them states that the mix has a problem or none, that an action is permitted or that
+    a call succeeded.
     """
     scope = AnalysisScope(tuple(sorted(state.snapshot.track_ids, key=str)), TimeRange(0.0, 60.0))
     selector = MetricSelector(VersionRef("metric-a", "1"), scope)
@@ -147,19 +166,47 @@ def _situation_inputs(state, context) -> dict:
         ),
         (),
     )
-    coverage = DiagnosisCoverage(
-        DiagnosisCoverageId("cov-1"),
-        ProblemFamily.MASKING,
-        scope,
-        DiagnosisCoverageStatus.UNAVAILABLE,
-        None,
-        "no diagnosis method exists; this fixture asserts nothing about problems",
-    )
+    candidates = ()
+    if evidence:
+        method = VersionRef("test-double-diagnosis", "0")  # labelled test double; no detection method exists
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.ASSESSED,
+            method,
+            "labelled test-double coverage; this fixture asserts nothing about problems",
+        )
+        statement = DiagnosticEvidence(
+            "test-double strength", "uncalibrated", UncertaintyRepresentation.UNCALIBRATED, False, (), ()
+        )
+        candidates = (
+            ProblemCandidate(
+                ProblemCandidateId("cand-1"),
+                DiagnosisCoverageId("cov-1"),
+                state.project_id,
+                state.revision,
+                ProblemFamily.MASKING,
+                scope,
+                tuple(ObservationId(e) for e in evidence),
+                method,
+                statement,
+            ),
+        )
+    else:
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.UNAVAILABLE,
+            None,
+            "no diagnosis method exists; this fixture asserts nothing about problems",
+        )
     return dict(
         run_id=RunId("run-1"),
         scope=scope,
         criteria=criteria,
-        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), ()),
+        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), candidates),
         capabilities=ActionCapabilityView(
             state.project_id,
             state.revision,
@@ -196,14 +243,14 @@ def _decision_request(state=None, protected=frozenset(), observation_source="c-m
         (observation,),
         BudgetUsage(1, 0, 1, 0, 2.0),
         BudgetLimits(4, 2, 6, 1, 300.0),
-        **_situation_inputs(state, context),
+        **_situation_inputs(state, context, evidence=("o1",)),
     )
 
 
 def _decision(value_db=-4.0, target="t2", revision="r2", outcome=_D) -> Decision:
     if outcome is _D:
         action = Action(ActionId("x1"), ProjectId("p1"), Revision(revision), SetTrackGain(TrackId(target), value_db))
-        outcome = ProposeAction(action, "set absolute track gain")
+        outcome = ProposeAction(action, "set absolute track gain", CANDIDATES, JUSTIFICATION)
     evidence = (ObservationId("o1"),) if isinstance(outcome, ProposeAction) else ()
     return Decision(
         DecisionId("d1"),

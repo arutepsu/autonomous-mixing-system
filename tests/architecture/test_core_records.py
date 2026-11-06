@@ -169,7 +169,9 @@ INVENTORY = {
     "results": ("Success", "PortFailureCode", "PortFailure", "PortResult"),
     "decision": (
         "ControllerIdentity",
+        "ActionJustification",  # increment 2E
         "ProposeAction",
+        "NoChange",  # increment 2E
         "AbstentionReason",
         "Abstain",
         "Decision",

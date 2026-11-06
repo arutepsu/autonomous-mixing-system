@@ -9,7 +9,15 @@ from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.context import MusicalContext
 from autonomous_mixing.core.records.diagnosis import DiagnosisReport, validate_diagnosis_references
 from autonomous_mixing.core.records.feedback import DecisionHistory, validate_decision_history
-from autonomous_mixing.core.records.identifiers import ContextId, DecisionId, ObservationId, ProjectId, Revision, RunId
+from autonomous_mixing.core.records.identifiers import (
+    ContextId,
+    DecisionId,
+    ObservationId,
+    ProblemCandidateId,
+    ProjectId,
+    Revision,
+    RunId,
+)
 from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of
 from autonomous_mixing.core.records.observation import AnalysisScope, Observation, validate_observation_sources
 from autonomous_mixing.core.records.project import ProjectSnapshot, ProjectState
@@ -27,13 +35,69 @@ class ControllerIdentity:
 
 
 @dataclass(frozen=True)
+class ActionJustification:
+    """Why a particular operation is proposed, separate from the diagnostic uncertainty of its candidates.
+
+    All fields are required; empty ``assumptions`` or ``limitations`` are explicit declarations. The text
+    is recorded as supplied: it is not a calibrated confidence, a sufficiency flag or proof that the
+    action is perceptually correct.
+    """
+
+    reasoning: str
+    uncertainty: str
+    assumptions: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.reasoning, "ActionJustification.reasoning")
+        require_text(self.uncertainty, "ActionJustification.uncertainty")
+        _require_text_entries(self.assumptions, "ActionJustification.assumptions")
+        _require_text_entries(self.limitations, "ActionJustification.limitations")
+
+
+def _require_text_entries(value: tuple[str, ...], field: str) -> None:
+    """A tuple (possibly empty) of distinct non-blank strings, kept exactly as supplied."""
+    require_tuple_of(value, str, field, nonempty=False, distinct=True)
+    for entry in value:
+        require_text(entry, f"{field} element")
+
+
+@dataclass(frozen=True)
 class ProposeAction:
+    """A proposed operation, the diagnosis candidates it addresses and its justification; not permission.
+
+    The constructor checks that ``candidate_ids`` is a nonempty tuple of distinct candidate IDs; that they
+    exist in a particular diagnosis report, and that their evidence is cited, is checked against the
+    request by ``core.ports.decision.validate_decision_response``.
+    """
+
     action: Action
     expected_effect: str
+    candidate_ids: tuple[ProblemCandidateId, ...]
+    justification: ActionJustification
 
     def __post_init__(self) -> None:
         require_instance(self.action, Action, "ProposeAction.action")
         require_text(self.expected_effect, "ProposeAction.expected_effect")
+        require_tuple_of(
+            self.candidate_ids, ProblemCandidateId, "ProposeAction.candidate_ids", nonempty=True, distinct=True
+        )
+        require_instance(self.justification, ActionJustification, "ProposeAction.justification")
+
+
+@dataclass(frozen=True)
+class NoChange:
+    """A deliberate recommendation to keep the accepted state.
+
+    Not an action, not a zero-gain operation and not success: it carries no verification and asserts
+    nothing about whether criteria are met. Distinct from ``NoChangeFeedback``, which summarizes a
+    previous call.
+    """
+
+    explanation: str
+
+    def __post_init__(self) -> None:
+        require_text(self.explanation, "NoChange.explanation")
 
 
 class AbstentionReason(Enum):
@@ -45,7 +109,12 @@ class AbstentionReason(Enum):
 
 @dataclass(frozen=True)
 class Abstain:
-    """An explicit decision not to act. ``requested_context`` explains what is missing; it does not pause a run."""
+    """An explicit decision not to act. ``requested_context`` explains what is missing; it does not pause a run.
+
+    MISSING_CONTEXT requires at least one question naming what is missing (and ideally why it matters);
+    only presence and non-blank text are checked, not the usefulness of a question. Other reasons may
+    leave ``requested_context`` empty. No answer is guessed.
+    """
 
     reason: AbstentionReason
     requested_context: tuple[str, ...] = ()
@@ -55,6 +124,8 @@ class Abstain:
         require_tuple_of(self.requested_context, str, "Abstain.requested_context", nonempty=False, distinct=True)
         for entry in self.requested_context:
             require_text(entry, "Abstain.requested_context element")
+        if self.reason is AbstentionReason.MISSING_CONTEXT and not self.requested_context:
+            raise ValueError("Abstain with reason MISSING_CONTEXT requires at least one requested_context question")
 
 
 @dataclass(frozen=True)
@@ -67,7 +138,7 @@ class Decision:
     evidence_ids: tuple[ObservationId, ...]
     rationale: str
     controller: ControllerIdentity
-    outcome: ProposeAction | Abstain
+    outcome: ProposeAction | NoChange | Abstain
 
     def __post_init__(self) -> None:
         require_instance(self.decision_id, DecisionId, "Decision.decision_id")
@@ -78,7 +149,7 @@ class Decision:
         require_tuple_of(self.evidence_ids, ObservationId, "Decision.evidence_ids", nonempty=False, distinct=True)
         require_text(self.rationale, "Decision.rationale")
         require_instance(self.controller, ControllerIdentity, "Decision.controller")
-        require_instance(self.outcome, (ProposeAction, Abstain), "Decision.outcome")
+        require_instance(self.outcome, (ProposeAction, NoChange, Abstain), "Decision.outcome")
         if isinstance(self.outcome, ProposeAction):
             if not self.evidence_ids:
                 raise ValueError("Decision proposing an action must reference at least one observation")
