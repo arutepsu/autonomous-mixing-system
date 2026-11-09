@@ -42,6 +42,7 @@ BEHAVIOR_INVENTORY = {
         "validate_acceptance_commit_response",
         "validate_acceptance_query_response",
     ),
+    "ports.integrity": ("StateIntegrityInspector", "validate_state_integrity_response"),
     "admission.admission": ("admit_action",),
     "admission.preflight": ("preflight_execution",),
     "admission.capabilities": ("build_action_capability_view",),

@@ -73,6 +73,7 @@ ALLOWED_RECORD_IMPORTS = {
     "verification_routing": set(),  # verification-routing plan, 2026-11-06 (standard library only)
     # Acceptance-contract plan, 2026-11-09.
     "acceptance": {"actions", "identifiers", "invariants", "project", "verification", "verification_assessment"},
+    "integrity": {"artifacts", "identifiers", "invariants", "project"},  # state-integrity plan, 2026-11-09
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
     "decision_gate": {"decision", "identifiers", "invariants"},  # decision-gate plan, 2026-11-06
@@ -264,6 +265,13 @@ INVENTORY = {
         "AcceptanceAbsent",
         "AcceptanceAuthorityUnknown",
         "AcceptanceQueryResult",
+    ),
+    "integrity": (
+        "ArtifactRootBinding",
+        "StateIntegrityRequest",
+        "IntegrityStatus",
+        "ArtifactIntegrityResult",
+        "StateIntegrityReport",
     ),
     "rendering": (
         "ExecutionWorkspace",
