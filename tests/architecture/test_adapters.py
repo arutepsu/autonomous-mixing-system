@@ -135,7 +135,13 @@ ANALYSIS_EDGES = {
     "analysis": ({f"{ANALYSIS}.features", f"{ANALYSIS}.io"}, set()),
 }
 # In-memory acceptance journal (memory-acceptance-journal plan, 2026-11-09): records and standard library only.
-JOURNAL_EDGES = {"memory": (_r("acceptance", "identifiers", "invariants"), set())}
+JOURNAL_EDGES = {
+    "memory": (_r("acceptance", "identifiers", "invariants"), set()),
+    "run_memory": (
+        {f"{JOURNAL}.memory"} | _r("acceptance", "identifiers", "invariants", "results", "run_trace"),
+        set(),
+    ),
+}
 
 
 def test_rendering_and_analysis_modules_are_exactly_the_planned_ones():
@@ -207,6 +213,14 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
 def test_memory_journal_loads_no_legacy_layer_other_adapter_driver_stage_provider_or_numpy():  # G4
     loaded = _loaded_after(f"import {JOURNAL}.memory")
     assert f"{JOURNAL}.memory" in loaded
+    assert _forbidden_layers(loaded) == []
+    assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(ANALYSIS)]
+    assert not [n for n in loaded if n.split(".")[0] in {"numpy", "soundfile", "scipy"}]
+
+
+def test_run_memory_journal_loads_no_other_adapter_driver_stage_provider_or_numpy():
+    loaded = _loaded_after(f"import {JOURNAL}.run_memory")
+    assert f"{JOURNAL}.run_memory" in loaded
     assert _forbidden_layers(loaded) == []
     assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(ANALYSIS)]
     assert not [n for n in loaded if n.split(".")[0] in {"numpy", "soundfile", "scipy"}]
