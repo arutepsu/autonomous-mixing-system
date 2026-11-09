@@ -102,6 +102,11 @@ class DiagnosisCoverageId(_Identifier):
 
 
 @dataclass(frozen=True)
+class AcceptanceId(_Identifier):
+    """Identifies one candidate acceptance event within a run."""
+
+
+@dataclass(frozen=True)
 class Revision(_Identifier):
     """Opaque project revision token; only equality is meaningful (no ordering or counter contract)."""
 

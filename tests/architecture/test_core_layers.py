@@ -37,6 +37,11 @@ BEHAVIOR_INVENTORY = {
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
     "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
     "ports.rendering": ("Renderer", "validate_rendered_candidate"),
+    "ports.acceptance": (
+        "AcceptanceJournal",
+        "validate_acceptance_commit_response",
+        "validate_acceptance_query_response",
+    ),
     "admission.admission": ("admit_action",),
     "admission.preflight": ("preflight_execution",),
     "admission.capabilities": ("build_action_capability_view",),
@@ -48,6 +53,7 @@ BEHAVIOR_INVENTORY = {
     "loop.references": ("validate_attempt_references",),
     "loop.budgets": ("check_budget",),
     "loop.verification_routing": ("route_verification",),
+    "loop.acceptance": ("validate_acceptance_event",),
 }
 
 

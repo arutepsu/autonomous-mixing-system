@@ -71,6 +71,8 @@ ALLOWED_RECORD_IMPORTS = {
     # Verification-verdict plan, 2026-11-06.
     "verification_assessment": {"identifiers", "invariants", "verification", "verification_evidence"},
     "verification_routing": set(),  # verification-routing plan, 2026-11-06 (standard library only)
+    # Acceptance-contract plan, 2026-11-09.
+    "acceptance": {"actions", "identifiers", "invariants", "project", "verification", "verification_assessment"},
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
     "decision_gate": {"decision", "identifiers", "invariants"},  # decision-gate plan, 2026-11-06
@@ -107,6 +109,7 @@ INVENTORY = {
         "CheckpointId",
         "ProblemCandidateId",
         "DiagnosisCoverageId",
+        "AcceptanceId",
         "Revision",
         "VersionRef",
     ),
@@ -249,6 +252,19 @@ INVENTORY = {
     ),
     "verification_assessment": ("ConditionMeasurement", "VerificationAssessment"),
     "verification_routing": ("VerificationRoute",),
+    "acceptance": (
+        "AcceptedReference",
+        "AcceptanceEvent",
+        "AcceptanceCommitted",
+        "AcceptanceNotCommitted",
+        "AcceptanceCommitUnknown",
+        "AcceptanceCommitResult",
+        "AcceptanceQuery",
+        "AcceptanceFound",
+        "AcceptanceAbsent",
+        "AcceptanceAuthorityUnknown",
+        "AcceptanceQueryResult",
+    ),
     "rendering": (
         "ExecutionWorkspace",
         "CandidateIdentity",
