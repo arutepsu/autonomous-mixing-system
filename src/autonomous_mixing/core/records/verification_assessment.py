@@ -41,6 +41,40 @@ def _condition_unit(condition) -> str:
     return condition.threshold.unit  # TargetCondition or AbsoluteGuard
 
 
+def validate_condition_measurements(
+    criteria: AcceptanceCriteria, measurements: tuple[ConditionMeasurement, ...]
+) -> None:
+    """Require exactly one measurement binding per configured condition, agreeing in selector and unit.
+
+    ``measurements`` must be a nonempty tuple of ``ConditionMeasurement`` (any order). Duplicate,
+    missing and extra condition IDs are rejected, and each definition's selector and unit must equal its
+    condition's (threshold, minimum delta or maximum delta unit), including conditions an INITIAL
+    assessment defers. Structure only: no scientific validity of the definitions is implied.
+    """
+    require_instance(criteria, AcceptanceCriteria, "criteria")
+    require_tuple_of(measurements, ConditionMeasurement, "measurements", nonempty=True, distinct=False)
+    bound: dict[ConditionId, MeasurementDefinition] = {}
+    for measurement in measurements:
+        if measurement.condition_id in bound:
+            raise ValueError(f"duplicate measurement binding for condition {measurement.condition_id}")
+        bound[measurement.condition_id] = measurement.definition
+    conditions = (*criteria.targets, *criteria.improvements, *criteria.guards)
+    configured = {condition.condition_id for condition in conditions}
+    missing = sorted(str(c) for c in configured - bound.keys())
+    extra = sorted(str(c) for c in bound.keys() - configured)
+    if missing or extra:
+        raise ValueError(f"measurement bindings do not match criteria (missing: {missing}, extra: {extra})")
+    for condition in conditions:
+        definition = bound[condition.condition_id]
+        if definition.selector != condition.selector:
+            raise ValueError(f"definition selector for {condition.condition_id} differs from the condition's")
+        unit = _condition_unit(condition)
+        if definition.unit != unit:
+            raise ValueError(
+                f"definition unit {definition.unit!r} for {condition.condition_id} is not the condition unit {unit!r}"
+            )
+
+
 @dataclass(frozen=True)
 class VerificationAssessment:
     """One assessment request: INITIAL (``assessed`` is the initial state, no baselines) or ATTEMPT
@@ -70,32 +104,9 @@ class VerificationAssessment:
             require_instance(self.before, StateEvidence, "VerificationAssessment.before")
         if self.initial is not None:
             require_instance(self.initial, StateEvidence, "VerificationAssessment.initial")
-        self._validate_bindings()
+        validate_condition_measurements(self.criteria, self.measurements)
         self._validate_baselines()
         self._validate_bundle_consistency()
-
-    def _validate_bindings(self) -> None:
-        bound: dict[ConditionId, MeasurementDefinition] = {}
-        for measurement in self.measurements:
-            if measurement.condition_id in bound:
-                raise ValueError(f"duplicate measurement binding for condition {measurement.condition_id}")
-            bound[measurement.condition_id] = measurement.definition
-        criteria = self.criteria
-        conditions = (*criteria.targets, *criteria.improvements, *criteria.guards)
-        configured = {condition.condition_id for condition in conditions}
-        missing = sorted(str(c) for c in configured - bound.keys())
-        extra = sorted(str(c) for c in bound.keys() - configured)
-        if missing or extra:
-            raise ValueError(f"measurement bindings do not match criteria (missing: {missing}, extra: {extra})")
-        for condition in conditions:
-            definition = bound[condition.condition_id]
-            if definition.selector != condition.selector:
-                raise ValueError(f"definition selector for {condition.condition_id} differs from the condition's")
-            unit = _condition_unit(condition)
-            if definition.unit != unit:
-                raise ValueError(
-                    f"definition unit {definition.unit!r} for {condition.condition_id} is not the condition unit {unit!r}"
-                )
 
     def _validate_baselines(self) -> None:
         assessed = self.assessed.state.revision

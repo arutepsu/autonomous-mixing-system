@@ -77,6 +77,11 @@ class RunId(_Identifier):
 
 
 @dataclass(frozen=True)
+class RunEventId(_Identifier):
+    """Identifies one attempted ordered trace append independently of acknowledgement."""
+
+
+@dataclass(frozen=True)
 class AttemptId(_Identifier):
     pass
 

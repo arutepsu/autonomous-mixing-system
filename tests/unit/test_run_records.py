@@ -32,6 +32,7 @@ from autonomous_mixing.core.records.observation import (
 )
 from autonomous_mixing.core.records.project import ProjectSnapshot, Track
 from autonomous_mixing.core.records.run import FinalProjectState, RunConfiguration, RunOutcome, RunRecord, RunState
+from autonomous_mixing.core.records.termination import TerminationReason
 from autonomous_mixing.core.records.verification import (
     AbsoluteGuard,
     AcceptanceCriteria,
@@ -132,12 +133,24 @@ def _run(state=RunState.OBSERVING, outcome=None, final=None, reason=None, **over
         outcome=outcome,
         final_project_state=final,
         termination_reason=reason,
+        termination_explanation="recorded explanation" if state is RunState.FINISHED else None,
     )
     fields.update(overrides)
     return RunRecord(**fields)
 
 
-def _finished(outcome, final, reason="recorded stop reason") -> RunRecord:
+_DEFAULT_REASON = object()
+
+
+def _finished(outcome, final, reason=_DEFAULT_REASON) -> RunRecord:
+    if reason is _DEFAULT_REASON:
+        reason = {
+            RunOutcome.SUCCEEDED: TerminationReason.INITIAL_CRITERIA_MET,
+            RunOutcome.ABSTAINED: TerminationReason.NO_JUSTIFIED_ACTION,
+            RunOutcome.FAILED: TerminationReason.RECORDING_FAILED,
+            RunOutcome.CANCELLED: TerminationReason.USER_CANCELLED,
+            RunOutcome.LIMIT_REACHED: TerminationReason.ELAPSED_TIME_LIMIT,
+        }[outcome]
     return _run(RunState.FINISHED, outcome, final, reason)
 
 

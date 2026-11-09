@@ -55,7 +55,11 @@ from autonomous_mixing.core.records.verification import (
     Verdict,
     VerificationResult,
 )
-from autonomous_mixing.core.records.verification_assessment import ConditionMeasurement, VerificationAssessment
+from autonomous_mixing.core.records.verification_assessment import (
+    ConditionMeasurement,
+    VerificationAssessment,
+    validate_condition_measurements,
+)
 from autonomous_mixing.core.records.verification_evidence import (
     MeasurementDefinition,
     SourceRequirement,
@@ -751,3 +755,39 @@ def test_failing_guard_rejects_although_other_evidence_is_unavailable():
                                          _bundle(BEFORE_STATE)))  # fmt: skip
     assert [c.status for c in result.checks] == [U, U, U, F]
     assert (result.target_status, result.verdict) == (UNKNOWN, REJ)
+
+
+# --- the extracted binding validator (coordinator-runtime plan, 2026-11-09) --------------------------
+
+
+def test_extracted_validator_accepts_exact_bindings_in_any_order():
+    acceptance = criteria([target("tg")], [improvement("im")], [absolute("ab"), delta("dl")])
+    assert validate_condition_measurements(acceptance, tuple(reversed(bindings(acceptance)))) is None
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["duplicate", "missing", "extra", "selector", "unit", "deferred-unit", "empty", "list", "element", "criteria"],
+)
+def test_extracted_validator_rejects_what_the_constructor_rejects(case):
+    acceptance = criteria([target("tg")], [improvement("im")], [delta("dl")])
+    exact = bindings(acceptance)
+    wrong_unit = ConditionMeasurement(ConditionId("tg"), _definition(_selector("tg"), "unit-b"))
+    deferred_unit = ConditionMeasurement(ConditionId("dl"), _definition(_selector("dl"), "unit-b"))
+    supplied = {
+        "duplicate": (*exact, exact[0]),
+        "missing": exact[:-1],
+        "extra": (*exact, ConditionMeasurement(ConditionId("other"), _definition(_selector("other")))),
+        "selector": (ConditionMeasurement(ConditionId("tg"), _definition(_selector("im"))), *exact[1:]),
+        "unit": (wrong_unit, *exact[1:]),
+        "deferred-unit": (*exact[:-1], deferred_unit),
+        "empty": (),
+        "list": list(exact),
+        "element": (*exact[:-1], "dl"),
+        "criteria": exact,
+    }[case]
+    with pytest.raises(ValueError):
+        validate_condition_measurements("criteria" if case == "criteria" else acceptance, supplied)
+    if case not in ("list", "element", "criteria", "empty"):
+        with pytest.raises(ValueError):  # the constructor applies the same rule
+            request(acceptance, INITIAL, _bundle(INITIAL_STATE), measurements=supplied)

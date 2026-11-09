@@ -75,10 +75,27 @@ ALLOWED_RECORD_IMPORTS = {
     "acceptance": {"actions", "identifiers", "invariants", "project", "verification", "verification_assessment"},
     "integrity": {"artifacts", "identifiers", "invariants", "project"},  # state-integrity plan, 2026-11-09
     "reconciliation": {"acceptance", "invariants"},  # acceptance-reconciliation plan, 2026-11-09
+    # Coordinator-runtime-contracts plan, 2026-11-09 (no reverse edges into this module).
+    "coordinator_runtime": {
+        "actions",
+        "admission",
+        "artifacts",
+        "capabilities",
+        "identifiers",
+        "integrity",
+        "invariants",
+        "mix",
+        "observation",
+        "project",
+        "rendering",
+        "run",
+        "verification_assessment",
+    },
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
     "decision_gate": {"decision", "identifiers", "invariants"},  # decision-gate plan, 2026-11-06
     "run": {
+        "termination",
         "identifiers",
         "invariants",
         "actions",
@@ -89,6 +106,30 @@ ALLOWED_RECORD_IMPORTS = {
         "project",
         "verification",
     },
+    "termination": set(),
+    "run_trace": {
+        "acceptance",
+        "actions",
+        "admission",
+        "analysis",
+        "budgets",
+        "coordinator_runtime",
+        "decision",
+        "decision_gate",
+        "diagnosis",
+        "feedback",
+        "identifiers",
+        "integrity",
+        "invariants",
+        "reconciliation",
+        "rendering",
+        "results",
+        "run",
+        "termination",
+        "verification",
+        "verification_assessment",
+    },
+    "run_report": {"acceptance", "coordinator_runtime", "invariants", "run", "run_trace", "termination"},
 }
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
@@ -106,6 +147,7 @@ INVENTORY = {
         "ConditionId",
         "VerificationResultId",
         "RunId",
+        "RunEventId",
         "AttemptId",
         "ExecutionId",
         "CheckpointId",
@@ -252,7 +294,7 @@ INVENTORY = {
         "EvidenceUnavailable",
         "EvidenceMatch",
     ),
-    "verification_assessment": ("ConditionMeasurement", "VerificationAssessment"),
+    "verification_assessment": ("ConditionMeasurement", "VerificationAssessment", "validate_condition_measurements"),
     "verification_routing": ("VerificationRoute",),
     "acceptance": (
         "AcceptedReference",
@@ -275,6 +317,15 @@ INVENTORY = {
         "StateIntegrityReport",
     ),
     "reconciliation": ("ReconciliationOutcome", "ReconciliationResult"),
+    "coordinator_runtime": (
+        "DecisionRetryPolicy",
+        "ClockReading",
+        "DiagnosisRequest",
+        "RunRenderRequest",
+        "RenderPreparationFailure",
+        "RunRenderOutcome",
+        "RunRequest",
+    ),
     "rendering": (
         "ExecutionWorkspace",
         "CandidateIdentity",
@@ -308,6 +359,25 @@ INVENTORY = {
         "AttemptDisposition",
         "CorrectionAttempt",
     ),
+    "termination": ("TerminationReason",),
+    "run_trace": (
+        "OperationKind",
+        "StageRequest",
+        "DispatchIntent",
+        "DispatchSkipped",
+        "InvalidPortResponse",
+        "OperationOutcome",
+        "OperationObserved",
+        "TerminalSnapshot",
+        "RunTracePayload",
+        "RunTraceEvent",
+        "RunJournalSnapshot",
+        "TraceAppended",
+        "TraceNotAppended",
+        "TraceAppendUnknown",
+        "TraceAppendResult",
+    ),
+    "run_report": ("RunReport",),
 }
 
 MUTABLE_TYPES = {"list", "dict", "set", "bytearray", "List", "Dict", "Set", "MutableMapping", "MutableSequence"}

@@ -34,6 +34,7 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
+    "ports.run_journal": ("RunJournal", "validate_trace_append_response", "validate_run_journal_snapshot"),
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
     "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
     "ports.rendering": ("Renderer", "validate_rendered_candidate"),
@@ -43,6 +44,14 @@ BEHAVIOR_INVENTORY = {
         "validate_acceptance_query_response",
     ),
     "ports.integrity": ("StateIntegrityInspector", "validate_state_integrity_response"),
+    "ports.coordinator_runtime": (
+        "DiagnosisSource",
+        "RunRenderer",
+        "RunClock",
+        "IdentitySource",
+        "validate_diagnosis_response",
+        "validate_run_render_response",
+    ),
     "admission.admission": ("admit_action",),
     "admission.preflight": ("preflight_execution",),
     "admission.capabilities": ("build_action_capability_view",),
