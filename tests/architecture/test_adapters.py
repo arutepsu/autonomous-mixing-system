@@ -126,6 +126,8 @@ RENDERING_EDGES = {
         | _r("actions", "artifacts", "identifiers", "rendering"),
         {"numpy"},
     ),
+    # File-backed state inspector (file-state-inspector plan, 2026-11-09).
+    "state_integrity": (_a("integrity", "locations") | _r("artifacts", "integrity", "invariants"), set()),
 }
 ANALYSIS_EDGES = {
     "io": (set(), {"numpy", "soundfile"}),
@@ -208,3 +210,11 @@ def test_memory_journal_loads_no_legacy_layer_other_adapter_driver_stage_provide
     assert _forbidden_layers(loaded) == []
     assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(ANALYSIS)]
     assert not [n for n in loaded if n.split(".")[0] in {"numpy", "soundfile", "scipy"}]
+
+
+def test_state_inspector_loads_no_other_adapter_driver_stage_or_provider():  # G4
+    loaded = _loaded_after(f"import {RENDERING}.state_integrity")
+    assert f"{RENDERING}.state_integrity" in loaded
+    assert _forbidden_layers(loaded) == []
+    assert not [n for n in loaded if n.startswith(ANALYSIS) or n.startswith(JOURNAL)]
+    assert not [n for n in loaded if n.startswith(f"{RENDERING}.gain_mix") or n.startswith(f"{RENDERING}.wav_output")]
