@@ -15,7 +15,8 @@ autonomous_mixing/
                     or port they serve (ids, project, artifacts, mix, context, observation,
                     actions, budgets, results, decision, analysis, verification, rendering,
                     admission, run), plus the invariant checks records call in __post_init__
-    ports/          protocols AudioAnalyzer, DecisionMaker, Renderer and their response checks
+    ports/          protocols AudioAnalyzer, DecisionMaker, Renderer, AcceptanceJournal and their
+                    response checks
     admission/      is a proposal allowed: admit_action, metadata preflight
     verification/   did the change help without regressions (rules only)
     diagnosis/      problem candidates (only from its roadmap phase on)
@@ -23,6 +24,7 @@ autonomous_mixing/
   adapters/
     dsp_analysis/   implements AudioAnalyzer (deterministic DSP)
     rendering/      implements Renderer (gain/mix, WAV I/O, workspaces, file integrity)
+    journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance)
     decision_agent/ implements DecisionMaker with Claude (ADR-005 name)
     baselines/      other DecisionMaker implementations for comparison conditions
   drivers/

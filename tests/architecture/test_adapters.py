@@ -19,6 +19,7 @@ PKG = "autonomous_mixing"
 ADAPTERS = f"{PKG}.adapters"
 RENDERING = f"{ADAPTERS}.rendering"
 ANALYSIS = f"{ADAPTERS}.dsp_analysis"
+JOURNAL = f"{ADAPTERS}.journal"
 RECORDS = f"{PKG}.core.records"
 PORTS = f"{PKG}.core.ports"
 SRC = Path(__file__).resolve().parents[2] / "src"
@@ -131,11 +132,14 @@ ANALYSIS_EDGES = {
     "features": (set(), {"numpy", "scipy"}),
     "analysis": ({f"{ANALYSIS}.features", f"{ANALYSIS}.io"}, set()),
 }
+# In-memory acceptance journal (memory-acceptance-journal plan, 2026-11-09): records and standard library only.
+JOURNAL_EDGES = {"memory": (_r("acceptance", "identifiers", "invariants"), set())}
 
 
 def test_rendering_and_analysis_modules_are_exactly_the_planned_ones():
     assert {n for n in MODULES if n.startswith(RENDERING + ".")} == {f"{RENDERING}.{m}" for m in RENDERING_EDGES}
     assert {n for n in MODULES if n.startswith(ANALYSIS + ".")} == {f"{ANALYSIS}.{m}" for m in ANALYSIS_EDGES}
+    assert {n for n in MODULES if n.startswith(JOURNAL + ".")} == {f"{JOURNAL}.{m}" for m in JOURNAL_EDGES}
 
 
 @pytest.mark.parametrize("module", sorted(RENDERING_EDGES))
@@ -148,10 +152,15 @@ def test_dsp_analysis_edges_are_exactly_the_permitted_ones(module):
     assert _edges(f"{ANALYSIS}.{module}") == ANALYSIS_EDGES[module]
 
 
+@pytest.mark.parametrize("module", sorted(JOURNAL_EDGES))
+def test_journal_edges_are_exactly_the_permitted_ones(module):
+    assert _edges(f"{JOURNAL}.{module}") == JOURNAL_EDGES[module]
+
+
 def test_adapter_package_initializers_contain_only_a_docstring():
     # Exact AST shape (Codex review of M3): one string expression and nothing else, so an import-free
     # assignment or call in an initializer fails too.
-    for package in (ADAPTERS, RENDERING, ANALYSIS):
+    for package in (ADAPTERS, RENDERING, ANALYSIS, JOURNAL):
         body = ast.parse(MODULES[package].read_text(encoding="utf-8")).body
         assert len(body) == 1, package
         assert isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant), package
@@ -191,3 +200,11 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
     assert f"{ANALYSIS}.analysis" in loaded
     assert _forbidden_layers(loaded) == []
     assert not [n for n in loaded if n.startswith(RENDERING)]
+
+
+def test_memory_journal_loads_no_legacy_layer_other_adapter_driver_stage_provider_or_numpy():  # G4
+    loaded = _loaded_after(f"import {JOURNAL}.memory")
+    assert f"{JOURNAL}.memory" in loaded
+    assert _forbidden_layers(loaded) == []
+    assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(ANALYSIS)]
+    assert not [n for n in loaded if n.split(".")[0] in {"numpy", "soundfile", "scipy"}]
