@@ -703,7 +703,9 @@ def run(
         plan: RenderPlan = preflight.plan
         state, action = situation.state, decision.outcome.action
         before_request = StateIntegrityRequest(state, bindings_for(state))
-        render_request = RunRenderRequest(plan, before_request, before_request.required_artifacts)
+        render_request = RunRenderRequest(
+            plan, before_request, before_request.required_artifacts, before_request.bindings
+        )
         intent_id, _, stop, skipped = gate(
             OperationKind.RENDER, lambda charged: render_request, BudgetOperation.RENDER_CALL, call=call_id,
             attempt=attempt_id, execution=plan.execution_id,

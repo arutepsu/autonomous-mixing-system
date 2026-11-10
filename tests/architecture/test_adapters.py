@@ -128,6 +128,11 @@ RENDERING_EDGES = {
     ),
     # File-backed state inspector (file-state-inspector plan, 2026-11-09).
     "state_integrity": (_a("integrity", "locations") | _r("artifacts", "integrity", "invariants"), set()),
+    # File-backed RunRenderer (file-run-renderer plan, 2026-11-10): sibling preparation and processing only.
+    "run_renderer": (
+        _a("gain_mix", "locations", "workspaces") | _r("actions", "coordinator_runtime", "invariants"),
+        set(),
+    ),
 }
 ANALYSIS_EDGES = {
     "io": (set(), {"numpy", "soundfile"}),
@@ -232,3 +237,33 @@ def test_state_inspector_loads_no_other_adapter_driver_stage_or_provider():  # G
     assert _forbidden_layers(loaded) == []
     assert not [n for n in loaded if n.startswith(ANALYSIS) or n.startswith(JOURNAL)]
     assert not [n for n in loaded if n.startswith(f"{RENDERING}.gain_mix") or n.startswith(f"{RENDERING}.wav_output")]
+
+
+RUN_RENDERER = f"{RENDERING}.run_renderer"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from autonomous_mixing.core.loop.coordinator import run",
+        "from autonomous_mixing.core import loop",
+        "from autonomous_mixing.core.loop import coordinator",
+        "from autonomous_mixing.core.admission.preflight import preflight_execution",
+        "from autonomous_mixing.core import verification",
+        "from autonomous_mixing.core.verification import assessment",
+        "from autonomous_mixing.drivers import cli",
+        "from autonomous_mixing import evaluation",
+        "from autonomous_mixing.adapters.journal.memory import InMemoryAcceptanceJournal",
+        "from autonomous_mixing.adapters import dsp_analysis",
+    ],
+)
+def test_checker_rejects_forbidden_run_renderer_imports(source):
+    assert adapter_violations(source, RUN_RENDERER), source
+
+
+def test_run_renderer_loads_no_coordinator_stage_driver_other_adapter_or_provider():  # G4
+    loaded = _loaded_after(f"import {RUN_RENDERER}")
+    assert RUN_RENDERER in loaded
+    assert _forbidden_layers(loaded) == []
+    assert not [n for n in loaded if n.startswith(ANALYSIS) or n.startswith(JOURNAL)]
+    assert f"{RENDERING}.state_integrity" not in loaded

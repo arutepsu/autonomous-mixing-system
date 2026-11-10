@@ -136,6 +136,7 @@ class RunRenderRequest:
     plan: RenderPlan
     before: StateIntegrityRequest
     protected_artifacts: tuple[AudioArtifact, ...]
+    protected_root_bindings: tuple[ArtifactRootBinding, ...]
 
     def __post_init__(self) -> None:
         require_instance(self.plan, RenderPlan, "RunRenderRequest.plan")
@@ -183,6 +184,29 @@ class RunRenderRequest:
         reused = sorted(str(a) for a in outputs & protected.keys())
         if reused:
             raise ValueError(f"candidate output IDs reuse protected artifact IDs: {reused}")
+        self._validate_protected_root_bindings(protected)
+
+    def _validate_protected_root_bindings(self, protected: dict[ArtifactId, AudioArtifact]) -> None:
+        """One explicit logical root per protected artifact; required artifacts keep their before-state root."""
+        require_tuple_of(
+            self.protected_root_bindings, ArtifactRootBinding, "RunRenderRequest.protected_root_bindings",
+            nonempty=True, distinct=False,
+        )  # fmt: skip
+        keys: dict[ArtifactId, str] = {}
+        for binding in self.protected_root_bindings:
+            if binding.artifact_id in keys:
+                raise ValueError(f"duplicate protected root binding for {binding.artifact_id}")
+            keys[binding.artifact_id] = binding.root_key
+        missing = sorted(str(a) for a in protected.keys() - keys.keys())
+        extra = sorted(str(a) for a in keys.keys() - protected.keys())
+        if missing or extra:
+            raise ValueError(
+                f"protected root bindings must name every protected artifact once (missing: {missing}, extra: {extra})"
+            )
+        before = {binding.artifact_id: binding.root_key for binding in self.before.bindings}
+        conflicting = sorted(str(a) for a, key in before.items() if keys.get(a) != key)
+        if conflicting:
+            raise ValueError(f"protected root bindings differ from the before-state bindings for: {conflicting}")
 
 
 @dataclass(frozen=True)

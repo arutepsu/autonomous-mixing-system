@@ -294,7 +294,7 @@ RUN_REQUEST = _run_request()
         (DecisionRetryPolicy, ["reference", "max_retries"]),
         (ClockReading, ["monotonic_seconds", "utc", "cancelled"]),
         (DiagnosisRequest, ["state", "scope", "observations"]),
-        (RunRenderRequest, ["plan", "before", "protected_artifacts"]),
+        (RunRenderRequest, ["plan", "before", "protected_artifacts", "protected_root_bindings"]),
         (RenderPreparationFailure, ["issue", "created_workspace"]),
         (RunRequest, ["run_id", "initial_state", "configuration", "policy", "renderer_capabilities", "processing_spec",
                       "recipe", "stem_bindings", "mix_artifact_id", "measurements", "alignment", "root_bindings",
@@ -650,9 +650,22 @@ PLAN = RenderPlan(
 BEFORE = StateIntegrityRequest(STATE, _roots())
 
 
+def _protection(before, protected, retained_key="retained"):
+    """Explicit bindings for ``protected``: the before root for required artifacts, ``retained_key`` otherwise."""
+    known = before.bindings if isinstance(before, StateIntegrityRequest) else BEFORE.bindings
+    keys = {binding.artifact_id: binding.root_key for binding in known}
+    return tuple(
+        ArtifactRootBinding(a.artifact_id, keys.get(a.artifact_id, retained_key))
+        for a in protected
+        if isinstance(a, AudioArtifact)
+    )
+
+
 def _render_request(**overrides) -> RunRenderRequest:
     fields = dict(plan=PLAN, before=BEFORE, protected_artifacts=REQUIRED)
     fields.update(overrides)
+    if "protected_root_bindings" not in fields:
+        fields["protected_root_bindings"] = _protection(fields["before"], fields["protected_artifacts"])
     return RunRenderRequest(**fields)
 
 
@@ -882,3 +895,75 @@ def test_output_root_key_is_an_explicit_logical_root_distinct_from_input_roots()
 
 def test_output_root_key_may_equal_an_input_root():
     assert _run_request(output_root_key="exports").output_root_key == "exports"
+
+
+# --- explicit protected root bindings (file-run-renderer plan, 2026-11-10) ---------------------------
+
+RETAINED_OUTPUT = _artifact("older-output", "r0", ("t2",))
+
+
+def test_extra_retained_artifact_needs_and_keeps_its_explicit_root():
+    bindings = (*BEFORE.bindings, ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, "archive"))
+    request = _render_request(protected_artifacts=(*REQUIRED, RETAINED_OUTPUT), protected_root_bindings=bindings)
+    assert request.protected_root_bindings is bindings
+
+
+def test_reordered_complete_bindings_are_accepted_unchanged():
+    bindings = tuple(reversed((*BEFORE.bindings, ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, "archive"))))
+    request = _render_request(protected_artifacts=(*REQUIRED, RETAINED_OUTPUT), protected_root_bindings=bindings)
+    assert request.protected_root_bindings is bindings
+
+
+@pytest.mark.parametrize(
+    "bindings",
+    [
+        list(BEFORE.bindings),
+        (*BEFORE.bindings, "s1"),
+        (*BEFORE.bindings, ArtifactId("older-output")),
+    ],
+    ids=["list", "string-element", "identifier-element"],
+)
+def test_protected_root_bindings_types(bindings):
+    with pytest.raises(ValueError):
+        _render_request(protected_artifacts=(*REQUIRED, RETAINED_OUTPUT), protected_root_bindings=bindings)
+
+
+@pytest.mark.parametrize(
+    "bindings, message",
+    [
+        ((*BEFORE.bindings,), "older-output"),  # the retained artifact has no binding
+        ((*BEFORE.bindings[1:], ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, "archive")), "s1"),  # required one missing
+        ((*BEFORE.bindings, ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, "archive"),
+          ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, "archive")), "duplicate"),
+        ((*BEFORE.bindings, ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, "archive"),
+          ArtifactRootBinding(ArtifactId("stray"), "archive")), "stray"),
+    ],
+    ids=["missing-retained", "missing-required", "duplicate", "extra"],
+)  # fmt: skip
+def test_every_protected_artifact_has_exactly_one_binding(bindings, message):
+    with pytest.raises(ValueError, match=message):
+        _render_request(protected_artifacts=(*REQUIRED, RETAINED_OUTPUT), protected_root_bindings=bindings)
+
+
+def test_required_artifact_binding_must_use_the_before_root():
+    conflicting = tuple(
+        ArtifactRootBinding(b.artifact_id, "elsewhere") if b.artifact_id == S1.artifact_id else b
+        for b in BEFORE.bindings
+    )
+    with pytest.raises(ValueError, match="s1"):
+        _render_request(protected_root_bindings=conflicting)
+
+
+@pytest.mark.parametrize("key", ["", " "])
+def test_blank_protected_root_keys_are_rejected_by_the_binding_invariant(key):
+    with pytest.raises(ValueError):
+        ArtifactRootBinding(RETAINED_OUTPUT.artifact_id, key)
+
+
+def test_protected_bindings_do_not_relax_existing_protection_checks():
+    with pytest.raises(ValueError, match="protect"):  # metadata equality is still enforced
+        _render_request(protected_artifacts=REQUIRED[:-1], protected_root_bindings=BEFORE.bindings[:-1])
+    retained = _artifact("s1-r2", "r0", ("t2",))
+    with pytest.raises(ValueError, match="candidate"):  # candidate IDs still may not reuse protected IDs
+        _render_request(protected_artifacts=(*REQUIRED, retained),
+                        protected_root_bindings=(*BEFORE.bindings, ArtifactRootBinding(retained.artifact_id, "x")))  # fmt: skip

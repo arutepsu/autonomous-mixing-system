@@ -644,7 +644,7 @@ def make_intent(operation):
         OperationKind.ANALYZE: AnalysisRequest(STATE, SCOPE, RUN_REQUEST.configuration.analysis_spec),
         OperationKind.DIAGNOSE: DiagnosisRequest(STATE, SCOPE, ()),
         OperationKind.DECIDE: situation,
-        OperationKind.RENDER: RunRenderRequest(plan, integrity, REQUIRED),
+        OperationKind.RENDER: RunRenderRequest(plan, integrity, REQUIRED, integrity.bindings),
         OperationKind.QUERY_ACCEPTANCE: AcceptanceQuery(RUN_REQUEST.run_id, AcceptanceId("acceptance")),
         OperationKind.INSPECT_STATE: integrity,
     }
