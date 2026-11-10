@@ -160,6 +160,11 @@ Implements the owner-approved file-run-renderer design and plan (stored in the C
 
 Limits: one exclusive workspace per call; a repeated assignment collides rather than reusing a directory. No fsync, atomic two-file publication, hard deadline, complete historical protection inventory, race-free confinement or F4 closure is claimed; the coordinator protects exactly the before state's required artifacts. The real analyzer, scientific diagnosis, provider decision maker, user-facing run driver, project metadata import and durable journal remain later work. Requirement statuses and the roadmap are unchanged.
 
+### Shared read-only audio access (`adapters.audio_io`; implemented 2026-11-10, ADR-028 Proposed)
+Implements the owner-approved shared-audio-read plan (Codex project folder), the first part of the file-audio-analyzer design. `audio_io.locations` and `audio_io.integrity` are the former `rendering.locations` and `rendering.integrity` modules, moved with unchanged implementations (locations byte-identical; integrity differs only in import statements and the relocated `_require_limit`); the old paths are removed without aliases. `audio_io.limits.AudioReadLimits(max_file_bytes, max_decoded_bytes)` is the new frozen public record, both fields exact built-in ints of at least one (no caps or defaults), checked file limit first with the reader's labels; `FileStateIntegrityInspector` now validates its two limits through it at the same point and order. Dependencies: `locations` imports `core.records.artifacts`; `limits` only the standard library; `integrity` its own `locations` and `limits`, `core.records.artifacts`, NumPy and soundfile. The only external clients are `rendering.workspaces`, `gain_mix`, `state_integrity` and `run_renderer`, each with its exact public modules; no other adapter may import the component, nobody else may import its private names, and it imports no consumer, loop, stage, driver or evaluation code. The package initializer is docstring-only, so location resolution, allocation and revalidation load no NumPy or soundfile.
+
+Limits: no behavior, validation order, error or numerical change; `AnalysisRequest`, the file-backed analyzer, level kernels, provider and driver are later increments. No requirement status changes.
+
 ## Implemented (M0)
 M0 implements only Audio I/O -> features -> descriptive JSON report. Do not claim masking detection from overlap measures alone.
 
@@ -257,7 +262,8 @@ Heading revised 2026-10-22: the earlier label "Infrastructure kernels (implement
 
 Limits: no WAV processing adapter, execution service or connected correction pipeline exists, and only tests call the kernels. Array immutability does not establish source-file protection (QR-01); F2 and F4 remain open (see Open questions). A fixed operation order does not promise bitwise-identical results across platforms, and no cross-platform identity is claimed. The tests use synthetic numerical arrays; no perceptual or research-performance result follows from them. No test yet enforces the infrastructure package's own import boundary. *Superseded (2026-10-22, ADR-022): source-import rules for the existing infrastructure modules are now enforced; see Import boundaries below.*
 
-### Read-only WAV integrity checks (`integrity`, formerly `verification`)
+### Read-only WAV integrity checks (`integrity`, formerly `verification`; moved to `adapters.audio_io.integrity` by ADR-028)
+Update 2026-11-10: this module now lives in the shared `adapters.audio_io` component (ADR-028, Proposed) with an unchanged implementation; its private `_require_limit` moved unchanged to `audio_io.limits`. The description below otherwise stands.
 `check_wav_integrity(artifact, *, max_file_bytes, max_decoded_bytes) -> CheckedAudio` checks one existing file against its `AudioArtifact` metadata. It writes, renames and removes nothing. It imports the `core.records` interface (`AudioArtifact`) and soundfile/libsndfile. Evidence: `tests/unit/test_audio_verification.py` (87 test cases passed, no skips; full suite 1,305 passed; ruff lint and scoped formatting passed; independent review, 2026-10-22). Status: implemented for read-only verification of a single artifact. It contributes to QR-01, QR-02, QR-03, FR-02 and FR-17 but completes none of them; requirement statuses are unchanged.
 
 | Element | Behaviour |
@@ -280,8 +286,8 @@ Limits:
 - No perceptual or research-performance result is established.
 - Platform: tested on Windows. soundfile 0.14.0 is the version pinned in `uv.lock`; libsndfile 1.2.2 is taken from the implementation report and is not recorded in the lockfile. The POSIX-specific `IsADirectoryError` branch was not exercised on a real filesystem. Permission failures and a non-regular opened handle were exercised only via test doubles.
 
-### Read-only artifact-location resolution (`locations`, formerly `filesystem`; ADR-023, Proposed)
-`autonomous_mixing.adapters.rendering.locations` (implementation module `locations`) owns local interpretation of artifact locations. It exports exactly four names:
+### Read-only artifact-location resolution (`locations`, formerly `filesystem`; ADR-023, Proposed; moved to `adapters.audio_io.locations` by ADR-028)
+`autonomous_mixing.adapters.audio_io.locations` (formerly `adapters.rendering.locations`, moved byte-identically on 2026-11-10; this supersedes the old path) owns local interpretation of artifact locations. It exports exactly four names:
 - `ResolvedArtifactLocation(artifact, configured_root, resolved_root, absolute_path)`;
 - `LocationResolutionFailureCode`, with seven codes: `UNSUPPORTED_PATH`, `INVALID_ROOT`, `NOT_FOUND`, `NOT_READABLE`, `OUTSIDE_ROOT`, `RESOLUTION_LOOP`, `STALE_RESOLUTION`;
 - `LocationResolutionError`, a `ValueError` subclass with `.code` and a message prefixed by the code value;

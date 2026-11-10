@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.adapters.rendering.integrity as verification  # moved in ADR-027 step M3; tests patch or inspect its internals
-from autonomous_mixing.adapters.rendering.integrity import (
+import autonomous_mixing.adapters.audio_io.integrity as verification  # moved in ADR-027 step M3 and to audio_io by ADR-028; tests patch or inspect its internals
+from autonomous_mixing.adapters.audio_io.integrity import (
     CheckedAudio,
     IntegrityError,
     IntegrityFailureCode,

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-import autonomous_mixing.adapters.rendering.locations as locations  # moved in ADR-027 step M3; tests patch or inspect its internals
-from autonomous_mixing.adapters.rendering.locations import (
+import autonomous_mixing.adapters.audio_io.locations as locations  # moved in ADR-027 step M3 and to audio_io by ADR-028; tests patch or inspect its internals
+from autonomous_mixing.adapters.audio_io.locations import (
     LocationResolutionError,
     LocationResolutionFailureCode,
     ResolvedArtifactLocation,

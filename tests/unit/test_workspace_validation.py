@@ -22,8 +22,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import autonomous_mixing.adapters.rendering.workspaces as allocation  # moved in ADR-027 step M3; tests patch or inspect its internals
-from autonomous_mixing.adapters.rendering.locations import LocationResolutionError, resolve_artifact_location
+import autonomous_mixing.adapters.rendering.workspaces as allocation  # moved in ADR-027 step M3 and to audio_io by ADR-028; tests patch or inspect its internals
+from autonomous_mixing.adapters.audio_io.locations import LocationResolutionError, resolve_artifact_location
 from autonomous_mixing.adapters.rendering.revalidation import validate_allocated_workspace
 from autonomous_mixing.adapters.rendering.workspaces import (
     AllocatedWorkspace,

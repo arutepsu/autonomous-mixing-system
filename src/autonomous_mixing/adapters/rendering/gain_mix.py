@@ -26,13 +26,13 @@ from typing import Any
 
 import numpy as np
 
-from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
-from autonomous_mixing.adapters.rendering.integrity import (
+from autonomous_mixing.adapters.audio_io.integrity import (
     CheckedAudio,
     IntegrityError,
     check_resolved_wav_integrity,
 )
-from autonomous_mixing.adapters.rendering.locations import LocationResolutionError, ResolvedArtifactLocation
+from autonomous_mixing.adapters.audio_io.locations import LocationResolutionError, ResolvedArtifactLocation
+from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
 from autonomous_mixing.adapters.rendering.wav_output import WavOutputError, WrittenWav, write_wav_output
 from autonomous_mixing.adapters.rendering.workspaces import AllocatedWorkspace
 from autonomous_mixing.core.records.actions import ExecutionIssue, ExecutionStatus

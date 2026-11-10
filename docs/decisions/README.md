@@ -31,6 +31,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [025](0025-exclusive-wav-output.md) | Exclusive WAV/DOUBLE output in a separate infrastructure component, with read-only workspace revalidation | 2026-11-03 | Proposed |
 | [026](0026-gain-mix-processor-adapter.md) | Gain/full-mix processor adapter bound to a pre-allocated workspace | 2026-11-03 | Accepted |
 | [027](0027-hexagonal-control-loop-architecture.md) | Hexagonal architecture around a MAPE-K control loop, with immutable records | 2026-11-03 | Accepted; supersedes ADR-017 and ADR-022 |
+| [028](0028-shared-read-only-audio-access.md) | Shared read-only audio access component with exact client edges | 2026-11-10 | Proposed |
 
 ## Template
 
