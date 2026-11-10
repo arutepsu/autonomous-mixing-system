@@ -64,6 +64,7 @@ BEHAVIOR_INVENTORY = {
     "loop.budgets": ("check_budget",),
     "loop.verification_routing": ("route_verification",),
     "loop.acceptance": ("validate_acceptance_event",),
+    "loop.coordinator": ("run",),  # controlled-coordinator composition plan, 2026-11-09
     "loop.reconciliation": ("reconcile_acceptance",),
 }
 

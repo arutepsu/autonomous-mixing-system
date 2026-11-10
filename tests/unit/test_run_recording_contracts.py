@@ -260,6 +260,7 @@ def _run_request(**overrides) -> RunRequest:
         measurements=MEASUREMENTS,
         alignment=ALIGNMENT,
         root_bindings=_roots(),
+        output_root_key="renders",
         retry_policy=RETRY,
     )
     fields.update(overrides)
@@ -413,7 +414,7 @@ def make_acceptance(expected=INITIAL, number=1):
 
 
 def test_reason_values_and_groups():
-    assert len(TerminationReason) == 32
+    assert len(TerminationReason) == 33
     assert all(r.value == r.name.lower() for r in TerminationReason)
     for reason in TerminationReason:
         for outcome in RunOutcome:
@@ -752,3 +753,13 @@ def test_record_shapes_are_frozen_and_all_fields_required(record, names):
         field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING
         for field in dataclasses.fields(record)
     )
+
+
+def test_diagnosis_failed_reason_maps_to_failed():
+    reason = TerminationReason.DIAGNOSIS_FAILED
+    assert reason.value == "diagnosis_failed"
+    make_run(reason, outcome=RunOutcome.FAILED)
+    for outcome in RunOutcome:
+        if outcome is not RunOutcome.FAILED:
+            with pytest.raises(ValueError):
+                make_run(reason, outcome=outcome)

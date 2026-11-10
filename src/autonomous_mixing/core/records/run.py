@@ -132,6 +132,7 @@ _REASON_OUTCOMES = {
             TerminationReason.INITIAL_ANALYSIS_FAILED,
             TerminationReason.INITIAL_ASSESSMENT_INCONCLUSIVE,
             TerminationReason.REQUIRED_BASELINE_UNAVAILABLE,
+            TerminationReason.DIAGNOSIS_FAILED,
             TerminationReason.DECISION_FAILED,
             TerminationReason.INVALID_DECISION_RESPONSE,
             TerminationReason.DECISION_RETRIES_EXHAUSTED,

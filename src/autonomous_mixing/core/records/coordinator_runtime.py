@@ -26,6 +26,7 @@ from autonomous_mixing.core.records.invariants import (
     require_count,
     require_finite,
     require_instance,
+    require_text,
     require_tuple_of,
     require_utc,
 )
@@ -223,6 +224,7 @@ class RunRequest:
     measurements: tuple[ConditionMeasurement, ...]
     alignment: VersionRef
     root_bindings: tuple[ArtifactRootBinding, ...]
+    output_root_key: str
     retry_policy: DecisionRetryPolicy
 
     def __post_init__(self) -> None:
@@ -253,6 +255,9 @@ class RunRequest:
             nonempty=False,
             distinct=False,
         )
+        # A logical configured root key for every generated workspace and output, never a path or a
+        # value inferred from an input binding; it may equal an input root key.
+        require_text(self.output_root_key, "RunRequest.output_root_key")
         require_instance(self.retry_policy, DecisionRetryPolicy, "RunRequest.retry_policy")
 
         state = self.initial_state

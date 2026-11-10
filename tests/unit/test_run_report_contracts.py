@@ -338,3 +338,58 @@ def test_failed_stage_reason_keeps_priority_over_a_finalization_time_limit():
                 final_run=limited,
             )
         )
+
+
+# --- completion that violates the runtime contract (coordinator review correction, 2026-11-10) --------
+# An invalid or backward completion clock reading cannot be represented by a ClockReading, so the report
+# carries the last valid reading and may only make an acknowledged, not yet failed result more conservative.
+
+
+def test_acknowledged_success_can_complete_as_a_runtime_contract_failure():
+    failed = make_run(TerminationReason.RUNTIME_CONTRACT_FAILED, outcome=RunOutcome.FAILED)
+    assert RunReport(**report_fields(final_run=failed)).final_run is failed
+
+
+def test_runtime_contract_completion_cannot_rewrite_an_established_failure():
+    render_failed = make_run(TerminationReason.RENDER_FAILED, outcome=RunOutcome.FAILED)
+    terminal = make_event(TerminalSnapshot(render_failed, INITIAL, INITIAL))
+    contract = make_run(TerminationReason.RUNTIME_CONTRACT_FAILED, outcome=RunOutcome.FAILED)
+    with pytest.raises(ValueError):
+        RunReport(
+            **report_fields(
+                trace=make_snapshot((terminal,)),
+                terminal_event=terminal,
+                terminal_append=TraceAppended(terminal),
+                final_run=contract,
+            )
+        )
+
+
+def test_runtime_contract_completion_cannot_replace_a_recording_failure_or_high_priority_reason():
+    contract = make_run(TerminationReason.RUNTIME_CONTRACT_FAILED, outcome=RunOutcome.FAILED)
+    terminal = make_terminal()
+    with pytest.raises(ValueError):  # an unacknowledged terminal must report RECORDING_FAILED
+        RunReport(
+            **report_fields(
+                trace=make_snapshot(()),
+                terminal_append=TraceNotAppended(terminal.event_id, "refused"),
+                final_run=contract,
+                unacknowledged_events=(terminal,),
+            )
+        )
+    uncertain = make_run(TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN, outcome=RunOutcome.FAILED,
+                         final=FinalProjectState.UNKNOWN)  # fmt: skip
+    high = make_event(TerminalSnapshot(uncertain, None, None))
+    contract_unknown = make_run(TerminationReason.RUNTIME_CONTRACT_FAILED, outcome=RunOutcome.FAILED,
+                                final=FinalProjectState.UNKNOWN)  # fmt: skip
+    with pytest.raises(ValueError):
+        RunReport(
+            **report_fields(
+                trace=make_snapshot((high,)),
+                terminal_event=high,
+                terminal_append=TraceAppended(high),
+                final_run=contract_unknown,
+                authoritative=None,
+                verified=None,
+            )
+        )

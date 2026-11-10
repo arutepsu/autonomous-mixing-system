@@ -275,6 +275,7 @@ def _run_request(**overrides) -> RunRequest:
         measurements=MEASUREMENTS,
         alignment=ALIGNMENT,
         root_bindings=_roots(),
+        output_root_key="renders",
         retry_policy=RETRY,
     )
     fields.update(overrides)
@@ -297,7 +298,7 @@ RUN_REQUEST = _run_request()
         (RenderPreparationFailure, ["issue", "created_workspace"]),
         (RunRequest, ["run_id", "initial_state", "configuration", "policy", "renderer_capabilities", "processing_spec",
                       "recipe", "stem_bindings", "mix_artifact_id", "measurements", "alignment", "root_bindings",
-                      "retry_policy"]),
+                      "output_root_key", "retry_policy"]),
     ],
 )  # fmt: skip
 def test_record_fields_are_exact_required_and_frozen(record, fields):
@@ -406,6 +407,8 @@ def test_a_consistent_run_request_keeps_the_supplied_objects():
         ("alignment", "alignment"),
         ("root_bindings", list(_roots())),
         ("retry_policy", 1),
+        ("output_root_key", None),
+        ("output_root_key", 3),
     ],
 )
 def test_run_request_field_types(field, value):
@@ -860,3 +863,22 @@ def test_clock_and_identity_doubles_satisfy_their_protocols():
     identities: IdentitySource = _ScriptedIdentities()
     assert clock.read().monotonic_seconds == 1.5
     assert [identities.next_token() for _ in range(2)] == ["id-1", "id-2"]
+
+
+# --- output root (controlled-coordinator composition plan, 2026-11-09) -------------------------------
+
+
+@pytest.mark.parametrize("key", ["", " ", "\t"])
+def test_output_root_key_must_be_nonblank(key):
+    with pytest.raises(ValueError):
+        _run_request(output_root_key=key)
+
+
+def test_output_root_key_is_an_explicit_logical_root_distinct_from_input_roots():
+    request = _run_request(output_root_key="renders")
+    assert request.output_root_key == "renders"
+    assert {binding.root_key for binding in request.root_bindings} == {"exports"}
+
+
+def test_output_root_key_may_equal_an_input_root():
+    assert _run_request(output_root_key="exports").output_root_key == "exports"

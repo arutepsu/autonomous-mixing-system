@@ -19,6 +19,7 @@ class TerminationReason(Enum):
     INITIAL_ANALYSIS_FAILED = "initial_analysis_failed"
     INITIAL_ASSESSMENT_INCONCLUSIVE = "initial_assessment_inconclusive"
     REQUIRED_BASELINE_UNAVAILABLE = "required_baseline_unavailable"
+    DIAGNOSIS_FAILED = "diagnosis_failed"
     DECISION_FAILED = "decision_failed"
     INVALID_DECISION_RESPONSE = "invalid_decision_response"
     DECISION_RETRIES_EXHAUSTED = "decision_retries_exhausted"

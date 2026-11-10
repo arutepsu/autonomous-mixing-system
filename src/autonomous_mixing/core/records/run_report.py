@@ -144,6 +144,14 @@ class RunReport:
             TerminationReason.RECORDING_FAILED,
         ):
             return
+        if (
+            isinstance(self.terminal_append, TraceAppended)
+            and terminal.run.outcome is not RunOutcome.FAILED
+            and final == (RunOutcome.FAILED, TerminationReason.RUNTIME_CONTRACT_FAILED)
+        ):
+            # The completion observation violated the runtime contract (e.g. an invalid or backward clock reading,
+            # which no ClockReading can carry): an acknowledged, not yet failed result may only become this failure.
+            return
         exceeded = self.final_run.usage.elapsed_seconds >= self.request.configuration.budget_limits.max_elapsed_seconds
         if (
             exceeded
