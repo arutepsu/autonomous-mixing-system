@@ -28,6 +28,26 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
+    "coordinator_progress": {
+        "verification_evidence",
+        "identifiers",
+        "invariants",
+        "diagnosis",
+        "project",
+        "acceptance",
+        "integrity",
+        "actions",
+        "rendering",
+        "admission",
+        "verification_assessment",
+        "feedback",
+        "verification",
+        "budgets",
+        "decision",
+        "termination",
+        "run_trace",
+        "coordinator_runtime",
+    },
     "identifiers": {"invariants"},
     "invariants": set(),
     "artifacts": {"identifiers", "invariants"},
@@ -134,6 +154,7 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
+    "coordinator_progress": ("RuntimeProgress", "PreparedCorrection", "AssessedCorrection", "Stop"),
     "identifiers": (
         "ProjectId",
         "TrackId",
