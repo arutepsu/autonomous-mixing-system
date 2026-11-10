@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from autonomous_mixing.core.loop.acceptance_flow import accept
 from autonomous_mixing.core.loop.feedback import _rejection, add_feedback
-from autonomous_mixing.core.loop.observation import analyze, bindings_for, evidence_for
+from autonomous_mixing.core.loop.observation import analysis_bindings, analyze, bindings_for, evidence_for
 from autonomous_mixing.core.loop.recovery import failed_attempt, restore_after_rejection
 from autonomous_mixing.core.loop.runtime import _invalid, fresh, gate, identity_failure, observed, record
 from autonomous_mixing.core.loop.transitions import derive_candidate_project_state
@@ -33,7 +33,7 @@ from autonomous_mixing.core.records.coordinator_progress import (
 from autonomous_mixing.core.records.coordinator_runtime import RenderPreparationFailure, RunRenderRequest
 from autonomous_mixing.core.records.feedback import FeedbackStage
 from autonomous_mixing.core.records.identifiers import CheckpointId, VerificationResultId
-from autonomous_mixing.core.records.integrity import StateIntegrityRequest
+from autonomous_mixing.core.records.integrity import ArtifactRootBinding, StateIntegrityRequest
 from autonomous_mixing.core.records.rendering import RenderedCandidate, RenderFailure, RenderPlan
 from autonomous_mixing.core.records.run_trace import OperationKind
 from autonomous_mixing.core.records.termination import TerminationReason
@@ -270,6 +270,13 @@ def verify_candidate(
         progress,
         candidate,
         TerminationReason.CANDIDATE_ANALYSIS_FAILED,
+        # Unaccepted outputs are located through the workspace root the plan assigned them; retained members
+        # keep their known roots. Nothing is promoted to locate files, and no other ID receives a root.
+        bindings=analysis_bindings(
+            candidate,
+            progress.roots,
+            tuple(ArtifactRootBinding(a.artifact_id, plan.workspace.root_key) for a in receipt.candidate_artifacts),
+        ),
         analyzer=analyzer,
         clock=clock,
         identities=identities,

@@ -18,7 +18,11 @@ from autonomous_mixing.core.records.admission import (
     StemBinding,
     TrackGainPermission,
 )
-from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
+from autonomous_mixing.core.records.analysis import (
+    AnalysisRequest,
+    AnalysisResponse,
+    deduplicate_analysis_definitions,
+)
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits
 from autonomous_mixing.core.records.capabilities import GainBounds, RendererCapabilities
@@ -162,6 +166,9 @@ def _roots(artifacts=REQUIRED, key="exports") -> tuple[ArtifactRootBinding, ...]
     return tuple(ArtifactRootBinding(a.artifact_id, key) for a in artifacts)
 
 
+CURRENT_ROOTS = _roots((S1, S2, MIX))  # current audio only: analysis requests bind no fixed inputs
+
+
 # --- run configuration fixtures ----------------------------------------------------------------------
 
 SELECTOR = MetricSelector(METRIC, SCOPE)
@@ -232,6 +239,10 @@ def _measurement(condition_id, selector=SELECTOR, unit=UNIT) -> ConditionMeasure
 
 
 MEASUREMENTS = (_measurement("tg"), _measurement("im"), _measurement("dl"))
+# Explicit fixture jobs (analysis-jobs plan, 2026-11-10): this fixture has no diagnostic-only job, so its jobs are
+# its one shared criterion definition, deduplicated by the caller. Overrides that change the criterion
+# definitions pass analysis_definitions explicitly; RunRequest itself has no default.
+ANALYSIS_DEFINITIONS = deduplicate_analysis_definitions(tuple(m.definition for m in MEASUREMENTS))
 RECIPE = MixRecipe(VersionRef("recipe", "1"), (T1, T2), SummingPolicy.SAMPLE_SUM)
 PROCESSING = ProcessingSpec(
     VersionRef("processing", "1"), NumericalPrecision.FLOAT64, GainRule.DB_AMPLITUDE, SummationOrder.RECIPE_SEQUENTIAL,
@@ -258,6 +269,7 @@ def _run_request(**overrides) -> RunRequest:
         stem_bindings=STEM_BINDINGS,
         mix_artifact_id=ArtifactId("mix"),
         measurements=MEASUREMENTS,
+        analysis_definitions=ANALYSIS_DEFINITIONS,
         alignment=ALIGNMENT,
         root_bindings=_roots(),
         output_root_key="renders",
@@ -468,7 +480,12 @@ def test_reason_values_and_groups():
 
 def test_operation_pairs_and_original_requests():
     intent = DispatchIntent(
-        OperationKind.ANALYZE, AnalysisRequest(STATE, SCOPE, _configuration().analysis_spec), INITIAL, None, None, None
+        OperationKind.ANALYZE,
+        AnalysisRequest(STATE, SCOPE, _configuration().analysis_spec, ANALYSIS_DEFINITIONS, CURRENT_ROOTS),
+        INITIAL,
+        None,
+        None,
+        None,
     )
     event = make_event(intent)
     observed = make_event(OperationObserved(event.event_id, OperationKind.ANALYZE, AnalysisResponse(())), 2)
@@ -641,7 +658,9 @@ def make_intent(operation):
         workspace,
     )
     requests = {
-        OperationKind.ANALYZE: AnalysisRequest(STATE, SCOPE, RUN_REQUEST.configuration.analysis_spec),
+        OperationKind.ANALYZE: AnalysisRequest(
+            STATE, SCOPE, RUN_REQUEST.configuration.analysis_spec, ANALYSIS_DEFINITIONS, CURRENT_ROOTS
+        ),
         OperationKind.DIAGNOSE: DiagnosisRequest(STATE, SCOPE, ()),
         OperationKind.DECIDE: situation,
         OperationKind.RENDER: RunRenderRequest(plan, integrity, REQUIRED, integrity.bindings),

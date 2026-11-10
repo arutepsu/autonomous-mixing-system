@@ -91,15 +91,23 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
     from autonomous_mixing.core.records.diagnosis import DiagnosisReport
     from autonomous_mixing.core.records.feedback import DecisionHistory
     from autonomous_mixing.core.records.identifiers import ProblemCandidateId, RunId
+    from autonomous_mixing.core.records.integrity import ArtifactRootBinding
     from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, Observation
     from autonomous_mixing.core.records.project import ProjectState
     from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult
     from autonomous_mixing.core.records.verification import AcceptanceCriteria
+    from autonomous_mixing.core.records.verification_evidence import MeasurementDefinition
 
     expected = {
         PortFailure: _fields(("code", PortFailureCode), ("message", str), ("retryable", bool), returns=None),
+        # Deliberate constructor extension, analysis-jobs plan (2026-11-10): two required fields, no defaults.
         AnalysisRequest: _fields(
-            ("state", ProjectState), ("scope", AnalysisScope), ("specification", AnalysisSpec), returns=None
+            ("state", ProjectState),
+            ("scope", AnalysisScope),
+            ("specification", AnalysisSpec),
+            ("definitions", tuple[MeasurementDefinition, ...]),
+            ("root_bindings", tuple[ArtifactRootBinding, ...]),
+            returns=None,
         ),
         AnalysisResponse: _fields(("observations", tuple[Observation, ...]), returns=None),
         Situation: _fields(

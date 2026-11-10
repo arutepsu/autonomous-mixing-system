@@ -72,7 +72,8 @@ ALLOWED_RECORD_IMPORTS = {
         "feedback",
         "verification",
     },
-    "analysis": {"identifiers", "invariants", "observation", "project"},
+    # Analysis-jobs plan, 2026-11-10: explicit jobs (verification_evidence) and current-artifact roots (integrity).
+    "analysis": {"identifiers", "integrity", "invariants", "observation", "project", "verification_evidence"},
     "diagnosis": {"identifiers", "invariants", "observation", "project"},
     "capabilities": {"identifiers", "invariants", "observation"},
     "feedback": {
@@ -110,6 +111,9 @@ ALLOWED_RECORD_IMPORTS = {
         "rendering",
         "run",
         "verification_assessment",
+        # Analysis-jobs plan, 2026-11-10: the initial AnalysisRequest built from the required analysis_definitions.
+        "analysis",
+        "verification_evidence",
     },
     "rendering": {"identifiers", "invariants", "actions", "artifacts", "mix", "observation", "project"},
     "admission": {"identifiers", "invariants", "actions", "decision", "mix", "observation", "rendering"},
@@ -261,7 +265,12 @@ INVENTORY = {
         "ReadyForAdmission",
         "DecisionGateResult",
     ),
-    "analysis": ("AnalysisRequest", "AnalysisResponse"),
+    "analysis": (
+        "AnalysisRequest",
+        "AnalysisResponse",
+        "deduplicate_analysis_definitions",  # analysis-jobs plan
+        "require_analysis_scope_within",  # moved from ports.analysis (was private _require_scope_within)
+    ),
     "capabilities": ("GainBounds", "RendererCapabilities", "AvailableTrackGain", "ActionCapabilityView"),
     "feedback": (
         "ActionFeedbackDisposition",

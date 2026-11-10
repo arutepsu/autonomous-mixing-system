@@ -546,7 +546,7 @@ def test_coordinator_completes_one_correction_with_real_rendering_and_integrity(
     from autonomous_mixing.core.loop.coordinator import run
     from autonomous_mixing.core.records.acceptance import AcceptedReference
     from autonomous_mixing.core.records.admission import StemBinding
-    from autonomous_mixing.core.records.analysis import AnalysisResponse
+    from autonomous_mixing.core.records.analysis import AnalysisResponse, deduplicate_analysis_definitions
     from autonomous_mixing.core.records.feedback import ActionFeedbackDisposition, DecisionFeedback
     from autonomous_mixing.core.records.identifiers import ConditionId, CriteriaId, ObservationId
     from autonomous_mixing.core.records.observation import (
@@ -594,7 +594,9 @@ def test_coordinator_completes_one_correction_with_real_rendering_and_integrity(
     request = _run_request(
         initial_state=project.state, configuration=configuration, processing_spec=PROCESSING, recipe=RECIPE,
         stem_bindings=(StemBinding(T1, ArtifactId("s1")), StemBinding(T2, ArtifactId("s2"))),
-        mix_artifact_id=ArtifactId("mix"), measurements=measurements, root_bindings=project.bindings(project.state),
+        mix_artifact_id=ArtifactId("mix"), measurements=measurements,
+        analysis_definitions=deduplicate_analysis_definitions(tuple(m.definition for m in measurements)),
+        root_bindings=project.bindings(project.state),
         output_root_key="renders",
     )  # fmt: skip
 
@@ -648,3 +650,13 @@ def test_coordinator_completes_one_correction_with_real_rendering_and_integrity(
     assert Path(project.roots["renders"], target.location).is_file()
     assert project.source_hashes() == before  # sources and the retained file unchanged
     assert [r.state for r in analyzer.requests] == [project.state, candidate]
+    # Analysis-jobs plan: each analysis names exactly the current members, and every logical root it names locates
+    # the real file; the unaccepted candidate's outputs were bound to the assigned workspace root, not guessed.
+    for analysis_request in analyzer.requests:
+        state, bound = analysis_request.state, {b.artifact_id: b.root_key for b in analysis_request.root_bindings}
+        assert list(bound) == [a.artifact_id for a in state.audio.artifacts]
+        for artifact in state.audio.artifacts:
+            assert Path(project.roots[bound[artifact.artifact_id]], artifact.location).is_file()
+        assert analysis_request.definitions == request.analysis_definitions
+    candidate_bound = {b.artifact_id: b.root_key for b in analyzer.requests[1].root_bindings}
+    assert candidate_bound[target.artifact_id] == candidate_bound[mix.artifact_id] == "renders"

@@ -39,7 +39,7 @@ BEHAVIOR_INVENTORY = {
     "loop.correction": ("render", "verify_candidate"),
     "loop.decision_round": ("decision_round", "evaluate_decision", "act"),
     "loop.feedback": ("add_feedback", "copied"),
-    "loop.observation": ("bindings_for", "inspect", "analyze", "diagnose", "evidence_for"),
+    "loop.observation": ("bindings_for", "analysis_bindings", "inspect", "analyze", "diagnose", "evidence_for"),
     "loop.recovery": (
         "recover_saved",
         "recovery_stop",

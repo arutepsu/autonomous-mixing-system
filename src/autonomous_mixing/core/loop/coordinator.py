@@ -6,7 +6,13 @@ from dataclasses import replace
 from autonomous_mixing.core.loop.completion import finalize
 from autonomous_mixing.core.loop.correction import render
 from autonomous_mixing.core.loop.decision_round import decision_round
-from autonomous_mixing.core.loop.observation import _missing_baselines, analyze, evidence_for, inspect
+from autonomous_mixing.core.loop.observation import (
+    _missing_baselines,
+    analysis_bindings,
+    analyze,
+    evidence_for,
+    inspect,
+)
 from autonomous_mixing.core.loop.runtime import fresh, identity_failure, record
 from autonomous_mixing.core.loop.verification_routing import route_verification
 from autonomous_mixing.core.ports.analysis import AudioAnalyzer
@@ -78,6 +84,7 @@ def ordinary(
         progress,
         progress.request.initial_state,
         TerminationReason.INITIAL_ANALYSIS_FAILED,
+        bindings=analysis_bindings(progress.request.initial_state, progress.roots),
         analyzer=analyzer,
         clock=clock,
         identities=identities,
