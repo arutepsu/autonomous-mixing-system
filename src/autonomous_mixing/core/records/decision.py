@@ -5,11 +5,23 @@ from enum import Enum
 
 from autonomous_mixing.core.records.actions import Action
 from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.context import MusicalContext
-from autonomous_mixing.core.records.identifiers import ContextId, DecisionId, ObservationId, ProjectId, Revision
+from autonomous_mixing.core.records.diagnosis import DiagnosisReport, validate_diagnosis_references
+from autonomous_mixing.core.records.feedback import DecisionHistory, validate_decision_history
+from autonomous_mixing.core.records.identifiers import (
+    ContextId,
+    DecisionId,
+    ObservationId,
+    ProblemCandidateId,
+    ProjectId,
+    Revision,
+    RunId,
+)
 from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of
-from autonomous_mixing.core.records.observation import Observation, validate_observation_sources
-from autonomous_mixing.core.records.project import ProjectState
+from autonomous_mixing.core.records.observation import AnalysisScope, Observation, validate_observation_sources
+from autonomous_mixing.core.records.project import ProjectSnapshot, ProjectState
+from autonomous_mixing.core.records.verification import AcceptanceCriteria
 
 
 @dataclass(frozen=True)
@@ -23,13 +35,69 @@ class ControllerIdentity:
 
 
 @dataclass(frozen=True)
+class ActionJustification:
+    """Why a particular operation is proposed, separate from the diagnostic uncertainty of its candidates.
+
+    All fields are required; empty ``assumptions`` or ``limitations`` are explicit declarations. The text
+    is recorded as supplied: it is not a calibrated confidence, a sufficiency flag or proof that the
+    action is perceptually correct.
+    """
+
+    reasoning: str
+    uncertainty: str
+    assumptions: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        require_text(self.reasoning, "ActionJustification.reasoning")
+        require_text(self.uncertainty, "ActionJustification.uncertainty")
+        _require_text_entries(self.assumptions, "ActionJustification.assumptions")
+        _require_text_entries(self.limitations, "ActionJustification.limitations")
+
+
+def _require_text_entries(value: tuple[str, ...], field: str) -> None:
+    """A tuple (possibly empty) of distinct non-blank strings, kept exactly as supplied."""
+    require_tuple_of(value, str, field, nonempty=False, distinct=True)
+    for entry in value:
+        require_text(entry, f"{field} element")
+
+
+@dataclass(frozen=True)
 class ProposeAction:
+    """A proposed operation, the diagnosis candidates it addresses and its justification; not permission.
+
+    The constructor checks that ``candidate_ids`` is a nonempty tuple of distinct candidate IDs; that they
+    exist in a particular diagnosis report, and that their evidence is cited, is checked against the
+    request by ``core.ports.decision.validate_decision_response``.
+    """
+
     action: Action
     expected_effect: str
+    candidate_ids: tuple[ProblemCandidateId, ...]
+    justification: ActionJustification
 
     def __post_init__(self) -> None:
         require_instance(self.action, Action, "ProposeAction.action")
         require_text(self.expected_effect, "ProposeAction.expected_effect")
+        require_tuple_of(
+            self.candidate_ids, ProblemCandidateId, "ProposeAction.candidate_ids", nonempty=True, distinct=True
+        )
+        require_instance(self.justification, ActionJustification, "ProposeAction.justification")
+
+
+@dataclass(frozen=True)
+class NoChange:
+    """A deliberate recommendation to keep the accepted state.
+
+    Not an action, not a zero-gain operation and not success: it carries no verification and asserts
+    nothing about whether criteria are met. Distinct from ``NoChangeFeedback``, which summarizes a
+    previous call.
+    """
+
+    explanation: str
+
+    def __post_init__(self) -> None:
+        require_text(self.explanation, "NoChange.explanation")
 
 
 class AbstentionReason(Enum):
@@ -41,7 +109,12 @@ class AbstentionReason(Enum):
 
 @dataclass(frozen=True)
 class Abstain:
-    """An explicit decision not to act. ``requested_context`` explains what is missing; it does not pause a run."""
+    """An explicit decision not to act. ``requested_context`` explains what is missing; it does not pause a run.
+
+    MISSING_CONTEXT requires at least one question naming what is missing (and ideally why it matters);
+    only presence and non-blank text are checked, not the usefulness of a question. Other reasons may
+    leave ``requested_context`` empty. No answer is guessed.
+    """
 
     reason: AbstentionReason
     requested_context: tuple[str, ...] = ()
@@ -51,6 +124,8 @@ class Abstain:
         require_tuple_of(self.requested_context, str, "Abstain.requested_context", nonempty=False, distinct=True)
         for entry in self.requested_context:
             require_text(entry, "Abstain.requested_context element")
+        if self.reason is AbstentionReason.MISSING_CONTEXT and not self.requested_context:
+            raise ValueError("Abstain with reason MISSING_CONTEXT requires at least one requested_context question")
 
 
 @dataclass(frozen=True)
@@ -63,7 +138,7 @@ class Decision:
     evidence_ids: tuple[ObservationId, ...]
     rationale: str
     controller: ControllerIdentity
-    outcome: ProposeAction | Abstain
+    outcome: ProposeAction | NoChange | Abstain
 
     def __post_init__(self) -> None:
         require_instance(self.decision_id, DecisionId, "Decision.decision_id")
@@ -74,7 +149,7 @@ class Decision:
         require_tuple_of(self.evidence_ids, ObservationId, "Decision.evidence_ids", nonempty=False, distinct=True)
         require_text(self.rationale, "Decision.rationale")
         require_instance(self.controller, ControllerIdentity, "Decision.controller")
-        require_instance(self.outcome, (ProposeAction, Abstain), "Decision.outcome")
+        require_instance(self.outcome, (ProposeAction, NoChange, Abstain), "Decision.outcome")
         if isinstance(self.outcome, ProposeAction):
             if not self.evidence_ids:
                 raise ValueError("Decision proposing an action must reference at least one observation")
@@ -96,12 +171,68 @@ def _require_unique_observations(observations: tuple[Observation, ...], field: s
         raise ValueError(f"{field} must have unique observation IDs")
 
 
+def _outside_scope(inner: AnalysisScope, outer: AnalysisScope) -> str | None:
+    """Why ``inner`` is not contained in ``outer``, or None; exact closed comparisons, no clamping."""
+    outside = sorted(str(t) for t in set(inner.track_ids) - set(outer.track_ids))
+    if outside:
+        return f"uses tracks outside the run scope: {', '.join(outside)}"
+    time, run_time = inner.time_range, outer.time_range
+    if time.start_seconds < run_time.start_seconds or time.end_seconds > run_time.end_seconds:
+        return "time range lies outside the run scope"
+    band, run_band = inner.frequency_range, outer.frequency_range
+    if run_band is not None:
+        if band is None:
+            return "needs an explicit frequency range within the run scope"
+        if band.low_hz < run_band.low_hz or band.high_hz > run_band.high_hz:
+            return "frequency range lies outside the run scope"
+    return None
+
+
+def _require_criteria_within(criteria: AcceptanceCriteria, scope: AnalysisScope, snapshot: ProjectSnapshot) -> None:
+    for condition in (*criteria.targets, *criteria.improvements, *criteria.guards):
+        selector_scope = condition.selector.scope
+        selector_scope.validate_against(snapshot)
+        problem = _outside_scope(selector_scope, scope)
+        if problem is not None:
+            raise ValueError(f"Situation criteria condition {condition.condition_id} {problem}")
+
+
+def _require_capabilities_bound(
+    view: ActionCapabilityView, state: ProjectState, context: MusicalContext, scope: AnalysisScope
+) -> None:
+    if (view.project_id, view.revision) != (state.project_id, state.revision):
+        raise ValueError(
+            f"Situation.capabilities describe {view.project_id}@{view.revision}, "
+            f"not the state {state.project_id}@{state.revision}"
+        )
+    if (view.context_id, view.context_version) != (context.context_id, context.version):
+        raise ValueError(
+            f"Situation.capabilities were declared for context {view.context_id} version {view.context_version}, "
+            f"not {context.context_id} version {context.version}"
+        )
+    view.scope.validate_against(state.snapshot)
+    if view.scope != scope:
+        raise ValueError("Situation.capabilities scope differs from the run scope")
+
+
 @dataclass(frozen=True)
 class Situation:
-    """Runtime-visible inputs for one decision.
+    """Runtime-visible inputs for one decision call (attempt contract, sections 11-15).
 
-    Usage may exceed limits (the record describes, it does not enforce). Artifact locations are
-    ordinary runtime source references; this record alone does not sandbox a provider.
+    Usage may exceed limits (the record describes, it does not enforce) and includes the charge for this
+    call: the first call has an empty history and ``usage.decision_calls == 1``; a later call carries the
+    complete prior-call prefix. Artifact locations are ordinary runtime source references; this record
+    alone does not sandbox a provider. Values are kept exactly as supplied.
+
+    Construction checks structure and bindings only: current observations against the state's audio
+    (historical ones in ``history`` keep their own revision and are not rechecked), the run scope and every
+    criteria selector against the snapshot and containment in the run scope, the diagnosis report's
+    references, capabilities bound to the state, context and exact run scope, and the history prefix
+    against ``run_id``, the state and ``usage``. It does not check metric-catalog membership, units or
+    render Nyquist limits (no analysis or render specification is carried), agreement with an
+    authoritative run configuration, policy or renderer, or that ``run_id`` names a persisted run.
+    Advertised capabilities are not authorization; empty candidates, available actions or history imply
+    neither the absence of problems, nor success, nor permission.
     """
 
     state: ProjectState
@@ -110,6 +241,12 @@ class Situation:
     observations: tuple[Observation, ...]
     usage: BudgetUsage
     limits: BudgetLimits
+    run_id: RunId
+    scope: AnalysisScope
+    criteria: AcceptanceCriteria
+    diagnosis: DiagnosisReport
+    capabilities: ActionCapabilityView
+    history: DecisionHistory
 
     def __post_init__(self) -> None:
         require_instance(self.state, ProjectState, "Situation.state")
@@ -118,10 +255,23 @@ class Situation:
         _require_unique_observations(self.observations, "Situation.observations")
         require_instance(self.usage, BudgetUsage, "Situation.usage")
         require_instance(self.limits, BudgetLimits, "Situation.limits")
+        require_instance(self.run_id, RunId, "Situation.run_id")
+        require_instance(self.scope, AnalysisScope, "Situation.scope")
+        require_instance(self.criteria, AcceptanceCriteria, "Situation.criteria")
+        require_instance(self.diagnosis, DiagnosisReport, "Situation.diagnosis")
+        require_instance(self.capabilities, ActionCapabilityView, "Situation.capabilities")
+        require_instance(self.history, DecisionHistory, "Situation.history")
         snapshot, audio = self.state.snapshot, self.state.audio
         self.context.validate_against(snapshot)
         for observation in self.observations:
             validate_observation_sources(observation, audio.artifacts, audio, snapshot)
+        self.scope.validate_against(snapshot)
+        _require_criteria_within(self.criteria, self.scope, snapshot)
+        validate_diagnosis_references(
+            self.diagnosis, state=self.state, scope=self.scope, observations=self.observations
+        )
+        _require_capabilities_bound(self.capabilities, self.state, self.context, self.scope)
+        validate_decision_history(self.history, state=self.state, run_id=self.run_id, usage=self.usage)
 
 
 @dataclass(frozen=True)

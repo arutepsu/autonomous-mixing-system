@@ -22,24 +22,41 @@ from autonomous_mixing.core.records.admission import (
 )
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
 from autonomous_mixing.core.records.decision import (
     Abstain,
     AbstentionReason,
+    ActionJustification,
     ControllerIdentity,
     Decision,
     ProposeAction,
     Situation,
 )
+from autonomous_mixing.core.records.diagnosis import (
+    DiagnosisCoverage,
+    DiagnosisCoverageStatus,
+    DiagnosisReport,
+    DiagnosticEvidence,
+    ProblemCandidate,
+    ProblemFamily,
+    UncertaintyRepresentation,
+)
+from autonomous_mixing.core.records.feedback import DecisionHistory
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     CheckpointId,
+    ConditionId,
     ContextId,
+    CriteriaId,
     DecisionId,
+    DiagnosisCoverageId,
     ObservationId,
+    ProblemCandidateId,
     ProjectId,
     Revision,
+    RunId,
     TrackId,
     VersionRef,
 )
@@ -51,6 +68,14 @@ from autonomous_mixing.core.records.project import (
     ProjectState,
     Track,
     TrackGainState,
+)
+from autonomous_mixing.core.records.verification import (
+    AcceptanceCriteria,
+    ComparisonOperator,
+    ImprovementCondition,
+    ImprovementDirection,
+    MetricSelector,
+    TargetCondition,
 )
 
 UTC_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
@@ -89,6 +114,91 @@ def _context(protected=frozenset(), roles=None) -> MusicalContext:
     return MusicalContext(ContextId("c1"), "1", track_roles, (), frozenset(TrackId(t) for t in protected))
 
 
+# Increment 2E: proposals cite the fixture candidate and carry an explicit, labelled justification.
+JUSTIFICATION = ActionJustification(
+    "labelled test-double reasoning", "uncalibrated fixture text, not a confidence", (), ("contract fixture only",)
+)
+CANDIDATES = (ProblemCandidateId("cand-1"),)
+
+
+def _situation_inputs(state, context, evidence=()) -> dict:
+    """Explicit decision-input records added by increment 2D (Situation fields after ``limits``).
+
+    Without ``evidence`` the diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method
+    exists). With ``evidence`` (increment 2E) it is one labelled ASSESSED test-double row and a candidate
+    ``cand-1`` citing those actual fixture observations, so proposals can reference a real candidate. The
+    capability view advertises no action and the history is the empty first-call prefix (usage charges
+    one call). None of them states that the mix has a problem or none, that an action is permitted or that
+    a call succeeded.
+    """
+    scope = AnalysisScope(tuple(sorted(state.snapshot.track_ids, key=str)), TimeRange(0.0, 60.0))
+    selector = MetricSelector(VersionRef("metric-a", "1"), scope)
+    criteria = AcceptanceCriteria(
+        CriteriaId("crit"),
+        "1",
+        (TargetCondition(ConditionId("target"), selector, ComparisonOperator.LE, MeasuredScalar(-10.0, "unit-a")),),
+        (
+            ImprovementCondition(
+                ConditionId("improve"), selector, ImprovementDirection.LOWER, MeasuredScalar(1.0, "unit-a")
+            ),
+        ),
+        (),
+    )
+    candidates = ()
+    if evidence:
+        method = VersionRef("test-double-diagnosis", "0")  # labelled test double; no detection method exists
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.ASSESSED,
+            method,
+            "labelled test-double coverage; this fixture asserts nothing about problems",
+        )
+        statement = DiagnosticEvidence(
+            "test-double strength", "uncalibrated", UncertaintyRepresentation.UNCALIBRATED, False, (), ()
+        )
+        candidates = (
+            ProblemCandidate(
+                ProblemCandidateId("cand-1"),
+                DiagnosisCoverageId("cov-1"),
+                state.project_id,
+                state.revision,
+                ProblemFamily.MASKING,
+                scope,
+                tuple(ObservationId(e) for e in evidence),
+                method,
+                statement,
+            ),
+        )
+    else:
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.UNAVAILABLE,
+            None,
+            "no diagnosis method exists; this fixture asserts nothing about problems",
+        )
+    return dict(
+        run_id=RunId("run-1"),
+        scope=scope,
+        criteria=criteria,
+        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), candidates),
+        capabilities=ActionCapabilityView(
+            state.project_id,
+            state.revision,
+            context.context_id,
+            context.version,
+            VersionRef("policy", "1"),
+            VersionRef("renderer", "1"),
+            scope,
+            (),
+        ),
+        history=DecisionHistory(RunId("run-1"), state.project_id, ()),
+    )
+
+
 def _decision_request(protected=frozenset(), roles=None, project="p1", revision="r2") -> Situation:
     snapshot = _snapshot(project, revision)
     mix = _artifact("a-mix", ("t1", "t2", "t3"), revision, project)
@@ -115,13 +225,15 @@ def _decision_request(protected=frozenset(), roles=None, project="p1", revision=
         VersionRef("analyzer", "0.1"),
         UTC_NOW,
     )
+    context = _context(protected, roles)
     return Situation(
         state,
-        _context(protected, roles),
+        context,
         CONTROLLER,
         (observation,),
         BudgetUsage(1, 0, 1, 0, 2.0),
         BudgetLimits(4, 2, 6, 1, 300.0),
+        **_situation_inputs(state, context, evidence=("o1",)),
     )
 
 
@@ -138,7 +250,7 @@ def _decision(
 ) -> Decision:
     if outcome is _D:
         action = Action(ActionId("x1"), ProjectId(project), Revision(revision), SetTrackGain(TrackId(target), value_db))
-        outcome = ProposeAction(action, "set track gain")
+        outcome = ProposeAction(action, "set track gain", CANDIDATES, JUSTIFICATION)
     return Decision(
         DecisionId("d1"),
         ProjectId(project),

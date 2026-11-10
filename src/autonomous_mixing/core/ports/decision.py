@@ -24,7 +24,13 @@ class DecisionMaker(Protocol):
 
 
 def validate_decision_response(request: Situation, response: DecisionResponse) -> None:
-    """Check a decision's structural references and controller identity against its request."""
+    """Check a decision's structural references and controller identity against its request.
+
+    For a proposed action, every selected candidate must exist in ``request.diagnosis`` and all of its
+    evidence must be among the decision's evidence IDs (extra evidence is allowed; unselected candidates
+    impose nothing). NoChange and Abstain pass this structural check. This is not a semantic evidence gate:
+    it does not judge whether the evidence is sufficient, the action justified or permitted.
+    """
     require_instance(request, Situation, "request")
     require_instance(response, DecisionResponse, "response")
     decision = response.decision
@@ -34,6 +40,19 @@ def validate_decision_response(request: Situation, response: DecisionResponse) -
             f"decision controller {decision.controller.name}@{decision.controller.version} does not match "
             f"the requested controller {request.controller.name}@{request.controller.version}"
         )
+    if isinstance(decision.outcome, ProposeAction):
+        candidates = {candidate.candidate_id: candidate for candidate in request.diagnosis.candidates}
+        unknown = [str(c) for c in decision.outcome.candidate_ids if c not in candidates]
+        if unknown:
+            raise ValueError(f"proposed action cites candidates not in the diagnosis report: {', '.join(unknown)}")
+        cited = set(decision.evidence_ids)
+        for candidate_id in decision.outcome.candidate_ids:
+            uncited = [str(o) for o in candidates[candidate_id].evidence_ids if o not in cited]
+            if uncited:
+                raise ValueError(
+                    f"proposed action selects candidate {candidate_id} but does not cite its evidence: "
+                    f"{', '.join(uncited)}"
+                )
 
 
 def validate_decision_references(

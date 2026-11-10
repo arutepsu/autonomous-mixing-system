@@ -1,0 +1,72 @@
+%
+% Bachelor thesis: Autonomous Detection and Correction of Mixing Problems Using an AI Agent
+%
+% Based on the LaTeX template of the Institute for Optical Systems (IOS), HTWG Konstanz
+% (Nico Brügel, adjusted by Lorenz Bung, 01.07.2020).
+%
+% Build (from this folder):  latexmk -xelatex thesis.tex
+%
+
+% Include header
+\input{header/header}
+
+% Personal data (name, student ID, e-mail, birth date and place) lives in
+% local/personal.tex, which is gitignored because the repository is public.
+% Copy local/personal.example.tex to local/personal.tex and fill it in.
+\InputIfFileExists{local/personal}{}{\input{local/personal.example}}
+
+% Thesis metadata
+\newcommand{\thema}{Autonomous Detection and Correction of Mixing Problems Using an AI Agent}
+\newcommand{\arbeitstyp}{Bachelor Thesis}
+\newcommand{\abgabedatum}{18.01.2027}
+\newcommand{\studiengang}{Applied Computer Science}
+\newcommand{\prueferA}{\todo{first examiner}}
+\newcommand{\prueferB}{\todo{second examiner}}
+
+
+\begin{document}
+
+% Title pages
+\input{title/cover}
+
+\pagenumbering{Roman}
+\input{title/affidavit}
+\input{title/abstract}
+
+\setlength{\parskip}{0pt plus1pt}	% no paragraph spacing in the table of contents
+\tableofcontents
+\newpage
+\setlength{\parskip}{\baselineskip}
+
+\renewcommand{\headheight}{14pt}
+
+\input{title/acronyms}
+
+% Keep roman page numbering continuous for the back matter
+\newcounter{anhang}
+\setcounter{anhang}{\value{page}}
+
+\pagenumbering{arabic}
+
+% Chapters
+% ---------------------------------------------------------------------------
+\input{chapters/01-introduction}
+\input{chapters/02-background}
+\input{chapters/03-requirements-research-design}
+\input{chapters/04-architecture}
+\input{chapters/05-implementation}
+\input{chapters/06-evaluation-methodology}
+\input{chapters/07-results}
+\input{chapters/08-discussion}
+\input{chapters/09-conclusion}
+
+% ---------------------------------------------------------------------------
+\newpage
+\pagenumbering{Roman}
+\setcounter{page}{\value{anhang}}
+\printbibliography[heading=bibintoc]
+\listoffigures
+\listoftables
+\input{appendix/appendix}
+
+\end{document}

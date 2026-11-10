@@ -46,6 +46,10 @@ def test_port_protocols_and_outcome_unions_keep_their_shape():
     assert typing.get_args(AdmissionResult) == (AdmittedAction, RejectedAction)
     assert typing.get_args(RenderOutcome) == (RenderedCandidate, RenderFailure)
     assert typing.get_args(PreflightResult) == (MetadataReady, PreflightRejected)
+    # Deliberate extension, increment 2E (2026-11-05): NoChange joins the decision outcome union.
+    from autonomous_mixing.core.records.decision import Abstain, Decision, NoChange, ProposeAction
+
+    assert typing.get_args(typing.get_type_hints(Decision)["outcome"]) == (ProposeAction, NoChange, Abstain)
 
 
 def _params(obj) -> list[tuple]:
@@ -70,13 +74,27 @@ def _method(*pairs, returns):
 def test_task1_constructor_function_and_protocol_signatures_match_the_baseline():
     from autonomous_mixing.core.ports.analysis import AudioAnalyzer, validate_analysis_response
     from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
+    from autonomous_mixing.core.records.actions import Action
     from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
     from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+    from autonomous_mixing.core.records.capabilities import ActionCapabilityView
     from autonomous_mixing.core.records.context import MusicalContext
-    from autonomous_mixing.core.records.decision import ControllerIdentity, Decision, DecisionResponse, Situation
+    from autonomous_mixing.core.records.decision import (
+        ActionJustification,
+        ControllerIdentity,
+        Decision,
+        DecisionResponse,
+        NoChange,
+        ProposeAction,
+        Situation,
+    )
+    from autonomous_mixing.core.records.diagnosis import DiagnosisReport
+    from autonomous_mixing.core.records.feedback import DecisionHistory
+    from autonomous_mixing.core.records.identifiers import ProblemCandidateId, RunId
     from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, Observation
     from autonomous_mixing.core.records.project import ProjectState
     from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult
+    from autonomous_mixing.core.records.verification import AcceptanceCriteria
 
     expected = {
         PortFailure: _fields(("code", PortFailureCode), ("message", str), ("retryable", bool), returns=None),
@@ -91,9 +109,32 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
             ("observations", tuple[Observation, ...]),
             ("usage", BudgetUsage),
             ("limits", BudgetLimits),
+            # Deliberate constructor extension, increment 2D (2026-11-05): six required fields, no defaults.
+            ("run_id", RunId),
+            ("scope", AnalysisScope),
+            ("criteria", AcceptanceCriteria),
+            ("diagnosis", DiagnosisReport),
+            ("capabilities", ActionCapabilityView),
+            ("history", DecisionHistory),
             returns=None,
         ),
         DecisionResponse: _fields(("decision", Decision), returns=None),
+        # Deliberate constructor contracts, increment 2E (2026-11-05): ProposeAction gains two required fields.
+        ActionJustification: _fields(
+            ("reasoning", str),
+            ("uncertainty", str),
+            ("assumptions", tuple[str, ...]),
+            ("limitations", tuple[str, ...]),
+            returns=None,
+        ),
+        ProposeAction: _fields(
+            ("action", Action),
+            ("expected_effect", str),
+            ("candidate_ids", tuple[ProblemCandidateId, ...]),
+            ("justification", ActionJustification),
+            returns=None,
+        ),
+        NoChange: _fields(("explanation", str), returns=None),
         validate_analysis_response: _fields(("request", AnalysisRequest), ("response", AnalysisResponse), returns=None),
         validate_decision_response: _fields(("request", Situation), ("response", DecisionResponse), returns=None),
         AudioAnalyzer.analyze: _method(("request", AnalysisRequest), returns=PortResult[AnalysisResponse]),

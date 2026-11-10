@@ -27,6 +27,7 @@ from autonomous_mixing.core.records.context import MusicalContext
 from autonomous_mixing.core.records.decision import (
     Abstain,
     AbstentionReason,
+    ActionJustification,
     ControllerIdentity,
     Decision,
     ProposeAction,
@@ -42,6 +43,7 @@ from autonomous_mixing.core.records.identifiers import (
     DecisionId,
     ExecutionId,
     ObservationId,
+    ProblemCandidateId,
     ProjectId,
     Revision,
     RunId,
@@ -297,6 +299,7 @@ def _run(project="p1", run_id="run-1", context=CONTEXT, controller=CONTROLLER, c
         None,
         None,
         None,
+        None,
     )
 
 
@@ -311,8 +314,16 @@ def _decision(revision="r1", *, project="p1", action="x1", decision="d1", contex
         (ObservationId("o1"),),
         "structured rationale",
         controller,
-        ProposeAction(action_record, "lower track t2"),
+        ProposeAction(action_record, "lower track t2", CANDIDATES, JUSTIFICATION),
     )
+
+
+# Increment 2E: proposals name a (labelled, fixture-only) diagnosis candidate and an explicit justification.
+# These record-level tests have no diagnosis report; candidate existence is checked by the response validator.
+JUSTIFICATION = ActionJustification(
+    "labelled test-double reasoning", "uncalibrated fixture text, not a confidence", (), ("contract fixture only",)
+)
+CANDIDATES = (ProblemCandidateId("cand-1"),)
 
 
 # --- identifiers -----------------------------------------------------------------

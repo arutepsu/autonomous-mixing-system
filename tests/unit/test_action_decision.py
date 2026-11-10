@@ -15,6 +15,7 @@ from autonomous_mixing.core.records.context import AssertionSource, MusicalConte
 from autonomous_mixing.core.records.decision import (
     Abstain,
     AbstentionReason,
+    ActionJustification,
     ControllerIdentity,
     Decision,
     ProposeAction,
@@ -25,6 +26,7 @@ from autonomous_mixing.core.records.identifiers import (
     ContextId,
     DecisionId,
     ObservationId,
+    ProblemCandidateId,
     ProjectId,
     Revision,
     TrackId,
@@ -83,8 +85,16 @@ def _decision(outcome, evidence: tuple[str, ...] = ("o1",), **overrides) -> Deci
     return Decision(**fields)
 
 
+# Increment 2E: proposals name a (labelled, fixture-only) diagnosis candidate and an explicit justification.
+# These record-level tests have no diagnosis report; candidate existence is checked by the response validator.
+JUSTIFICATION = ActionJustification(
+    "labelled test-double reasoning", "uncalibrated fixture text, not a confidence", (), ("contract fixture only",)
+)
+CANDIDATES = (ProblemCandidateId("cand-1"),)
+
+
 def _proposal(**action_kwargs) -> ProposeAction:
-    return ProposeAction(_action(**action_kwargs), "lower the lead track level")
+    return ProposeAction(_action(**action_kwargs), "lower the lead track level", CANDIDATES, JUSTIFICATION)
 
 
 # --- identifiers and actions -----------------------------------------------------
@@ -154,14 +164,16 @@ def test_valid_proposal_for_arbitrary_tracks_and_roles():
 
 def test_propose_action_requires_typed_action_and_expected_effect():
     with pytest.raises(ValueError):
-        ProposeAction(_action(), " ")
+        ProposeAction(_action(), " ", CANDIDATES, JUSTIFICATION)
     with pytest.raises(ValueError):
-        ProposeAction(SetTrackGain(TrackId("t1"), -3.0), "effect")
+        ProposeAction(SetTrackGain(TrackId("t1"), -3.0), "effect", CANDIDATES, JUSTIFICATION)
 
 
 @pytest.mark.parametrize("reason", list(AbstentionReason))
 def test_every_abstention_reason_is_valid_without_observations(reason):
-    decision = _decision(Abstain(reason), evidence=())
+    # Increment 2E: MISSING_CONTEXT must name at least one question; the other reasons may name none.
+    requested = ("Which track is the lead in this section?",) if reason is AbstentionReason.MISSING_CONTEXT else ()
+    decision = _decision(Abstain(reason, requested), evidence=())
     validate_decision_references(decision, _snapshot(), _context(), ())
     assert decision.outcome.reason is reason
     assert decision.evidence_ids == ()
@@ -188,6 +200,7 @@ def test_abstain_may_cite_evidence_and_request_context():
     [
         ("MISSING_CONTEXT", ()),
         (None, ()),
+        (AbstentionReason.MISSING_CONTEXT, ()),  # increment 2E: missing context requires a question
         (AbstentionReason.MISSING_CONTEXT, ("",)),
         (AbstentionReason.MISSING_CONTEXT, ("a", "a")),
         (AbstentionReason.MISSING_CONTEXT, ["a"]),

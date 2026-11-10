@@ -20,6 +20,7 @@ from autonomous_mixing.core.records.identifiers import ActionId, AttemptId, Deci
 from autonomous_mixing.core.records.invariants import require_instance, require_text, require_utc
 from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, RenderSpec
 from autonomous_mixing.core.records.project import ProjectSnapshot, ProjectState
+from autonomous_mixing.core.records.termination import TerminationReason
 from autonomous_mixing.core.records.verification import (
     AcceptanceCriteria,
     AssessmentMode,
@@ -111,6 +112,48 @@ class RunOutcome(Enum):
     CANCELLED = "cancelled"
 
 
+_REASON_OUTCOMES = {
+    TerminationReason.INITIAL_CRITERIA_MET: RunOutcome.SUCCEEDED,
+    TerminationReason.CANDIDATE_CRITERIA_MET: RunOutcome.SUCCEEDED,
+    TerminationReason.NO_CHANGE_PROPOSED: RunOutcome.ABSTAINED,
+    TerminationReason.INSUFFICIENT_EVIDENCE: RunOutcome.ABSTAINED,
+    TerminationReason.MISSING_CONTEXT: RunOutcome.ABSTAINED,
+    TerminationReason.CONFLICTING_CONSTRAINTS: RunOutcome.ABSTAINED,
+    TerminationReason.NO_JUSTIFIED_ACTION: RunOutcome.ABSTAINED,
+    TerminationReason.DECISION_CALL_LIMIT: RunOutcome.LIMIT_REACHED,
+    TerminationReason.ATTEMPT_LIMIT: RunOutcome.LIMIT_REACHED,
+    TerminationReason.RENDER_CALL_LIMIT: RunOutcome.LIMIT_REACHED,
+    TerminationReason.RECOVERY_CAPACITY_LIMIT: RunOutcome.LIMIT_REACHED,
+    TerminationReason.ELAPSED_TIME_LIMIT: RunOutcome.LIMIT_REACHED,
+    TerminationReason.USER_CANCELLED: RunOutcome.CANCELLED,
+    **{
+        reason: RunOutcome.FAILED
+        for reason in (
+            TerminationReason.INITIAL_ANALYSIS_FAILED,
+            TerminationReason.INITIAL_ASSESSMENT_INCONCLUSIVE,
+            TerminationReason.REQUIRED_BASELINE_UNAVAILABLE,
+            TerminationReason.DIAGNOSIS_FAILED,
+            TerminationReason.DECISION_FAILED,
+            TerminationReason.INVALID_DECISION_RESPONSE,
+            TerminationReason.DECISION_RETRIES_EXHAUSTED,
+            TerminationReason.EXECUTION_PREPARATION_FAILED,
+            TerminationReason.RENDER_FAILED,
+            TerminationReason.INVALID_RENDER_RESPONSE,
+            TerminationReason.CANDIDATE_ANALYSIS_FAILED,
+            TerminationReason.VERIFICATION_INCONCLUSIVE,
+            TerminationReason.ACCEPTED_STATE_INTEGRITY_FAILED,
+            TerminationReason.ACCEPTED_STATE_INTEGRITY_UNCERTAIN,
+            TerminationReason.RESTORATION_FAILED,
+            TerminationReason.RESTORATION_UNCERTAIN,
+            TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+            TerminationReason.RECORDING_FAILED,
+            TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN,
+            TerminationReason.RUNTIME_CONTRACT_FAILED,
+        )
+    },
+}
+
+
 class FinalProjectState(Enum):
     """Disposition of project outputs at the end of a run, reported separately from the run outcome."""
 
@@ -133,7 +176,8 @@ class RunRecord:
     usage: BudgetUsage
     outcome: RunOutcome | None
     final_project_state: FinalProjectState | None
-    termination_reason: str | None
+    termination_reason: TerminationReason | None
+    termination_explanation: str | None
 
     def __post_init__(self) -> None:
         require_instance(self.run_id, RunId, "RunRecord.run_id")
@@ -147,10 +191,18 @@ class RunRecord:
         if self.state is RunState.FINISHED:
             require_instance(self.outcome, RunOutcome, "RunRecord.outcome")
             require_instance(self.final_project_state, FinalProjectState, "RunRecord.final_project_state")
-            require_text(self.termination_reason, "RunRecord.termination_reason")
+            require_instance(self.termination_reason, TerminationReason, "RunRecord.termination_reason")
+            require_text(self.termination_explanation, "RunRecord.termination_explanation")
+            if _REASON_OUTCOMES[self.termination_reason] is not self.outcome:
+                raise ValueError("RunRecord termination reason does not belong to its outcome")
             if self.outcome is RunOutcome.SUCCEEDED and self.final_project_state is FinalProjectState.UNKNOWN:
                 raise ValueError("SUCCEEDED run cannot have UNKNOWN final project state")
-        elif (self.outcome, self.final_project_state, self.termination_reason) != (None, None, None):
+        elif (self.outcome, self.final_project_state, self.termination_reason, self.termination_explanation) != (
+            None,
+            None,
+            None,
+            None,
+        ):
             raise ValueError(f"run in state {self.state.name} must not have terminal fields")
 
 

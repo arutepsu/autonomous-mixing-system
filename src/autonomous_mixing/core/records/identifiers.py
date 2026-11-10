@@ -52,6 +52,11 @@ class DecisionId(_Identifier):
 
 
 @dataclass(frozen=True)
+class DecisionCallId(_Identifier):
+    """Identifies one charged decision slot, independent of whether a valid decision was parsed."""
+
+
+@dataclass(frozen=True)
 class CriteriaId(_Identifier):
     """Identifies a criteria definition together with its version."""
 
@@ -72,6 +77,11 @@ class RunId(_Identifier):
 
 
 @dataclass(frozen=True)
+class RunEventId(_Identifier):
+    """Identifies one attempted ordered trace append independently of acknowledgement."""
+
+
+@dataclass(frozen=True)
 class AttemptId(_Identifier):
     pass
 
@@ -84,6 +94,21 @@ class ExecutionId(_Identifier):
 @dataclass(frozen=True)
 class CheckpointId(_Identifier):
     pass
+
+
+@dataclass(frozen=True)
+class ProblemCandidateId(_Identifier):
+    """Identifies one problem candidate within a diagnosis report."""
+
+
+@dataclass(frozen=True)
+class DiagnosisCoverageId(_Identifier):
+    """Identifies one coverage row (family, scope, method) within a diagnosis report."""
+
+
+@dataclass(frozen=True)
+class AcceptanceId(_Identifier):
+    """Identifies one candidate acceptance event within a run."""
 
 
 @dataclass(frozen=True)

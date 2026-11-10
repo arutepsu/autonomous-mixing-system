@@ -34,14 +34,63 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
+    "loop.acceptance_flow": ("accept", "finish_acceptance"),
+    "loop.completion": ("finalize",),
+    "loop.correction": ("render", "verify_candidate"),
+    "loop.decision_round": ("decision_round", "evaluate_decision", "act"),
+    "loop.feedback": ("add_feedback", "copied"),
+    "loop.observation": ("bindings_for", "inspect", "analyze", "diagnose", "evidence_for"),
+    "loop.recovery": (
+        "recover_saved",
+        "recovery_stop",
+        "failed_attempt",
+        "restore_after_rejection",
+        "failed_attempt_after",
+        "reconcile_unknown",
+    ),
+    "loop.runtime": (
+        "checkpoint",
+        "fresh",
+        "identity_failure",
+        "new_event",
+        "append",
+        "record",
+        "gate",
+        "observed",
+        "promote",
+    ),
+    "ports.run_journal": ("RunJournal", "validate_trace_append_response", "validate_run_journal_snapshot"),
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
     "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
     "ports.rendering": ("Renderer", "validate_rendered_candidate"),
+    "ports.acceptance": (
+        "AcceptanceJournal",
+        "validate_acceptance_commit_response",
+        "validate_acceptance_query_response",
+    ),
+    "ports.integrity": ("StateIntegrityInspector", "validate_state_integrity_response"),
+    "ports.coordinator_runtime": (
+        "DiagnosisSource",
+        "RunRenderer",
+        "RunClock",
+        "IdentitySource",
+        "validate_diagnosis_response",
+        "validate_run_render_response",
+    ),
     "admission.admission": ("admit_action",),
     "admission.preflight": ("preflight_execution",),
+    "admission.capabilities": ("build_action_capability_view",),
+    "admission.decision_gate": ("assess_decision",),
     "verification.consistency": ("validate_verification_references",),
+    "verification.evidence": ("match_evidence",),
+    "verification.assessment": ("assess_verification",),
     "loop.transitions": ("validate_gain_execution", "derive_candidate_project_state"),
     "loop.references": ("validate_attempt_references",),
+    "loop.budgets": ("check_budget",),
+    "loop.verification_routing": ("route_verification",),
+    "loop.acceptance": ("validate_acceptance_event",),
+    "loop.coordinator": ("run",),  # controlled-coordinator composition plan, 2026-11-09
+    "loop.reconciliation": ("reconcile_acceptance",),
 }
 
 

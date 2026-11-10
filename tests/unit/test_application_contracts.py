@@ -16,25 +16,43 @@ from autonomous_mixing.core.records.actions import Action, SetTrackGain
 from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
+from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.context import AssertionSource, MusicalContext, TrackRole
 from autonomous_mixing.core.records.decision import (
     Abstain,
     AbstentionReason,
+    ActionJustification,
     ControllerIdentity,
     Decision,
     DecisionResponse,
     ProposeAction,
     Situation,
 )
+from autonomous_mixing.core.records.diagnosis import (
+    DiagnosisCoverage,
+    DiagnosisCoverageStatus,
+    DiagnosisReport,
+    DiagnosticEvidence,
+    ProblemCandidate,
+    ProblemFamily,
+    UncertaintyRepresentation,
+)
+from autonomous_mixing.core.records.feedback import DecisionFeedback, DecisionHistory, PortFailureFeedback
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
     CheckpointId,
+    ConditionId,
     ContextId,
+    CriteriaId,
+    DecisionCallId,
     DecisionId,
+    DiagnosisCoverageId,
     ObservationId,
+    ProblemCandidateId,
     ProjectId,
     Revision,
+    RunId,
     TrackId,
     VersionRef,
 )
@@ -56,6 +74,14 @@ from autonomous_mixing.core.records.project import (
     TrackGainState,
 )
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult, Success
+from autonomous_mixing.core.records.verification import (
+    AcceptanceCriteria,
+    ComparisonOperator,
+    ImprovementCondition,
+    ImprovementDirection,
+    MetricSelector,
+    TargetCondition,
+)
 
 UTC_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 METRIC_A, METRIC_B, METRIC_C = VersionRef("metric-a", "1"), VersionRef("metric-b", "1"), VersionRef("metric-c", "1")
@@ -150,6 +176,91 @@ def _context(protected: frozenset = frozenset(), context_id: str = "c1") -> Musi
     return MusicalContext(ContextId(context_id), "1", roles, (), protected)
 
 
+# Increment 2E: proposals cite the fixture candidate and carry an explicit, labelled justification.
+JUSTIFICATION = ActionJustification(
+    "labelled test-double reasoning", "uncalibrated fixture text, not a confidence", (), ("contract fixture only",)
+)
+CANDIDATES = (ProblemCandidateId("cand-1"),)
+
+
+def _situation_inputs(state, context, evidence=()) -> dict:
+    """Explicit decision-input records added by increment 2D (Situation fields after ``limits``).
+
+    Without ``evidence`` the diagnosis is one labelled UNAVAILABLE coverage row (no diagnosis method
+    exists). With ``evidence`` (increment 2E) it is one labelled ASSESSED test-double row and a candidate
+    ``cand-1`` citing those actual fixture observations, so proposals can reference a real candidate. The
+    capability view advertises no action and the history is the empty first-call prefix (usage charges
+    one call). None of them states that the mix has a problem or none, that an action is permitted or that
+    a call succeeded.
+    """
+    scope = AnalysisScope(tuple(sorted(state.snapshot.track_ids, key=str)), TimeRange(0.0, 60.0))
+    selector = MetricSelector(VersionRef("metric-a", "1"), scope)
+    criteria = AcceptanceCriteria(
+        CriteriaId("crit"),
+        "1",
+        (TargetCondition(ConditionId("target"), selector, ComparisonOperator.LE, MeasuredScalar(-10.0, "unit-a")),),
+        (
+            ImprovementCondition(
+                ConditionId("improve"), selector, ImprovementDirection.LOWER, MeasuredScalar(1.0, "unit-a")
+            ),
+        ),
+        (),
+    )
+    candidates = ()
+    if evidence:
+        method = VersionRef("test-double-diagnosis", "0")  # labelled test double; no detection method exists
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.ASSESSED,
+            method,
+            "labelled test-double coverage; this fixture asserts nothing about problems",
+        )
+        statement = DiagnosticEvidence(
+            "test-double strength", "uncalibrated", UncertaintyRepresentation.UNCALIBRATED, False, (), ()
+        )
+        candidates = (
+            ProblemCandidate(
+                ProblemCandidateId("cand-1"),
+                DiagnosisCoverageId("cov-1"),
+                state.project_id,
+                state.revision,
+                ProblemFamily.MASKING,
+                scope,
+                tuple(ObservationId(e) for e in evidence),
+                method,
+                statement,
+            ),
+        )
+    else:
+        coverage = DiagnosisCoverage(
+            DiagnosisCoverageId("cov-1"),
+            ProblemFamily.MASKING,
+            scope,
+            DiagnosisCoverageStatus.UNAVAILABLE,
+            None,
+            "no diagnosis method exists; this fixture asserts nothing about problems",
+        )
+    return dict(
+        run_id=RunId("run-1"),
+        scope=scope,
+        criteria=criteria,
+        diagnosis=DiagnosisReport(state.project_id, state.revision, (coverage,), candidates),
+        capabilities=ActionCapabilityView(
+            state.project_id,
+            state.revision,
+            context.context_id,
+            context.version,
+            VersionRef("policy", "1"),
+            VersionRef("renderer", "1"),
+            scope,
+            (),
+        ),
+        history=DecisionHistory(RunId("run-1"), state.project_id, ()),
+    )
+
+
 def _decision_request(**overrides) -> Situation:
     fields = dict(
         state=_state(),
@@ -160,13 +271,21 @@ def _decision_request(**overrides) -> Situation:
         limits=BudgetLimits(4, 2, 6, 1, 300.0),
     )
     fields.update(overrides)
-    return Situation(**fields)
+    # New fields are derived from the final state and context only when those are valid records, so the
+    # wrong-type cases below still fail on their own field rather than inside this fixture.
+    state = fields["state"] if isinstance(fields["state"], ProjectState) else _state()
+    context = fields["context"] if isinstance(fields["context"], MusicalContext) else _context()
+    # Increment 2E: the fixture candidate cites o-a whenever o-a is among the supplied observations.
+    supplied = fields["observations"] if isinstance(fields["observations"], tuple) else ()
+    has_o_a = any(isinstance(o, Observation) and o.observation_id == ObservationId("o-a") for o in supplied)
+    evidence = ("o-a",) if has_o_a else ()
+    return Situation(**{**_situation_inputs(state, context, evidence), **fields})
 
 
 def _decision(outcome=None, evidence=("o-a",), *, context=("c1", "1"), controller=CONTROLLER, target="t2"):
     if outcome is None:
         action = Action(ActionId("x1"), ProjectId("p1"), Revision("r2"), SetTrackGain(TrackId(target), -2.0))
-        outcome = ProposeAction(action, "lower track t2")
+        outcome = ProposeAction(action, "lower track t2", CANDIDATES, JUSTIFICATION)
     return Decision(
         DecisionId("d1"),
         ProjectId("p1"),
@@ -404,9 +523,32 @@ def test_decision_request_with_arbitrary_roles_is_valid():
     assert isinstance(request.observations, tuple)
 
 
+def _prior_calls(count: int) -> DecisionHistory:
+    """A complete prefix of ``count`` charged calls that stayed at revision r2 (provider unavailable)."""
+    failure = PortFailureFeedback(PortFailure(PortFailureCode.UNAVAILABLE, "provider unavailable", True))
+    entries = tuple(
+        DecisionFeedback(
+            DecisionCallId(f"call-{i}"),
+            i,
+            RunId("run-1"),
+            ProjectId("p1"),
+            Revision("r2"),
+            None,
+            Revision("r2"),
+            None,
+            BudgetUsage(i, 0, 0, 0, 0.0),
+            failure,
+        )
+        for i in range(1, count + 1)
+    )
+    return DecisionHistory(RunId("run-1"), ProjectId("p1"), entries)
+
+
 def test_usage_beyond_limits_remains_representable_in_decision_request():
-    request = _decision_request(usage=BudgetUsage(9, 5, 20, 3, 400.0))
+    # Nine charged calls need the complete prefix of the eight earlier calls (increment 2D).
+    request = _decision_request(usage=BudgetUsage(9, 5, 20, 3, 400.0), history=_prior_calls(8))
     assert request.usage.decision_calls > request.limits.max_decision_calls
+    assert len(request.history.entries) == 8
 
 
 @pytest.mark.parametrize(
