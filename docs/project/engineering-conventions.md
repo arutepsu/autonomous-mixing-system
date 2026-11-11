@@ -24,7 +24,7 @@ autonomous_mixing/
   adapters/
     dsp_analysis/   implements AudioAnalyzer (deterministic DSP)
     audio_io/       shared read-only WAV access: location resolution, WAV integrity reading, read limits
-                    (ADR-028, Proposed; used only by the listed rendering modules)
+                    (ADR-028, Proposed; used only by the listed rendering modules and dsp_analysis.file_analyzer)
     rendering/      implements Renderer (gain/mix, WAV output, workspaces, state inspection)
     journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance)
     decision_agent/ implements DecisionMaker with Claude (ADR-005 name)
@@ -38,7 +38,7 @@ autonomous_mixing/
 ## Import rules
 1. `core` imports nothing outside `core`: no NumPy, soundfile, provider SDK or filesystem access.
 2. Inside `core`, `core.records` imports nothing outside itself; `core.ports` imports only `core.records`; stage packages (`admission`, `verification`, `diagnosis`) import only `core.records` and `core.ports` (and the standard library). Only `core.loop` composes stages and ports.
-3. `adapters` import only `core.records`, `core.ports`, third-party libraries and their own internals; never another adapter's internals and never `core.loop`. The one exception is ADR-028 (Proposed): listed rendering modules may import listed public modules of the shared `adapters.audio_io` component (exact module edges, no private names); it imports no consumer.
+3. `adapters` import only `core.records`, `core.ports`, third-party libraries and their own internals; never another adapter's internals and never `core.loop`. The one exception is ADR-028 (Proposed): listed rendering modules and `dsp_analysis.file_analyzer` may import listed public modules of the shared `adapters.audio_io` component (exact module edges, no private names); it imports no consumer.
 4. Only `drivers.experiments` imports `evaluation` (SR-10, ADR-010). This rule is necessary, not sufficient: an import test is not a filesystem sandbox. Runtime inputs, decision inputs and runtime configuration must also contain no hidden-data fields or references, and adapters read only from explicitly supplied roots (ADR-023).
 5. Inside `core`, data types are defined only in `core.records`; ports, stages and the loop define functions. A function that a record calls in `__post_init__` lives with the records. Ports exchange request and response types; their definitions live in `core.records`. Adapter-local implementation data (for example `CheckedAudio`, `AllocatedWorkspace`, `WrittenWav`, resource limits) stays inside its adapter.
 6. The modules of `core.records` form an acyclic import graph. A record used by several record modules gets its own module (for example `budgets`); cycles are never resolved through import order or local imports.

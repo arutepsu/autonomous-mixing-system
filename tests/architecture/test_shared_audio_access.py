@@ -1,7 +1,7 @@
 """Architecture tests for the shared read-only audio component (ADR-028, Proposed; ADR-027 rule c otherwise).
 
 ``adapters.audio_io`` owns location resolution, WAV integrity reading and read limits. Only the listed
-rendering modules may import its listed public modules; every other cross-adapter import stays forbidden,
+rendering modules and ``dsp_analysis.file_analyzer`` may import its listed public modules; every other cross-adapter import stays forbidden,
 another component may not import its private names, and the shared modules import no consumer, stage,
 loop, driver or evaluation code. Guarantees carried over from the former rendering-owned modules: exact
 internal edges and third-party dependencies (G10), one definition per moved name (G9) and fresh-process
@@ -30,6 +30,7 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 INTEGRITY = f"{AUDIO_IO}.integrity"
 LOCATIONS = f"{AUDIO_IO}.locations"
 LIMITS = f"{AUDIO_IO}.limits"
+FILE_ANALYZER = f"{ADAPTERS}.dsp_analysis.file_analyzer"
 
 
 def test_audio_io_modules_are_exactly_the_planned_ones():
@@ -112,6 +113,9 @@ def test_the_audio_io_initializer_contains_only_a_docstring():
         (f"{RENDERING}.state_integrity", "from ..audio_io.limits import AudioReadLimits"),  # relative public name
         (f"{RENDERING}.workspaces", "from ..audio_io import locations"),  # relative package form, listed child
         (LOCATIONS, "from autonomous_mixing.core.records.artifacts import AudioArtifact"),
+        (FILE_ANALYZER, "from autonomous_mixing.adapters.audio_io.integrity import check_resolved_wav_integrity"),
+        (FILE_ANALYZER, "from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location"),
+        (FILE_ANALYZER, "from ..audio_io.limits import AudioReadLimits"),
     ],
 )  # fmt: skip
 def test_listed_public_clients_are_allowed(client, source):
@@ -134,6 +138,13 @@ def test_listed_public_clients_are_allowed(client, source):
         # Other adapters may not use it.
         (f"{ADAPTERS}.journal.memory", "from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location"),
         (f"{ADAPTERS}.dsp_analysis.analysis", "from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio"),
+        (f"{ADAPTERS}.dsp_analysis.levels", "from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio"),
+        (f"{ADAPTERS}.dsp_analysis.io", "from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location"),
+        # The analyzer may use the public names only, and no rendering module.
+        (FILE_ANALYZER, "from autonomous_mixing.adapters.audio_io.limits import _require_limit"),
+        (FILE_ANALYZER, "from ..audio_io.integrity import _capture"),
+        (FILE_ANALYZER, "import autonomous_mixing.adapters.audio_io"),  # the package itself is not a listed module
+        (FILE_ANALYZER, "from autonomous_mixing.adapters.rendering.state_integrity import FileStateIntegrityInspector"),
         # Unlisted rendering modules and unlisted shared modules stay forbidden.
         (f"{RENDERING}.wav_output", "from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location"),
         (f"{RENDERING}.revalidation", "from autonomous_mixing.adapters.audio_io.integrity import IntegrityError"),

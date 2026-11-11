@@ -5,7 +5,7 @@ third-party libraries, ``core.records``, ``core.ports`` and their own package; n
 the loop or a stage), G10 (the exact internal edges and third-party dependencies of the rendering
 adapter, carried over from the ADR-022 to ADR-026 infrastructure rules) and G4 for adapters (runtime
 load isolation in fresh processes). ADR-028 (Proposed) adds one narrow exception to rule (c): the listed
-rendering modules may import the listed public modules of the shared ``adapters.audio_io`` component, and
+rendering modules and ``dsp_analysis.file_analyzer`` may import the listed public modules of the shared ``adapters.audio_io`` component, and
 no other module may import its private names (``test_shared_audio_access.py`` holds its own edges and probes).
 """
 
@@ -41,6 +41,8 @@ SHARED_CLIENTS = {
     f"{ADAPTERS}.rendering.gain_mix": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity"},
     f"{ADAPTERS}.rendering.state_integrity": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
     f"{ADAPTERS}.rendering.run_renderer": {f"{AUDIO_IO}.locations"},
+    # File-backed level analyzer (file-audio-analyzer design, 2026-11-11): the edge ADR-028 reserved for it.
+    f"{ADAPTERS}.dsp_analysis.file_analyzer": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
 }
 
 
@@ -184,6 +186,23 @@ ANALYSIS_EDGES = {
     "io": (set(), {"numpy", "soundfile"}),
     "features": (set(), {"numpy", "scipy"}),
     "analysis": ({f"{ANALYSIS}.features", f"{ANALYSIS}.io"}, set()),
+    # Versioned level kernels and the file-backed AudioAnalyzer (file-audio-analyzer design, 2026-11-11).
+    "levels": (_r("observation"), {"numpy"}),
+    "file_analyzer": (
+        {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
+        | _s("integrity", "limits", "locations")
+        | _r(
+            "analysis",
+            "artifacts",
+            "coordinator_runtime",
+            "identifiers",
+            "invariants",
+            "observation",
+            "results",
+            "verification_evidence",
+        ),
+        {"numpy"},
+    ),  # fmt: skip
 }
 # Shared read-only audio component (ADR-028, Proposed): carried over from the former rendering modules.
 AUDIO_IO_EDGES = {
@@ -269,6 +288,16 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
     assert f"{ANALYSIS}.analysis" in loaded
     assert _forbidden_layers(loaded) == []
     assert not [n for n in loaded if n.startswith(RENDERING)]
+
+
+@pytest.mark.parametrize("module", ["levels", "file_analyzer"])
+def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
+    loaded = _loaded_after(f"import {ANALYSIS}.{module}")
+    assert f"{ANALYSIS}.{module}" in loaded
+    assert _forbidden_layers(loaded) == []
+    assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(JOURNAL)]
+    assert not [n for n in loaded if n in {f"{ANALYSIS}.io", f"{ANALYSIS}.features", f"{ANALYSIS}.analysis"}]
+    assert "scipy" not in {n.split(".")[0] for n in loaded}
 
 
 def test_memory_journal_loads_no_legacy_layer_other_adapter_driver_stage_provider_or_numpy():  # G4
