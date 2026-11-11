@@ -188,6 +188,8 @@ ANALYSIS_EDGES = {
     "analysis": ({f"{ANALYSIS}.features", f"{ANALYSIS}.io"}, set()),
     # Versioned level kernels and the file-backed AudioAnalyzer (file-audio-analyzer design, 2026-11-11).
     "levels": (_r("observation"), {"numpy"}),
+    # Directional masking-margin kernel (directional-masking-margin plan, Task 1, 2026-11-11): stdlib and NumPy only.
+    "masking": (set(), {"numpy"}),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -290,7 +292,7 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
     assert not [n for n in loaded if n.startswith(RENDERING)]
 
 
-@pytest.mark.parametrize("module", ["levels", "file_analyzer"])
+@pytest.mark.parametrize("module", ["levels", "file_analyzer", "masking"])
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")
     assert f"{ANALYSIS}.{module}" in loaded
@@ -298,6 +300,14 @@ def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(m
     assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(JOURNAL)]
     assert not [n for n in loaded if n in {f"{ANALYSIS}.io", f"{ANALYSIS}.features", f"{ANALYSIS}.analysis"}]
     assert "scipy" not in {n.split(".")[0] for n in loaded}
+
+
+def test_masking_kernel_loads_no_other_project_module_soundfile_or_scipy():  # G4
+    loaded = _loaded_after(f"import {ANALYSIS}.masking")
+    assert f"{ANALYSIS}.masking" in loaded
+    project = {n for n in loaded if n.split(".")[0] == PKG}
+    assert project == {PKG, ADAPTERS, ANALYSIS, f"{ANALYSIS}.masking"}  # package initializers and itself only
+    assert not {"soundfile", "scipy"} & {n.split(".")[0] for n in loaded}
 
 
 def test_memory_journal_loads_no_legacy_layer_other_adapter_driver_stage_provider_or_numpy():  # G4
