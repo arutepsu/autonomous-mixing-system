@@ -9,6 +9,15 @@
     "network": "none (docker run --network none)",
     "sources": "A: harness.c l3psy_probe.c; B: harness_mapping.c l3psy_mapping_probe.c; both with common.c subs.c psy.c tonal.c portableio.c ieeefloat.c -lm"
   },
+  "expected_long_fft_sha256": {
+    "impulse_32767_at1983.jsonl": "14dcfe2dc6e3eaf0219a27e00245fc1555ec19874e69af8890c77e9c58c4a20d",
+    "impulse_32767_at1984.jsonl": "756fc76798436089385903985aeafc5c6949b08655fda3fde33c8f97efc5f5cb",
+    "masker_1k_a81.92.jsonl": "eb547ec9f3e217b1d78b1f74c9e166cb29e2420a072b9a76bb804b69cdd52361",
+    "masker_1k_a8192.jsonl": "052b93891552aa170492bdaee790e4549b5270b5a5a1ff573fbe9dd9ad708e9a",
+    "silence_12granules.jsonl": "4f819f5f6ca9d81b3dc2493a0e7c5f3dc7cdcbc6eb71f7cd846b4ec68cb0dd5b",
+    "target_2k_a10.24.jsonl": "598dfd691612d359a01b907422e885c7ae4f27d27cd8b439d1c967237e2d2c3f",
+    "target_2k_a1024.jsonl": "77be8e17cdaf4c961e65d8ace6ebecd4cc05bdea675f5ebc797d9ce87f784d24"
+  },
   "expected_long_mapping_sha256": {
     "burst_1k_a8192_onset2000.jsonl": "e62eb4429be711ce77940b1ad830d674fe2ee636061ac9cdee5f645de790dc1f",
     "impulse_32767_at1983.jsonl": "5036ae53f5d9d8f761aaa934cdad214e04f960660f2b6d19598662b221aefe56",
@@ -47,6 +56,74 @@
     "patch": "capture/l3psy_probe.diff",
     "patch_sha256": "9cab2bef3b6b699f2bb59f31903f34b04d02c687019e6c36661aaadb31864107",
     "patched_source_sha256": "8e57718ca98b6161219bdeedfa44b6055298e71483f2652cdd625a4c7eaa6a89"
+  },
+  "probe_long_fft": {
+    "base": "l3psy_mapping_probe.c (probe B) and the original subs.c",
+    "captured": "2026-11-12, fresh extraction of the pinned archive, same container and toolchain as probes A and B",
+    "description": "copies window[0..1023] and wsamp_r[0..1023] before the Layer III long fft() call and energy[]/phi[] after it (l3psy.c around original l. 483); inside subs.c fft(), while armed by that call only, copies each energy[i]/energy[ip] right after it is computed and before the 0.0005 floor test, and applies the same bit-reversal swap to that copy; writes only probe globals and block-local counters",
+    "flags": "-g -DUNIX (makefile.unix MODE, no optimisation); FLOAT is float",
+    "generator": "capture/make_probe_fft.py",
+    "harness": "capture/harness_fft.c",
+    "harness_binary_sha256": "05309b3a0dff9086db0fb33c708a5dd3f8a8bcc316a25a70f90ff790640f5545",
+    "harness_source_sha256": "055f87460f457548c2748f9af61e079ba2c09c06e3ff71c1a684345beec3a0d0",
+    "label": "probe C, long-FFT probe (expected_long_fft/); observation-only, built on probe B",
+    "patch": "capture/l3psy_subs_fft_probe.diff",
+    "patch_sha256": "5208f92aca54288c65b9446fa0ff8121479c4d088ff5e3bd9757599206118683",
+    "patched_sources_sha256": {
+      "l3psy_fft_probe.c": "ba1fe4852196ba44620341c03d2e9b0d23126c5c282c40fa38f652534993fe31",
+      "subs_fft_probe.c": "ba8e738ae36466cc7c5a517b327631d92db6e4258159b563fc9057b26200d8fa"
+    },
+    "repeatability": "two container runs byte-identical (all outputs, window files and the binary)",
+    "run_script": "capture/run_fft_in_container.sh",
+    "run_script_sha256": "4b61df70ab7bc5c5a6a1d02793522c1b4b0a6b8b41967cf643b1d3236e80a970",
+    "selected_calls": [
+      [
+        "impulse_32767_at1983",
+        3
+      ],
+      [
+        "impulse_32767_at1983",
+        4
+      ],
+      [
+        "impulse_32767_at1984",
+        3
+      ],
+      [
+        "impulse_32767_at1984",
+        4
+      ],
+      [
+        "masker_1k_a8192",
+        6
+      ],
+      [
+        "masker_1k_a81.92",
+        6
+      ],
+      [
+        "silence_12granules",
+        2
+      ],
+      [
+        "target_2k_a1024",
+        6
+      ],
+      [
+        "target_2k_a10.24",
+        6
+      ]
+    ],
+    "sources": "harness_fft.c l3psy_fft_probe.c subs_fft_probe.c common.c psy.c tonal.c portableio.c ieeefloat.c -lm",
+    "stdout_filter": "only lines starting with '{' kept (drops the absthr index status line)",
+    "unselected_outputs_note": "inputs without selected calls; their probe C output is byte-identical to probe B's and is not stored again",
+    "unselected_outputs_sha256": {
+      "burst_1k_a8192_onset2000": "e62eb4429be711ce77940b1ad830d674fe2ee636061ac9cdee5f645de790dc1f",
+      "target_2k_a1024_trunc6536": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
+    },
+    "window_file": "expected_long_fft/window_long.json",
+    "window_note": "written by every one of the nine runs; all nine files were byte-identical, one copy is kept",
+    "window_sha256": "5cc9d5c86e603874b25556cdf30fb3ad58ea6f7d206b0eb065fad738cbf794a6"
   },
   "probe_long_mapping": {
     "description": "observation-only patch: records temp_1 = min(nb, 2 nb_1, 16 nb_2) per partition and, before the block-switching branch of every call, applies the encoder's long-band mapping (l3psy.c ll. 654-660 expressions and summation order) to eb, thr, qthr_l, temp_1 and to thr restricted to partitions where qthr_l >= temp_1; writes no encoder variable",

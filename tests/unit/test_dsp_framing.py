@@ -187,6 +187,22 @@ def test_matches_probe_a_call_indices(name):
     assert frame(fixture_samples(name)).call.tolist() == [r["call"] for r in fixture_records("expected", name)]
 
 
+FFT_CAPTURES = sorted(p.stem for p in (FIXTURE / "expected_long_fft").glob("*.jsonl"))
+
+
+@pytest.mark.parametrize("name", FFT_CAPTURES)
+def test_windows_times_dist10_coefficients_equal_the_captured_fft_input(name):
+    # Probe C (Task 3B) records wsamp_r = window[j] * savebuf[j] as passed into dist10's long FFT (float32).
+    window = np.array(json.loads((FIXTURE / "expected_long_fft" / "window_long.json").read_text())["window"])
+    window = window.astype(np.float32)
+    result = frame(fixture_samples(name))
+    selected = [r for r in fixture_records("expected_long_fft", name) if "windowed_samples" in r]
+    assert selected
+    for record in selected:
+        expected = np.array(record["windowed_samples"]).astype(np.float32)
+        np.testing.assert_array_equal(window * result.windows[record["call"]].astype(np.float32), expected)
+
+
 def test_fixture_covers_every_input():
     assert len(FIXTURE_INPUTS) == 9
 

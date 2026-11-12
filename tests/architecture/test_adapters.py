@@ -192,6 +192,8 @@ ANALYSIS_EDGES = {
     "masking": (set(), {"numpy"}),
     # dist10 long-block sample framing (front-end contract revision 2, Task 3A, 2026-11-11): stdlib and NumPy only.
     "framing": (set(), {"numpy"}),
+    # dist10 long-window spectral kernel (front-end contract revision 3, Task 3C, 2026-11-12): stdlib and NumPy only.
+    "long_spectrum": (set(), {"numpy"}),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -294,7 +296,7 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
     assert not [n for n in loaded if n.startswith(RENDERING)]
 
 
-@pytest.mark.parametrize("module", ["levels", "file_analyzer", "masking", "framing"])
+@pytest.mark.parametrize("module", ["levels", "file_analyzer", "masking", "framing", "long_spectrum"])
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")
     assert f"{ANALYSIS}.{module}" in loaded
@@ -304,7 +306,7 @@ def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(m
     assert "scipy" not in {n.split(".")[0] for n in loaded}
 
 
-@pytest.mark.parametrize("module", ["masking", "framing"])
+@pytest.mark.parametrize("module", ["masking", "framing", "long_spectrum"])
 def test_masking_kernel_and_framing_load_no_other_project_module_soundfile_or_scipy(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")
     assert f"{ANALYSIS}.{module}" in loaded

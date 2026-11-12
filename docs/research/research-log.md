@@ -719,3 +719,80 @@
   - whole-array count restored;
   - view returned without a copy, which fails the owns-data check.
 - Checks (Windows 11): focused framing and architecture tests 289 passed; fixture verifier passed; full suite 4,506 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; `ruff check .` clean. Left uncommitted.
+
+## 2026-11-12 — dist10 long-window FFT reference capture (Task 3B, Claude Code)
+- Scope: reference evidence for the long-window FFT stage. There is no Python FFT kernel; short FFT, tonality, spreading and threshold come later. Probes A and B, their outputs and the framing code are unchanged. Contract revision 3 (§3.1) documents the stage.
+- Probe C is observation-only and built on probe B (`capture/make_probe_fft.py`, `l3psy_subs_fft_probe.diff`, `harness_fft.c`, `run_fft_in_container.sh`).
+  - It copies `window[]` and `wsamp_r[]` before the Layer III long `fft()` call, and `energy[]`/`phi[]` after it.
+  - Inside `fft()`, only while armed by that call, it copies each energy right after computation and before the floor test, and applies the same bit-reversal swap to that copy.
+  - It writes only probe globals.
+  - Selected calls: silence 2; impulses at 1983 and 1984, calls 3 and 4; the four level-case tones, call 6.
+- Build: a fresh extraction of the pinned archive (SHA-256 `79f8321b…f369`) in `gcc@sha256:d47e63a2…`, GCC 13.5.0, `-g -DUNIX`, `--network none`. Two runs were byte-identical in outputs, window files and binary (`05309b3a…`).
+- Downstream unchanged: every probe C line carries probe B's fields equal to `expected_long_mapping`. The two inputs without selected calls produced output byte-identical to probe B's.
+- Source conventions confirmed by the capture:
+  - window = float32(0.5(1 − cos(2·PI·(i − 0.5)/1024))) with `PI = 3.14159265358979`, exactly; it is neither the periodic nor the symmetric Hann window;
+  - windowed samples = float32 product of window and frame, exactly;
+  - forward transform, unnormalised, natural bin order after bit reversal. Against a float64 FFT: error ≤ 1e−7 of the peak energy, Parseval within 4e−8, phase within 2.4e−5 rad on strong bins, impulse energy v² in every bin;
+  - the bins `L3psycho_anal` consumes: energy 0–512, phase 0–5.
+- Correction to revision 2: the floor applies to even *pre-reorder* positions, which are natural bins 0–511. Nyquist and bins 513–1023 are never floored. The quiet 2 kHz target floors bins 169–170 inside an active window, and the stored floor value is float32(0.0005).
+- Verifier: `verify_fixture.py` now checks the probe C hashes, downstream identity, window formula, windowed samples rebuilt from the raw inputs, scaling, Parseval, phase, impulse energy and the exact floor set. A new framing unit test checks that window × `framing.windows` equals the captured FFT input for all selected calls.
+- Error injection into a temporary copy of the evidence; all were detected except the last:
+  - periodic Hann window: 9 failures;
+  - frame offset by one sample: 16;
+  - 1/N² energy: 30;
+  - conjugate phase: 7;
+  - floor on even natural bins: 8;
+  - floor on all bins: 5;
+  - double 0.0005 floor value: undetectable after float32 storage (documented).
+- Checks: reported in the handoff. Left uncommitted for Codex review. The Task 2/3A files were already staged by someone else; the index was left as found.
+
+## 2026-11-12 — dist10 long-window spectral kernel (Task 3C, Claude Code)
+- Scope: the long-window spectrum only. There is no short FFT, tonality, spreading, temporal threshold, WAV conversion or diagnosis. Framing, the probes and the fixtures are unchanged, and the staged index was left as found.
+- Change: new `adapters.dsp_analysis.long_spectrum` with:
+  - `dist10_long_window()` (float32, read-only);
+  - `apply_long_window(windows)`;
+  - `apply_long_energy_floor(energy_prefloor)`;
+  - `long_window_spectrum(windows) -> LongSpectrum`, with float32 `energy_prefloor`, `energy` and bool `floored`, each `(calls, 513)`, and float32 `phase` `(calls, 6)`.
+- Computation, per the owner's specification:
+  - window from dist10's formula and `PI`, stored as float32;
+  - float32 product with the int16 samples;
+  - unnormalised float64 real-input FFT, natural bins 0–512;
+  - |X|² rounded to float32;
+  - floor where the widened float32 energy is `<= 0.0005`, on bins 0–511 only, with replacement float32(0.0005);
+  - phase of bins 0–5 as float32, zeroed where floored.
+
+  Work is done in chunks of 256 calls to bound the temporaries. Architecture: inventory entry (stdlib and NumPy) and both isolation probes.
+- Tests: `tests/unit/test_dsp_long_spectrum.py` was written first; red evidence is a `ModuleNotFoundError` at collection and 4 architecture failures. Against all nine Probe C calls:
+  - window coefficients and windowed samples match exactly;
+  - pre-floor energy is within the verifier's 1e−6 of peak (worst 3.1e−7);
+  - floor masks are identical, with no differences;
+  - floored energies are bit-identical to dist10;
+  - phase on strong bins 0–5 is within 1e−4 rad (worst 9.8e−7). Strong bins exist only for the impulses (6 of 6) and the quiet target (2 of 6); the tones' low bins are below 1e−6 of peak.
+
+  Separate cases: silence, the 1983/1984 boundary, the quiet tone's bins 169–170, start-up calls, energies just above (5.0162e−4) and just below (4.9830e−4) the cutoff, Nyquist kept below the floor, zero- and tiny-energy phase, float32 neighbours of 0.0005, chunk boundaries, and input validation.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 73:
+  - floor on Nyquist: 9;
+  - periodic Hann: 16;
+  - 1/N FFT: 26;
+  - phase not zeroed: 2;
+  - double floor value: 12;
+  - float64 windowed product: 10. This first survived because the spectrum loop duplicated the windowing; both paths now share one helper.
+  - sign-flipped phase: 5;
+  - strict `<`: survives. It is equivalent on float32 input, since no float32 equals 0.0005; this is documented.
+- Limits: the nearest captured nonzero energy is 1.29e−4 from the cutoff, so a near-cutoff disagreement with dist10's float32 FFT is not exercised by the capture. A reimplementation tolerance for later stages is open. Left uncommitted for review.
+
+## 2026-11-12 — Correction: long-window kernel window ownership and chunked floor (Codex review of Task 3C)
+- Findings:
+  - `dist10_long_window()` returned the module's shared window, so a caller could re-enable writes and change what the kernel used.
+  - The floor ran on the whole result, which added float64 widening, mask and replacement temporaries that grew with the number of calls.
+- Fix:
+  - The function now returns a fresh read-only copy; the private window is unchanged.
+  - The floor runs per 256-call chunk into preallocated outputs, in both `long_window_spectrum` and `apply_long_energy_floor`, and the retained phase is zeroed per chunk.
+  - The FFT convention, floor predicate and tolerances are unchanged.
+- Regressions:
+  - Modifying a returned window leaves later spectra and windows unchanged.
+  - Peak memory beyond the outputs does not grow from 1,000 to 4,000 calls (limit 1 MiB). It now measures a constant 7.36 MB per chunk; before, the peak at 4,000 calls exceeded the outputs by 10.2 MB.
+- Mutation probes, restored byte-identically (SHA-256 checked):
+  - returning the shared window: the protection test fails;
+  - a whole-array floor in either function: the memory test fails.
+- Checks (Windows 11): fixture verifier passed; spectrum, framing and architecture tests 374 passed; full suite 4,591 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; index tree unchanged. Left uncommitted.
