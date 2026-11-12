@@ -211,6 +211,20 @@ Selected calls are consecutive, so the history can be checked call to call:
 
 Limits: 15 calls, one rate, synthetic signals. The tolerances describe the float32 reference, not a reimplementation tolerance.
 
+**Implementation (Task 3F, 2026-11-12).** `adapters.dsp_analysis.unpredictability.dist10_unpredictability` computes `cw` `(calls, 513)` in float64 from the post-floor long and short spectra. It uses the two float32 history slots, read before overwrite, with zero history at the start of each clip. Lines 6–205 come from short bin `(j + 2) // 4`, predicting block 1 from blocks 0 and 2. Lines 206–512 are 0.4. The zero-denominator branch returns 0. Two comparisons are kept apart:
+- **Captured spectra (predictor alone):** the result is within 2.2e−16 of the captured `cw`. This holds for consecutive calls from call 0 (silence 0–2, tone 0–4) and for single calls from recorded history.
+- **Python spectra (FFT precision included):** deviations grow as the bin's energy falls relative to its block or call peak.
+
+  | Bins (weakest input relative to peak) | Short worst | Long worst |
+  | --- | --- | --- |
+  | Strong (≥ 1e−6) | 5.2e−6 | 6.9e−6 |
+  | 1e−9 to 1e−6 | 2.1e−4 | 2.1e−4 (below 1e−6) |
+  | Below 1e−9 | 6.9e−3 (burst call 5, line 170, short bin 43, energy 1.2e−11 of peak) | — |
+
+  The long worst case is the masker, call 4, bin 5 (9.4e−10 of peak). In those bins, the reviewed spectrum agreement (energy within 1e−6 of the peak) allows relative energy differences of about 0.3–0.6% and phase differences of a few mrad.
+
+No end-to-end `cw` tolerance is set. Whether weak-bin `cw` differences matter depends on the later partition step, which weights `cw` by energy (`cb += cw·energy`).
+
 ## 4. Remaining implementation decisions and open questions
 
 1. **Block-switching option** (a) or (b) (§2.2). Under (b), decide whether onset frames whose threshold is capped by pre-echo control need their own label in the evidence.

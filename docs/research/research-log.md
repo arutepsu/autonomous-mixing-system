@@ -877,3 +877,47 @@
   | Sign-flipped phase | 8 |
   | Whole-array floor | 1 (memory test) |
 - Limits: the nearest captured nonzero energy is 3.7e−4 from the cutoff, so near-cutoff disagreement with dist10's float32 FFT is exercised only by the synthetic cases. Left uncommitted for review.
+
+## 2026-11-12 — dist10 spectral unpredictability cw (Task 3F, Claude Code)
+- Start: clean tree at `52a3e7b`, index tree `c1bfd4eb…`. Scope: `cw` only. There is no partitioning, spreading, tonality, threshold or diagnosis, and the spectra, framing and fixtures are unchanged.
+- Change: new `adapters.dsp_analysis.unpredictability` (standard library and NumPy) with:
+  - `dist10_unpredictability(long_energy, long_phase, short_energy, short_phase)`, giving float64 `(calls, 513)`, read-only;
+  - `long_predictor_cw` (the single step from slot values);
+  - `short_predictor_cw` (lines 6–205);
+  - `short_bin_for_line`.
+
+  It uses two float32 age slots (initial 0/1/0, flipping each call), reads `old`/`oldest` before overwriting them with `float32(sqrt(energy))` and the phase, and does the arithmetic in double in the reference's order. Lines 6–205 come from short bin `(j + 2) // 4` with 2·block 0 − block 2 predicting block 1; lines 206–512 are 0.4. The zero-denominator branch returns 0; floored spectra cannot reach it, since `r_new, r2 ≥ √float32(0.0005)`. Inputs are validated: plain float32 arrays, shapes, equal call counts, finite values, non-negative energies. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_unpredictability.py` was written first; red evidence is a collection error and 4 architecture failures. One test was then corrected: at call 0 the long `cw` is 1 regardless of energy (r' = 0), so the boundary perturbation was moved to call 1. Coverage:
+  - Captured spectra (the long bins are rebuilt from the recorded float32 `r_new`, with an exact square-root round trip asserted): consecutive calls from 0 reproduce `cw` within 1e−12 (observed ≤ 2.2e−16), and all 16 single calls match from recorded history.
+  - Silence gives 1, 1/3, 0; also covered: line boundaries (k = 2 → lines 6–9, k = 51 → 202–205, k = 1 and 52 unused, long bin 6 unused), the interpolation block order, clip independence and zero start, float32 history storage, the zero branch under `errstate(all="raise")`, and validation.
+- Python spectra end to end (report only; no tolerance set). Deviations scale with bin weakness:
+  - strong bins: at most 5.2e−6 (short) and 6.9e−6 (long);
+  - 1e−9–1e−6 of peak: at most 2.1e−4;
+  - below 1e−9: at most 6.9e−3, at the burst, call 5, line 170, short bin 43, 1.2e−11 of peak.
+
+  The long worst case is the masker, call 4, bin 5. With the captured spectra, the same calls agree to 2e−16, so the differences come from FFT precision within the reviewed spectrum bounds, not from the predictor. No discrepancy is unexplained.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 46:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | old/oldest swapped | 7 |
+  | Overwrite before read | 6 |
+  | Ages not flipped | 8 |
+  | Bin `j // 4` | 11 |
+  | Block order swapped | 10 |
+  | Target block 2 | 11 |
+  | Denominator without abs | 8 |
+  | Constant 0.5 | 6 |
+  | Zero branch returns 1 | 1 |
+  | `r_new` kept in float64 | 0 (equivalent: the float32 slots cast it, and the single-step API requires float32) |
+- Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: cw predictor processes calls in chunks (Codex review of Task 3F)
+- Finding: `dist10_unpredictability` built its history copies and float64 temporaries for all calls at once. Peak memory beyond the output was 7.0 MB at 1,000 calls and 28.0 MB at 4,000 calls.
+- Fix: calls are processed in chunks of 256. The two-slot history is a small state object, created once per clip and advanced across chunks. The arithmetic, operation order and precision boundaries are unchanged. Memory beyond the output is now a constant 1.79 MB at both sizes.
+- Regressions:
+  - memory beyond the output must grow by less than 1 MiB from 1,000 to 4,000 calls;
+  - over 600 random calls, the long `cw` equals the closed-form two-slot recurrence exactly, across the 256 and 512 chunk boundaries, and the short lines equal the single-call values.
+- Mutation probes, restored byte-identically (SHA-256 checked): a single chunk fails only the memory test, and resetting the history per chunk fails only the continuity test.
+- The numerical findings stand and are kept separate. With captured spectra, `cw` agrees within 2.2e−16. With Python FFT outputs, the largest differences are 2.1e−4 (long) and 6.9e−3 (short), in weak bins. Their effect on the energy-weighted partition values is to be measured in the next stage before any end-to-end tolerance is set.
+- Checks: reported in the handoff. Left uncommitted.
