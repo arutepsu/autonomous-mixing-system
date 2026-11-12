@@ -1,0 +1,84 @@
+{
+  "burst_1k_a8192_onset2000": {
+    "amplitude": 8192.0,
+    "frames": 4608,
+    "freq_hz": 1000.0,
+    "granules": 8,
+    "onset": 2000,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "d3e3d02ca88d26cdd40c8edea7a01e77b741100da1d735b10c72fdc50ed8d863"
+  },
+  "impulse_32767_at1983": {
+    "amplitude": 32767.0,
+    "frames": 3456,
+    "freq_hz": null,
+    "granules": 6,
+    "onset": 1983,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "64c32f1218973155f643675f9e7a036d271bfd3d183706523538084a970b6aac"
+  },
+  "impulse_32767_at1984": {
+    "amplitude": 32767.0,
+    "frames": 3456,
+    "freq_hz": null,
+    "granules": 6,
+    "onset": 1984,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "99e59a8dcd491129ad313c2fdb91579f9064cd785537aec84634087410177f21"
+  },
+  "masker_1k_a81.92": {
+    "amplitude": 81.92,
+    "frames": 6912,
+    "freq_hz": 1000.0,
+    "granules": 12,
+    "onset": 0,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "8dde9fd33bc60a63fb062f12ae554dff2178c06b1abe531178ea2a4777e5437c"
+  },
+  "masker_1k_a8192": {
+    "amplitude": 8192.0,
+    "frames": 6912,
+    "freq_hz": 1000.0,
+    "granules": 12,
+    "onset": 0,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "d352aa44ca5fcac37ac094f818f3ee65d95a0a1507b64a4593e2fd0702c0e71c"
+  },
+  "silence_12granules": {
+    "amplitude": 0.0,
+    "frames": 6912,
+    "freq_hz": null,
+    "granules": 12,
+    "onset": 0,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "299407adb3f1bd645191cfecb3c33a47510b1dfba3c0a936d741bdd8513526c0"
+  },
+  "target_2k_a10.24": {
+    "amplitude": 10.24,
+    "frames": 6912,
+    "freq_hz": 2000.0,
+    "granules": 12,
+    "onset": 0,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "698498146c9a32a83bf2c9cf4d2ef9a13cbe91c961eebf79f50e361cb714f936"
+  },
+  "target_2k_a1024": {
+    "amplitude": 1024.0,
+    "frames": 6912,
+    "freq_hz": 2000.0,
+    "granules": 12,
+    "onset": 0,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "a0a3f2fa5c8bdc1cd375430e0367ee4430fe2bab0b1ae963f38435bfcabe2479"
+  },
+  "target_2k_a1024_trunc6536": {
+    "amplitude": 1024.0,
+    "frames": 6536,
+    "freq_hz": 2000.0,
+    "granules": 12,
+    "onset": 0,
+    "sample_rate_hz": 44100,
+    "sha256_int16le": "e62ad115dc8515a4f1b7d687a34d1f5e3dd0f65a5edf70883427e0326ca5eb53",
+    "truncate_to": 6536
+  }
+}

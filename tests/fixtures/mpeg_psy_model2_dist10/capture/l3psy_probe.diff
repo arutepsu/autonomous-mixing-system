@@ -1,0 +1,16 @@
+--- l3psy.c
++++ l3psy_probe.c
+@@ -30,2 +30,5 @@
+ #include "l3side.h"
++/* --- observation probe (fixture capture only; no computation change) --- */
++double probe_en[SBMAX_l], probe_thm[SBMAX_l];
++int probe_long_valid;
+ #include <assert.h>
+@@ -461,2 +464,3 @@
+ 
++	probe_long_valid = 0; /* probe */
+ /**********************************************************************
+@@ -665,2 +669,3 @@
+ 	    }
++	    for ( sb = 0; sb < SBMAX_l; sb++ ) { probe_en[sb] = en[sb]; probe_thm[sb] = thm[sb]; } probe_long_valid = 1; /* probe */
+ 	}

@@ -190,6 +190,8 @@ ANALYSIS_EDGES = {
     "levels": (_r("observation"), {"numpy"}),
     # Directional masking-margin kernel (directional-masking-margin plan, Task 1, 2026-11-11): stdlib and NumPy only.
     "masking": (set(), {"numpy"}),
+    # dist10 long-block sample framing (front-end contract revision 2, Task 3A, 2026-11-11): stdlib and NumPy only.
+    "framing": (set(), {"numpy"}),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -292,7 +294,7 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
     assert not [n for n in loaded if n.startswith(RENDERING)]
 
 
-@pytest.mark.parametrize("module", ["levels", "file_analyzer", "masking"])
+@pytest.mark.parametrize("module", ["levels", "file_analyzer", "masking", "framing"])
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")
     assert f"{ANALYSIS}.{module}" in loaded
@@ -302,11 +304,12 @@ def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(m
     assert "scipy" not in {n.split(".")[0] for n in loaded}
 
 
-def test_masking_kernel_loads_no_other_project_module_soundfile_or_scipy():  # G4
-    loaded = _loaded_after(f"import {ANALYSIS}.masking")
-    assert f"{ANALYSIS}.masking" in loaded
+@pytest.mark.parametrize("module", ["masking", "framing"])
+def test_masking_kernel_and_framing_load_no_other_project_module_soundfile_or_scipy(module):  # G4
+    loaded = _loaded_after(f"import {ANALYSIS}.{module}")
+    assert f"{ANALYSIS}.{module}" in loaded
     project = {n for n in loaded if n.split(".")[0] == PKG}
-    assert project == {PKG, ADAPTERS, ANALYSIS, f"{ANALYSIS}.masking"}  # package initializers and itself only
+    assert project == {PKG, ADAPTERS, ANALYSIS, f"{ANALYSIS}.{module}"}  # package initializers and itself only
     assert not {"soundfile", "scipy"} & {n.split(".")[0] for n in loaded}
 
 

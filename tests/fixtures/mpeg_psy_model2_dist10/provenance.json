@@ -1,0 +1,99 @@
+{
+  "build": {
+    "architecture": "x86_64 (Docker Desktop 29.5.3, linux/amd64)",
+    "compiler": "gcc (GCC) 13.5.0",
+    "container_image": "gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e",
+    "flags": "-g -DUNIX (makefile.unix MODE, no optimisation); FLOAT is float under UNIX",
+    "harness_binary_sha256": "e6e9250dac76b4a900342706b4b272dd84e9242bf8e85a471e66b365001a55a7",
+    "image_tag_at_pull": "gcc:13",
+    "network": "none (docker run --network none)",
+    "sources": "A: harness.c l3psy_probe.c; B: harness_mapping.c l3psy_mapping_probe.c; both with common.c subs.c psy.c tonal.c portableio.c ieeefloat.c -lm"
+  },
+  "expected_long_mapping_sha256": {
+    "burst_1k_a8192_onset2000.jsonl": "e62eb4429be711ce77940b1ad830d674fe2ee636061ac9cdee5f645de790dc1f",
+    "impulse_32767_at1983.jsonl": "5036ae53f5d9d8f761aaa934cdad214e04f960660f2b6d19598662b221aefe56",
+    "impulse_32767_at1984.jsonl": "cd1951538f31592308209b43fa4b47a9e7ffbc1f174355af887cca6cbd28da2f",
+    "masker_1k_a81.92.jsonl": "861a96c4cdefb7a455ef0624818afe6e8460a81feacda44dee8ea034476d98ca",
+    "masker_1k_a8192.jsonl": "51b2ebd560ac3091be95b1b57bfd9d85f02be27a9e763ad597797392ecda7a1f",
+    "silence_12granules.jsonl": "996ae5fc0c0fc30a2f43118baaf03cc774c48b4167aaf44d33cc7ee18d18d878",
+    "target_2k_a10.24.jsonl": "fa984ff7249b97c65465998c80371b36c0391db049945b1225226ace40c1575d",
+    "target_2k_a1024.jsonl": "4618daa9eaf2261f76f5eee8f02fec676852fcd34bbea52fff4fd39f87679443",
+    "target_2k_a1024_trunc6536.jsonl": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
+  },
+  "expected_sha256": {
+    "burst_1k_a8192_onset2000.jsonl": "be512b2106692b174eae4ef5643c3e42ca7f5651c8337f760feef7231732a320",
+    "impulse_32767_at1983.jsonl": "28cd8308416a014a952e48d69a1815c6f0a878b53a141bbe7fa75d11ad4d8b05",
+    "impulse_32767_at1984.jsonl": "c1a6c0315c5ee128866a7f5aa0b96eb1ccec02e5fe98fc97097071d17f5f39bd",
+    "masker_1k_a81.92.jsonl": "490184549663e9c23b87bd068b9f136d8512b058489274e2d54eba3cace86220",
+    "masker_1k_a8192.jsonl": "76ce4c54692df95575228529fba9b702f37d6144c76c7295ecf36a11ad319b9a",
+    "silence_12granules.jsonl": "c7fbe5e1bae7475acb31a6ae3cf966df77b15815352ae035974e7c3a98f5c049",
+    "target_2k_a10.24.jsonl": "ee6c454c914f25c87e2fb200201ec2edcb12ec78b086703e2dd5d8aa6e21436d",
+    "target_2k_a1024.jsonl": "a8e1857114707ef42f4a29d59bee9d10a5f67b7c70fc18044e73a7ef23ab2b08"
+  },
+  "inputs_sha256": {
+    "burst_1k_a8192_onset2000.raw": "d3e3d02ca88d26cdd40c8edea7a01e77b741100da1d735b10c72fdc50ed8d863",
+    "impulse_32767_at1983.raw": "64c32f1218973155f643675f9e7a036d271bfd3d183706523538084a970b6aac",
+    "impulse_32767_at1984.raw": "99e59a8dcd491129ad313c2fdb91579f9064cd785537aec84634087410177f21",
+    "masker_1k_a81.92.raw": "8dde9fd33bc60a63fb062f12ae554dff2178c06b1abe531178ea2a4777e5437c",
+    "masker_1k_a8192.raw": "d352aa44ca5fcac37ac094f818f3ee65d95a0a1507b64a4593e2fd0702c0e71c",
+    "silence_12granules.raw": "299407adb3f1bd645191cfecb3c33a47510b1dfba3c0a936d741bdd8513526c0",
+    "target_2k_a10.24.raw": "698498146c9a32a83bf2c9cf4d2ef9a13cbe91c961eebf79f50e361cb714f936",
+    "target_2k_a1024.raw": "a0a3f2fa5c8bdc1cd375430e0367ee4430fe2bab0b1ae963f38435bfcabe2479",
+    "target_2k_a1024_trunc6536.raw": "e62ad115dc8515a4f1b7d687a34d1f5e3dd0f65a5edf70883427e0326ca5eb53"
+  },
+  "probe": {
+    "description": "observation-only patch: copies en[sb]/thm[sb] after the long-block scale-factor loop and flags whether that path ran; no arithmetic change",
+    "label": "probe A, encoder-path capture (expected/)",
+    "patch": "capture/l3psy_probe.diff",
+    "patch_sha256": "9cab2bef3b6b699f2bb59f31903f34b04d02c687019e6c36661aaadb31864107",
+    "patched_source_sha256": "8e57718ca98b6161219bdeedfa44b6055298e71483f2652cdd625a4c7eaa6a89"
+  },
+  "probe_long_mapping": {
+    "description": "observation-only patch: records temp_1 = min(nb, 2 nb_1, 16 nb_2) per partition and, before the block-switching branch of every call, applies the encoder's long-band mapping (l3psy.c ll. 654-660 expressions and summation order) to eb, thr, qthr_l, temp_1 and to thr restricted to partitions where qthr_l >= temp_1; writes no encoder variable",
+    "harness": "capture/harness_mapping.c",
+    "harness_binary_sha256": "8945a97dc59478fcfc76f83962fc0f140b9a0ab8944c724560c09d971c3545cc",
+    "harness_source_sha256": "1d219d989acd0e4c88d59254b7ac7298c321d7b5003d8b80ac815fcc4528f810",
+    "label": "probe B, long-band mapping probe (expected_long_mapping/); a project extension, not encoder behaviour",
+    "patch": "capture/l3psy_mapping_probe.diff",
+    "patch_sha256": "d0eacfd9915a2f50f32d1be46fa5a9437d38776b673e740cc989e90b553587fe",
+    "patched_source_sha256": "486bb73ec72fa6cfd59a5ef77ee4fbd2d324dfab5c0b8702f91d8919f4000ee5"
+  },
+  "reference": {
+    "archive_bytes": 229420,
+    "archive_repository_commit": "ea3c5ee5fada34e7a53ed1e3fdd447fe11267dca",
+    "archive_sha256": "79f8321b383c701c39ed843c76ac560f8e957ab342c8abe3d4b0e44b2ff8f369",
+    "archive_url": "https://raw.githubusercontent.com/joncampbell123/iso-dist10/ea3c5ee5fada34e7a53ed1e3fdd447fe11267dca/orig/dist10.tar.xz",
+    "description": "ISO MPEG Audio Subgroup Software Simulation Group (1996), MPEG-2 Audio Simulation Software Distribution 10 (dist10), lsf/encoder, L3psycho_anal (psychoacoustic model 2, Layer III form)",
+    "licence": "no licence file in the repository; the sources carry ISO 1996 headers only",
+    "note": "the cleaned repository master l3psy.c is byte-identical to the archive's lsf/encoder/l3psy.c (checked 2026-11-11)",
+    "read_only_sources_sha256": {
+      "encode.c": "6734dd7c17b89b6d3b442153ee6dd8d5850be45f708d99ebe8f65b26ec31154b",
+      "musicin.c": "505df97972c7c053290fe1ed4fe52a95c8ee734a635c1bebd2836f0cf0f6bfc7",
+      "note": "read only (final-frame zero fill, encode.c ll. 160-162); not compiled"
+    },
+    "source_sha256": {
+      "common.c": "a5b3fe99d6c46e0e0a876d4d5b27eb45f1d721e1f3342bde66d2a9b8eaad7552",
+      "common.h": "ee580e10bebe8e5039d24ab09a1210c2d665aa6c493e28f47c720fe002935e61",
+      "encoder.h": "edf3bb443afec3d85e5e0ecfc496adc4b8cf7a83f6dd02c6bf7e0830e47267d3",
+      "ieeefloat.c": "f9425460b5956ee09cbe4a1ecad5185a6e08257bc32b6ebd55b63c68f8d14af2",
+      "l3psy.c": "92f914ef1fca7cd30f34cfa520d959c4607535dea6032c7e06105b67195ef437",
+      "l3psy.h": "6fd7e2025de4d8617be7a714dae7185787f4b46a88c870861b17230c5b85beef",
+      "l3side.h": "e547630b701bc72cef413f96e7f2817ff904024bfc3ebc157554fe98351408cf",
+      "portableio.c": "d5ae059c87225370e6fb1f29bc97604690b62dcc3d3f5a9fb19167f82fe26fb0",
+      "psy.c": "c8fd23702b76c2dbdd366df00f66ae4dca7cd8e75c86a83a10d52678b5fb18d3",
+      "subs.c": "146d6195d67174fedebc3b0efa507a5ccd081aea37af9ca137adce93859564f0",
+      "tables/absthr_1": "a76d0ee4d4dd0c309fa57868bdae58b0c32ea79cd2bc76b399b2d2b950e802d8",
+      "tables/psy_data": "9094946e8cc36a30d956571ab3731e57af6e0ce7127a0d33edf11d91a3ef0c48",
+      "tonal.c": "023b2e35872adb5c1dbab3ccd1d36ca7010e122ddd2d1aefafd5dffd6f725372"
+    }
+  },
+  "run": {
+    "call": "each call passes 576 new samples; the 1344-sample save buffer starts zeroed (as musicin.c memsets sam)",
+    "captured": "2026-11-11 (probe A, first 7 inputs); 2026-11-11 recapture of A and B from a fresh extraction",
+    "channel": "mono stream as chn 0; one process per signal, so no static state is shared between signals",
+    "final_partial_granule": "A rejects clips that are not whole 1152-sample frames and is run only on those; B fills a final partial granule with zeros like encode.c",
+    "repeatability": "first capture: two runs byte-identical. Recapture: two further runs byte-identical (outputs and both binaries); probe A outputs and harness binary byte-identical to the first capture",
+    "sample_rate_hz": 44100,
+    "stdout_filter": "library status lines (absthr index print) dropped; only lines starting with '{' kept"
+  }
+}

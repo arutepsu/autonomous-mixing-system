@@ -656,3 +656,66 @@
 - Fix: the peak scaling and squaring in `adapters.dsp_analysis.levels` now run inside a local `np.errstate(under="ignore")`. Rounding negligible terms to zero is harmless because the largest scaled magnitude is exactly 1, so the mean square stays at least `1 / n`. The caller's error policy is restored afterwards, and overflow and invalid-operation policies are unaffected. The numerical definition and the analyzer are unchanged.
 - Regression: two cases under `np.errstate(under="raise")`, one where squaring underflows (`[1.0, 1e-200]`, -3.0103 dBFS) and one where scaling underflows (`[1e300, 1e-300]`); both also check that the caller's policy is restored. With the guard removed, both fail with `FloatingPointError`; the source was restored byte-identically (SHA-256 checked).
 - Checks (Windows 11): kernel and analyzer tests 92 passed; full suite 4,358 passed, 4 skipped; `ruff check` and `ruff format --check src tests` clean; CLI help works; `uv lock --check` passed. Codex's independent run reported 4,342 passed with 18 platform or permission skips; the different split comes from that environment's skips. Left uncommitted.
+
+## 2026-11-11 — MPEG psychoacoustic front end: source trace and dist10 reference fixture (Task 2, draft for review)
+- Scope: source tracing and reference evidence for the inputs of the directional margin kernel. No production front end, analyzer integration or report change. Draft contract: `docs/superpowers/specs/2026-11-11-mpeg-psychoacoustic-front-end-contract.md`.
+- Sources: Ronan's thesis could not be read. The QMRO URL returns 404, and the CORE copy is behind a bot check, which was not bypassed. The author's SoundSoftware repository refused connections. The withdrawn arXiv preprint 1803.09960v1 (§3.4, Eqs. 13–18) was used as secondary evidence. ISO/IEC 11172-3 Annex D was not consulted (paywalled). The thesis equation numbering, the paper's "maximum of three values" wording and the exact implementation Ronan used remain open questions.
+- Identification: the stated TMN 29 dB / NMT 6 dB, `minval`, unpredictability tonality, two-previous-frame pre-echo control and scale-factor-band energy and threshold match MPEG-1 psychoacoustic model 2 in its Layer III form as implemented by ISO dist10 `L3psycho_anal` (original archive `dist10.tar.xz`, SHA-256 `79f8321b…f369`). The preprint also cites the MPEG-2 AAC paper for band energy and threshold; that alternative is recorded as unresolved.
+- Reference evidence (owner approved the downloads and the container run): an observation-only three-line patch exposes `en[sb]`/`thm[sb]`. A harness calls the unmodified function per 576-sample granule. It was built with `-g -DUNIX` in `gcc@sha256:d47e63a2…` (GCC 13.5.0, x86_64) without network access; two runs were byte-identical. Fixture `tests/fixtures/mpeg_psy_model2_dist10/` (44.1 kHz, mono int16, seven signals) has full provenance and a verification script.
+- Findings: call `k` analyses samples `[576k − 768, 576k + 256)`; an impulse at 1983 reaches call 3 and one at 1984 does not. The returned ratio lags one call. The first two calls use threshold in quiet because the pre-echo state starts at zero, and loud signals take the short-block path there. FFT energies have a 0.0005 floor on half of the bins, so band energy is never zero, even for silence. Energies are in unnormalised-FFT int16 units, so a [−1, 1] input scale is off by 2³⁰. Cross-adaptive margins change with a common −40 dB gain (for example 95.0 to 69.2 dB in one band) because threshold in quiet is absolute. The FFT runs in float32 (`FLOAT` is `float` under UNIX).
+- Checks: fixture verification passed; `ruff check` and format clean; full suite 4,422 passed, 4 skipped. Limits: one rate, mono, synthetic signals, short-block path not instrumented, no reimplementation tolerance yet. This verifies reproduction of dist10, not model validity or agreement with Ronan's implementation. Left uncommitted for Codex review.
+
+## 2026-11-11 — MPEG front end revision 2: thesis source trace, reference profile, long-band mapping probe and silent-masker control (Task 2, draft for review)
+- Scope: revision of the Task 2 draft contract and extension of the dist10 fixture. Production code is unchanged. Contract: `docs/superpowers/specs/2026-11-11-mpeg-psychoacoustic-front-end-contract.md` (revision 2).
+- Supersedes the previous entry's "Ronan's thesis could not be read". The institutional copy was found through the C4DM theses page at QMRO handle `123456789/55527` (the old `xmlui` path returns an empty page). File `RONAN_David_PhD_Final_110119.pdf`, SHA-256 `216f5571…77b9f2`; it is not stored in the repository. Ch. 7, §§7.2.4.1–7.2.4.2 (pp. 105–109) define the cross-adaptive calculation: Eqs. 7.10–7.13, `T_max = 20 dB`. They cite Brandenburg & Stoll for the model and the AAC paper (Bosi et al.) for `B(dz)`, `E_sf` and `T`. They state the "maximum of three values" threshold wording, and no sample rate, FFT, block switching, channel handling or code. dist10 is now labelled as our chosen backend. The threshold-wording discrepancy with dist10's `max(qthr, min(nb, 2·nb₋₁, 16·nb₋₂))` and the band-table provenance (Layer III vs AAC) remain open.
+- Contract changes: reference profile v1 is pinned to 44.1 kHz, mono, int16 and one masker; float-WAV conversion, stereo, 48 kHz and multi-masker sums are deferred. Final-frame rule: zero-fill the last partial granule, as dist10's `encode.c` does; frame `k` is valid iff `k ≥ 2` and `576k + 256 ≤ N`. This holds because the short FFTs read inside the long window, so call `k` depends only on samples below `576k + 256`. Activity and action thresholds are left to a separate decision; the front end is to report an exact silent-window flag, threshold in quiet and the share of the threshold that threshold in quiet decided.
+- Fixture: the original encoder-path capture (probe A, `expected/`) is kept. A separately labelled long-band mapping probe B (`expected_long_mapping/`, observation-only patch and its own harness) applies the encoder's long-band expressions to the long partition values before the block-switching branch on every call. New inputs: digital silence (12 granules) and the 2 kHz target cut to 6536 samples. Recapture used a fresh extraction of the pinned archive in the same offline container: probe A's seven earlier outputs and its binary were byte-identical to the first capture. Two runs of both probes were byte-identical.
+- Findings:
+  - Probe B equals probe A bit for bit on all 69 long-path calls and gives finite values on the 11 short-path calls.
+  - At the burst onset (call 4, `pe` 9219), band 6 has `en = 3.07e12` but `thm` equals threshold in quiet (0.048), because pre-echo control caps the threshold from the silent history.
+  - The truncated clip equals the full clip exactly on calls 0–10 and differs on call 11, whose window passes the end.
+  - A silent masker gives threshold in quiet exactly; its signal-derived part is at least 31 dB below. Against the active targets it gives 0 of 210 cells with `T > E` (margins −120.6 to −5.9 dB).
+  - A silent target is "masked" in 210 of 210 cells, even by a silent masker (12.6 to 40.7 dB), because threshold in quiet lies above the FFT floor. The window's nonzero-sample count separates such frames exactly; across all 92 probe B records it coincides with floor energy.
+- Checks: fixture verification passed (hashes and probe relations); `ruff check` and format clean for the changed Python; full suite reported in the handoff. Limits: one rate, mono, synthetic signals; probe B's short-path values have no encoder counterpart; no reimplementation tolerance yet. Left uncommitted for Codex review.
+
+## 2026-11-11 — dist10 long-block sample framing (Task 3A, Claude Code)
+- Scope: the framing step of the fixed long-band dist10 front end (contract revision 2, §2). There is no FFT, threshold, WAV conversion, diagnosis or report change, and the Task 2 evidence is untouched.
+- Change: new `adapters.dsp_analysis.framing` with `frame_long_blocks(samples, *, sample_rate_hz) -> LongBlockFrames`.
+  - Profile v1 only: 44,100 Hz and one-dimensional int16 samples; either byte order is accepted.
+  - Call `k` has the window `[576k − 768, 576k + 256)`, and a clip has `ceil(N / 576)` calls.
+  - Positions before sample 0 and in the final partial granule are zero-filled.
+  - Every call is kept, including the start-up calls whose history the threshold stage needs.
+  - `eligible` is true iff `k ≥ 2` and `576k + 256 ≤ N`.
+  - `nonzero_samples` is the exact count of nonzero int16 values per window.
+  - All arrays are fresh and read-only, and the input is never modified.
+- Architecture: `framing` was added to the dsp_analysis edge inventory (standard library and NumPy only) and to both fresh-process isolation probes.
+- Tests: `tests/unit/test_dsp_framing.py` was written before the implementation; red evidence is a `ModuleNotFoundError` at collection, plus four architecture failures. The tests cover:
+  - call indices, window bounds, eligibility and nonzero counts against all nine recorded probe B captures, and call indices against the eight probe A captures;
+  - the 1983/1984 impulse boundary;
+  - the 6,536-sample truncation, where windows 0–10 equal the full clip's and the last window holds 56 fill zeros;
+  - the silent fixture, and the 1,407- and 1,408-sample lengths;
+  - window content against a sample-by-sample reference, and invalid inputs (dtype, shape, masked array, rate);
+  - unchanged and unshared input, read-only output, and non-contiguous, read-only and byte-swapped input.
+
+  Three expectations written in the red step were wrong: two hand-derived window memberships and the fixture input count. They were corrected against the contract bounds; the implementation was unchanged.
+- Mutation probes, restored byte-identically (SHA-256 checked); each line gives the number of the 80 focused tests that failed:
+  - strict end bound: 2;
+  - first eligible call 1: 20;
+  - lookback 767: 33;
+  - floor instead of ceiling call count: 31;
+  - nonzero fill: 6;
+  - 2-D input accepted: 1.
+- Checks (Windows 11): focused framing and architecture tests 288 passed; fixture verifier passed; full suite 4,505 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; `ruff check .` clean.
+- Limits: framing only. Samples at or after `576(calls − 1) + 256` fall in no call's window, as in dist10. Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: framing memory use (Codex review of Task 3A)
+- Finding: `frame_long_blocks` built an int64 index for every window sample, four times the size of the int16 windows it returns.
+- Fix: windows are now a copy of a strided view (`sliding_window_view` with a step of 576). An empty clip still yields a `(0, 1024)` array.
+- Further fix: measurement also showed that `count_nonzero(windows, axis=1)` built a temporary about half the size of the windows. Nonzero counts are now taken one row at a time.
+- Unchanged: call indices, bounds, padding, eligibility and counts.
+- Regression test: the peak traced allocation for a 400-granule clip must stay below the returned windows, plus the zero-led int16 buffer, plus 64 KiB. Before the fix the peak was 1.77 MB, against 1.28 MB for windows and buffer.
+- Mutation probes: each failed only the new test; the source was restored byte-identically (SHA-256 checked).
+  - per-sample index restored;
+  - whole-array count restored;
+  - view returned without a copy, which fails the owns-data check.
+- Checks (Windows 11): focused framing and architecture tests 289 passed; fixture verifier passed; full suite 4,506 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; `ruff check .` clean. Left uncommitted.
