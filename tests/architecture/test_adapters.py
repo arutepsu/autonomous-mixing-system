@@ -198,6 +198,8 @@ ANALYSIS_EDGES = {
     "short_spectrum": (set(), {"numpy"}),
     # dist10 spectral unpredictability cw (front-end contract §3.2, Task 3F, 2026-11-12): stdlib and NumPy only.
     "unpredictability": (set(), {"numpy"}),
+    # dist10 long partition accumulator eb/cb (front-end contract §3.3, Task 3H, 2026-11-12): stdlib and NumPy only.
+    "partitions": (set(), {"numpy"}),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -301,7 +303,17 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
 
 
 @pytest.mark.parametrize(
-    "module", ["levels", "file_analyzer", "masking", "framing", "long_spectrum", "short_spectrum", "unpredictability"]
+    "module",
+    [
+        "levels",
+        "file_analyzer",
+        "masking",
+        "framing",
+        "long_spectrum",
+        "short_spectrum",
+        "unpredictability",
+        "partitions",
+    ],
 )
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")
@@ -312,7 +324,9 @@ def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(m
     assert "scipy" not in {n.split(".")[0] for n in loaded}
 
 
-@pytest.mark.parametrize("module", ["masking", "framing", "long_spectrum", "short_spectrum", "unpredictability"])
+@pytest.mark.parametrize(
+    "module", ["masking", "framing", "long_spectrum", "short_spectrum", "unpredictability", "partitions"]
+)
 def test_masking_kernel_and_framing_load_no_other_project_module_soundfile_or_scipy(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")
     assert f"{ANALYSIS}.{module}" in loaded

@@ -949,3 +949,48 @@
 
   Mechanism: partition 50's `cw` comes from short bins 40–42, where short block 2 is 1e−11–1e−12 of its own peak.
 - Open: the end-to-end tolerance, until the effect on the tonality ratio `ctb/ecb` and the threshold is measured. Left uncommitted for Codex review.
+
+## 2026-11-12 — dist10 long partition accumulator (Task 3H, Claude Code)
+- Start: clean tree at `88b0c0c`, index tree `e7b36819…`. Scope: `eb`/`cb` only. There is no spreading, tonality or threshold, and the fixtures and the other kernels are unchanged.
+- Change: new `adapters.dsp_analysis.partitions` (standard library and NumPy) with:
+  - `DIST10_LONG_PARTITION_LINES_44100`: the 63 `#lines` of the pinned `psy_data` 44.1 kHz long block, embedded with its SHA-256;
+  - `dist10_long_partition_map()`: a fresh read-only `partition_l`, with bins 465–512 in partition 0;
+  - `dist10_partition_sums(energy, cw) -> PartitionSums(eb float64, cb float32)`, each `(calls, 63)`.
+
+  Bins are visited in ascending order. `eb` accumulates in float64; `cb` is formed in float64 and rounded to float32 after every bin. Calls are processed in chunks of 256, including validation. Inputs are validated: plain arrays, float32 energy and float64 `cw`, shape `(calls, 513)`, equal call counts, finite, non-negative. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_partitions.py` was written first; red evidence is a collection error and 4 architecture failures. Coverage:
+  - exact `eb` and `cb` on all 8 Probe E calls, singly and batched;
+  - the embedded table and mapping equal the captured ones, and partition 0 is DC plus 465–512;
+  - every table boundary, and selected bins including 464/465 and 511/512;
+  - Nyquist energy and `cw` into partition 0;
+  - an order-sensitive `cb` case: partition 61 with 1e8 then 72 ones gives 1e8 in ascending order, and a different float32 value in descending order;
+  - float64 `eb`: 2²⁴ + 1 is kept;
+  - empty input, read-only and fresh outputs, chunk boundaries, no memory growth, mapping protection, validation.
+
+  The Python-chain report prints the strong-partition worst residuals (`eb` 1.78e−5 at the quiet target, call 6, p16; `cb` 2.47e−3 at the burst, call 4, p50) and retains (burst, 4, 50) as the named case for the threshold comparison. One report test divided by zero on zero `cb` (a runtime warning); fixed with a guarded divide.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 48:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | High bins to partition 62 | 16 |
+  | Mapping shifted | 22 |
+  | `cb` in float64 | 10 |
+  | Descending order | 8 |
+  | `eb` in float32 | 11 |
+  | `cb` without `cw` | 24 |
+  | Nyquist dropped | 8 |
+- Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: reject float32 overflow in the cb accumulator (Codex review of Task 3H)
+- Finding: finite, valid inputs whose `cb` partition sum exceeds the float32 range produced `inf`, with only a cast warning. Under a raising NumPy policy they produced `FloatingPointError` instead of `ValueError`. Reproduced: 73 bins of partition 61 at float32 max with `cw` = 1.
+- Fix: the accumulation loop runs under a local `np.errstate(over="ignore")`. Each chunk is then checked for `inf` in `cb` (an overflow persists once reached, because all terms are finite and non-negative). On overflow, a `ValueError` names the first call and partition. This also covers an overflowing float64 product `cw·energy`. Results for in-range inputs are unchanged; the 8 Probe E calls are still exact. `eb` cannot overflow (513 × float32 max ≈ 1.7e41 in float64). Profile v1 int16 inputs stay far below the limit: the largest windowed-FFT energy is about (32768·1024)² ≈ 1.1e15.
+- Regressions:
+  - partition 61 overflow (message names call 0, partition 61);
+  - the same under `errstate(all="raise")`;
+  - the first affected call in a later chunk (call 300);
+  - a float64 product overflow;
+  - `cb` exactly at float32 max is kept;
+  - 513 × float32 max energies give a finite `eb`.
+
+  Before the fix, 4 failed. Removing the rejection or the local guard fails the same 4 (restored, SHA-256 checked).
+- Checks: reported in the handoff. Left uncommitted.

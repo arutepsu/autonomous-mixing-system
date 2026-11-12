@@ -274,6 +274,14 @@ Largest absolute errors: eb 2.6e5 (burst, call 4, p19) and cb 6.4e5 (burst, call
 
 **Left uncovered:** stereo, and rates other than 44.1 kHz (other rates have their own `#lines` sums and unassigned ranges). Also not checked here: how the overwritten `numlines` affects `pe` and block switching.
 
+**Implementation (Task 3H, 2026-11-12).** `adapters.dsp_analysis.partitions.dist10_partition_sums(energy, cw)` takes float32 `(calls, 513)` energies and float64 `cw` and returns float64 `eb` and float32 `cb`, each `(calls, 63)`.
+- **Mapping:** the 44.1 kHz `#lines` are embedded with their `psy_data` provenance and checked against the Probe E mapping. Bins 465–512 go to partition 0.
+- **Arithmetic:** ascending bin order; `eb` in float64; `cb` formed in float64 and rounded to float32 after every bin; calls processed in chunks.
+- **Against Probe E:** exact on all 8 captured calls, from their captured inputs.
+- **Python chain** (this package's spectra and `cw`), report only: strong-partition worst relative residuals are `eb` 1.8e−5 (quiet target, call 6, p16) and `cb` 2.5e−3 (burst, call 4, p50).
+- **Retained case:** burst call 4, partition 50 is kept as the named case for the threshold comparison. The tolerance remains open.
+- **Overflow:** finite inputs whose `cb` sum exceeds the float32 range are rejected with `ValueError`, naming the first call and partition, whatever the caller's NumPy error policy. The reference's double-to-float store is undefined behaviour in C for out-of-range values. `eb` cannot overflow, since 513 × float32 max is about 1.7e41. Profile v1 int16 inputs stay far below the float32 limit: the largest possible windowed-FFT energy is about 1.1e15.
+
 ## 4. Remaining implementation decisions and open questions
 
 1. **Block-switching option** (a) or (b) (§2.2). Under (b), decide whether onset frames whose threshold is capped by pre-echo control need their own label in the evidence.
