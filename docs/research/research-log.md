@@ -837,3 +837,43 @@
 
   Injected errors were each detected: a non-float32 floor value, a kept phase, an extra floored bin, a floored Nyquist and an altered unfloored energy. The unchanged record passes.
 - Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — dist10 short-window spectral kernel (Task 3E, Claude Code)
+- Scope: the short-window spectra only. There is no `cw` prediction or history, partitioning, tonality, threshold, WAV conversion or diagnosis. Framing, the long kernel and the fixtures are unchanged; the index was left as found (clean at `90b0293`).
+- Change: new `adapters.dsp_analysis.short_spectrum`. It is self-contained (standard library and NumPy; it does not import `long_spectrum`) and provides:
+  - `dist10_short_window()`, which returns a fresh read-only float32 copy;
+  - `apply_short_window(windows)`, giving `(calls, 3, 256)`;
+  - `short_window_spectrum(windows) -> ShortSpectrum`, with float32 `energy_prefloor`, `energy` and `phase`, and bool `floored`, each `(calls, 3, 129)`.
+- Computation:
+  - blocks at long-window positions 256, 384 and 512, in block order;
+  - window from dist10's formula and `PI`, stored as float32, and float32 products;
+  - unnormalised float64 real FFT, natural bins 0–128;
+  - |X|² rounded to float32;
+  - floor where the widened float32 energy is `<= 0.0005`, on bins 0–127 only, with replacement float32(0.0005) and phase zeroed;
+  - processing in chunks of 256 calls.
+
+  Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_short_spectrum.py` was written first; red evidence is a collection error and 4 architecture failures. Against all 16 Probe D calls (48 blocks):
+  - window and windowed blocks match exactly;
+  - energy is within 1e−6 of the block peak (worst 1.93e−7);
+  - floor masks are identical, with no differences;
+  - floored energies match dist10 bit for bit;
+  - phase is within 1e−4 rad on 1,021 strong unfloored bins (worst 3.74e−5).
+
+  Separate cases: silence; the 1983 boundary (call 3 silent in every block; call 4 at positions 191/63 of blocks 0/1; block 2 silent); the quiet target, call 6 block 2, floored exactly at bins 42 and 86; start-up calls; energies 2% above (5.10e−4) and below (4.89e−4) the cutoff; Nyquist kept below the floor; zero-energy phase; overlapping blocks; chunk boundaries; memory growth; window protection; validation.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 107:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Offsets 0/128/256 | 36 |
+  | Offsets +1 | 32 |
+  | Reversed block order | 35 |
+  | Periodic Hann | 28 |
+  | 1/N FFT | 27 |
+  | Floor on Nyquist | 23 |
+  | Phase not zeroed | 3 |
+  | Double floor value | 12 |
+  | Float64 windowed product | 17 |
+  | Sign-flipped phase | 8 |
+  | Whole-array floor | 1 (memory test) |
+- Limits: the nearest captured nonzero energy is 3.7e−4 from the cutoff, so near-cutoff disagreement with dist10's float32 FFT is exercised only by the synthetic cases. Left uncommitted for review.

@@ -226,6 +226,14 @@ Task 3C (2026-11-12) took the following steps for the long window, as specified 
 - the floor replacement stored as float32.
 
 Against Probe C, the energy error is at most 3.1e−7 of the call's peak, and the floor masks are identical on all nine captured calls. The nearest captured nonzero energy is 1.29e−4 away from the cutoff, so the capture does not test bins within float32 rounding of 0.0005. A reimplementation tolerance for later stages is still open.
+
+Task 3E (2026-11-12) applies the same strategy to the short window (`adapters.dsp_analysis.short_spectrum`):
+- blocks at long-window positions 256, 384 and 512;
+- float32 window and products;
+- a float64 FFT;
+- float32 pre-floor energy, with the floor on bins 0–127 and phase zeroed there.
+
+Against all 48 Probe D blocks: the energy error is at most 1.93e−7 of the block's peak, and the phase error at most 3.74e−5 rad on 1,021 strong unfloored bins. The floor masks are identical, including exactly bins 42 and 86 in the quiet target's call 6, block 2. The nearest captured nonzero energy is 3.7e−4 below the cutoff.
 6. **Deferred profile items**: float-WAV conversion, stereo, 48 kHz (needs a fixture), multi-masker sums (sum domain and clipping).
 7. **Time aggregation** of per-frame margins: the thesis states none; Eq. 7.13 is per band. Out of scope here.
 8. Retry the SoundSoftware author repository; if it is reachable, compare its threshold and band code with dist10.
