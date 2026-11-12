@@ -921,3 +921,31 @@
 - Mutation probes, restored byte-identically (SHA-256 checked): a single chunk fails only the memory test, and resetting the history per chunk fails only the continuity test.
 - The numerical findings stand and are kept separate. With captured spectra, `cw` agrees within 2.2e−16. With Python FFT outputs, the largest differences are 2.1e−4 (long) and 6.9e−3 (short), in weak bins. Their effect on the energy-weighted partition values is to be measured in the next stage before any end-to-end tolerance is set.
 - Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — dist10 partition inputs eb/cb: trace, reference capture and comparisons (Task 3G, Claude Code)
+- Start: clean tree at `aebc530`. Scope: reference evidence and contract revision 5 (§3.3). There is no production partitioning, spreading, tonality or threshold, and no change to the kernels or earlier fixtures.
+- Trace (l3psy.c):
+  - `partition_l` is built from the `psy_data` 44.1 kHz long block: 63 partitions whose `#lines` sum to **465**. Bins 465–512 (≈ 20.03–22.05 kHz, Nyquist included) keep the static zero initialisation and so accumulate into **partition 0** with DC (49 bins). The `tp >= 0` guard never rejects a bin, and no table entry is unused.
+  - `numlines[0..38]` is overwritten by the later short-table read. `eb`/`cb` are unaffected, but `pe` uses the overwritten values; this belongs to the later block-switching stage.
+  - `eb` is double; `cb` is a `FLOAT` array, so every `cb[tp] += cw[j]*energy[j]` is rounded to float32 on store.
+- Probe E: observation-only, built on probe D (`make_probe_partition.py`, `l3psy_partition_probe.diff`, `harness_partition.c`, `run_partition_in_container.sh`). Calls: silence 0–2, the 1983 impulse 3–4, the burst 4, the 8192 masker 3 and the quiet target 6.
+  - Build: a fresh extraction, with the B, C and D diffs regenerated identically; two runs byte-identical (binary `95538546…`).
+  - Downstream: every input's output, with the E fields removed, was byte-identical to its stored D, C or B file. Only the E fields are stored (93 KB) plus `mapping_44100.json`.
+- Verifier: new checks on the hashes, stripped-output hashes, mapping and table, the `numlines` overwrite, the input cross-links to probes C and D, exact `eb`/`cb` reconstruction, detectability of a double-only `cb` and of ±1-bin boundary shifts, silence `eb`, and 49 bins in partition 0 for the flat impulse. Injected errors were each detected:
+
+  | Injected error | Failures |
+  | --- | --- |
+  | Shifted mapping | 11 |
+  | Nyquist mapped to partition 62 | 7 |
+  | `eb` changed by 1e−12 relative | 1 |
+  | `cw` changed | 2 |
+  | Energy changed | 6 |
+
+  The unchanged copy passes.
+- Comparisons (`capture/compare_partition_inputs.py`):
+  - A, captured energy + captured `cw`: exact on 8 of 8 calls.
+  - B, Python spectra + Python `cw`: `eb` relative error is at most 1.8e−5 in strong partitions (≥ 1e−6 of the call's maximum `eb`; quiet target, call 6, p16), 2.6e−4 in weak and 4.9e−3 in very weak ones. `cb` reaches **2.5e−3 even in a strong partition** (burst, call 4, p50).
+  - C, captured energy + Python `cw`: `eb` exact; the strong-partition `cb` error is the same 2.5e−3. So `cw` causes it.
+
+  Mechanism: partition 50's `cw` comes from short bins 40–42, where short block 2 is 1e−11–1e−12 of its own peak.
+- Open: the end-to-end tolerance, until the effect on the tonality ratio `ctb/ecb` and the threshold is measured. Left uncommitted for Codex review.

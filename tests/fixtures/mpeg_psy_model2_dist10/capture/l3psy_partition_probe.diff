@@ -1,0 +1,18 @@
+--- l3psy_short_probe.c
++++ l3psy_partition_probe.c
+@@ -45,2 +45,5 @@
+ FLOAT *probe_d_short_target; int probe_d_short_armed;
++/* --- partition probe E (fixture capture only; copies values, writes no encoder variable) --- */
++double probe_e_eb[CBANDS], probe_e_cw[HBLKSIZE]; FLOAT probe_e_cb[CBANDS], probe_e_energy[HBLKSIZE];
++int probe_e_partition[HBLKSIZE], probe_e_numlines[CBANDS];
+ #include <assert.h>
+@@ -606,2 +609,9 @@
+ 
++	{ int probe_e_n; /* probe E: partition inputs after accumulation, before spreading */
++	  for ( probe_e_n = 0; probe_e_n < CBANDS; probe_e_n++ ) {
++	    probe_e_eb[probe_e_n] = eb[probe_e_n]; probe_e_cb[probe_e_n] = cb[probe_e_n];
++	    probe_e_numlines[probe_e_n] = numlines[probe_e_n]; }
++	  for ( probe_e_n = 0; probe_e_n < HBLKSIZE; probe_e_n++ ) {
++	    probe_e_energy[probe_e_n] = energy[probe_e_n]; probe_e_cw[probe_e_n] = cw[probe_e_n];
++	    probe_e_partition[probe_e_n] = partition_l[probe_e_n]; } }
+ /**********************************************************************

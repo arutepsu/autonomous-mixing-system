@@ -29,6 +29,13 @@
     "target_2k_a1024.jsonl": "4618daa9eaf2261f76f5eee8f02fec676852fcd34bbea52fff4fd39f87679443",
     "target_2k_a1024_trunc6536.jsonl": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
   },
+  "expected_partition_sha256": {
+    "burst_1k_a8192_onset2000.jsonl": "4c655f860e83e7b2546a83ee4b42a3227d54b475181e9cff2db3acca2c2ce0c2",
+    "impulse_32767_at1983.jsonl": "cbaecbb433ec3bf83838b53ab9fb935d8eb497ce2532afe07b0ad447aba60406",
+    "masker_1k_a8192.jsonl": "7ee2445ea3fa9ef39febffe896becb904db08e97b53227b5890842c8b5d135d5",
+    "silence_12granules.jsonl": "614fe0bfc38da987e86283d0ede7b9fa8d3aa19f12821c3baf80cb30454f9755",
+    "target_2k_a10.24.jsonl": "ba43c4eed3565d1e853bedd0e91a32ddd6fcc01ad8171e5aca512c8d6ac2db5f"
+  },
   "expected_sha256": {
     "burst_1k_a8192_onset2000.jsonl": "be512b2106692b174eae4ef5643c3e42ca7f5651c8337f760feef7231732a320",
     "impulse_32767_at1983.jsonl": "28cd8308416a014a952e48d69a1815c6f0a878b53a141bbe7fa75d11ad4d8b05",
@@ -141,6 +148,80 @@
     "patch": "capture/l3psy_mapping_probe.diff",
     "patch_sha256": "d0eacfd9915a2f50f32d1be46fa5a9437d38776b673e740cc989e90b553587fe",
     "patched_source_sha256": "486bb73ec72fa6cfd59a5ef77ee4fbd2d324dfab5c0b8702f91d8919f4000ee5"
+  },
+  "probe_partition": {
+    "base": "l3psy_short_probe.c and subs_short_probe.c (probe D)",
+    "build_command": "gcc -g -DUNIX -o harness_partition harness_partition.c l3psy_partition_probe.c subs_short_probe.c common.c psy.c tonal.c portableio.c ieeefloat.c -lm",
+    "captured": "2026-11-12, fresh extraction; probe B, C and D diffs regenerated identically",
+    "description": "after the long partition loop (eb[tp] += energy[j]; cb[tp] += cw[j] * energy[j]) and before spreading, copies eb[0..62] (double), cb[0..62] (FLOAT), energy[0..512], cw[0..512], partition_l[0..512] and numlines[0..62]; writes only probe globals and a block-local counter; subs.c unchanged (probe D's)",
+    "generator": "capture/make_probe_partition.py",
+    "generator_sha256": "a30ee2b036ff1b30cb223574f9a9c5e067cae4c84032a72e95dbb88300330bf3",
+    "harness": "capture/harness_partition.c",
+    "harness_binary_sha256": "955385463ba86e552ab145b9a21eb64388377cc9034905d7bf83977481f9c7e7",
+    "harness_source_sha256": "0d5574ceda8b5d897d94c57ed5141a3eff756619a03eb1d09bd4796985cfb182",
+    "label": "probe E, partition probe (expected_partition/); observation-only, built on probe D",
+    "mapping_file": "expected_partition/mapping_44100.json",
+    "mapping_note": "partition_l and numlines as captured (all nine runs wrote byte-identical mapping files); psy_data 44.1 kHz long and short #lines parsed from the pinned tables/psy_data (SHA-256 under reference.source_sha256)",
+    "mapping_sha256": "f1356e7e7b9a58e38d0410c14409f66df1b428525a4e10dbd50260de87ddfe17",
+    "patch": "capture/l3psy_partition_probe.diff",
+    "patch_sha256": "e9965eb3c7cca4300d02ffd7a1004941ced059b1c321bceaa50b433ac80cb3b4",
+    "patched_source_sha256": {
+      "l3psy_partition_probe.c": "6a8f8494050d61e66bb0ac91ee618cf4bca34556096f16eef27ce297bfe3aec8",
+      "subs_short_probe.c": "72b6701c61477467772218d1e1693892f756b926b9ce09a07ab28012a6c74389"
+    },
+    "repeatability": "two container runs byte-identical (all outputs, window and mapping files, the binary)",
+    "run_command": "docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e sh /w/run_partition_in_container.sh",
+    "run_script": "capture/run_partition_in_container.sh",
+    "run_script_sha256": "dc785f4583780ddf437a94f6b2eea060fd2a9f1034ec6f2647f56b8d69cbee70",
+    "selected_calls": [
+      [
+        "burst_1k_a8192_onset2000",
+        4
+      ],
+      [
+        "impulse_32767_at1983",
+        3
+      ],
+      [
+        "impulse_32767_at1983",
+        4
+      ],
+      [
+        "masker_1k_a8192",
+        3
+      ],
+      [
+        "silence_12granules",
+        0
+      ],
+      [
+        "silence_12granules",
+        1
+      ],
+      [
+        "silence_12granules",
+        2
+      ],
+      [
+        "target_2k_a10.24",
+        6
+      ]
+    ],
+    "stdout_filter": "only lines starting with '{' kept (drops the absthr index status line)",
+    "stored_fields": "per probe E call only: call, partition_energy (FLOAT), partition_cw (double), eb (double), cb (FLOAT)",
+    "stripped_outputs_note": "full probe E output of every input with the probe E fields removed; each hash equals the stored probe D, C or B file of that input (checked at capture time byte for byte, and by the verifier through the hashes)",
+    "stripped_outputs_sha256": {
+      "burst_1k_a8192_onset2000": "d5d6be9f7f719996a15de8e2725bd5d1f9c028659bf4f27f2e354da731173d5e",
+      "impulse_32767_at1983": "983b37a2636450b69c88733b5a81ba5b9c96bd463dee3718590d7d23b0b3f5c0",
+      "impulse_32767_at1984": "756fc76798436089385903985aeafc5c6949b08655fda3fde33c8f97efc5f5cb",
+      "masker_1k_a81.92": "eb547ec9f3e217b1d78b1f74c9e166cb29e2420a072b9a76bb804b69cdd52361",
+      "masker_1k_a8192": "74c33bb54b18d0675ac553afc5fc69dd9663db1a0a55cb5d2c99bfac5a08fc7e",
+      "silence_12granules": "3c9fdf2c4953116330c9eb2c43ce1b735c55f9532912bbd907f495980007ec1f",
+      "target_2k_a10.24": "eb2173b2bf63b0ab74e5fbfc1a8bda0704ff4159ab1ccd23b7138a87571f5fa9",
+      "target_2k_a1024": "77be8e17cdaf4c961e65d8ace6ebecd4cc05bdea675f5ebc797d9ce87f784d24",
+      "target_2k_a1024_trunc6536": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
+    },
+    "window_s_identical_to_expected_short": true
   },
   "probe_short": {
     "base": "l3psy_fft_probe.c and subs_fft_probe.c (probe C)",

@@ -8,6 +8,8 @@ Revision 3 (2026-11-12, Task 3B) adds the long-window FFT reference capture (§3
 
 Revision 4 (2026-11-12, Task 3D) adds the short-window FFT and unpredictability reference capture (§3.2). It traces the three short-block offsets, the short-bin mapping of lines 6–205, the two-slot long-predictor history and the constant lines, and records that the zero-denominator branch is unreachable.
 
+Revision 5 (2026-11-12, Task 3G) adds the partition-input capture (§3.3). Bins 465–512 are not covered by the 44.1 kHz long table and accumulate into partition 0, and the short table overwrites `numlines[0..38]`.
+
 Labels: **[T]** defined by Ronan's thesis; **[S]** defined by the dist10 source, our chosen backend; **[R]** observed in the reference run; **[P]** project choice proposed for review; **[U]** unresolved.
 
 ## 1. Source trace
@@ -224,6 +226,53 @@ Limits: 15 calls, one rate, synthetic signals. The tolerances describe the float
   The long worst case is the masker, call 4, bin 5 (9.4e−10 of peak). In those bins, the reviewed spectrum agreement (energy within 1e−6 of the peak) allows relative energy differences of about 0.3–0.6% and phase differences of a few mrad.
 
 No end-to-end `cw` tolerance is set. Whether weak-bin `cw` differences matter depends on the later partition step, which weights `cw` by energy (`cb += cw·energy`).
+
+### 3.3 Partition inputs `eb` and `cb` (probe E, Task 3G, 2026-11-12)
+
+**Probe E** is a fifth observation-only patch, built on probe D (`capture/l3psy_partition_probe.diff` from `capture/make_probe_partition.py`, `capture/harness_partition.c`, `capture/run_partition_in_container.sh`; outputs `expected_partition/`). After the long partition loop and before spreading, it copies `eb[0..62]`, `cb[0..62]`, the `energy[0..512]` and `cw[0..512]` the loop read, `partition_l[0..512]` and `numlines[0..62]`.
+
+Selected calls are a subset of probe D's:
+
+| Input | Calls | Purpose |
+| --- | --- | --- |
+| `silence_12granules` | 0–2 | silence and start-up |
+| `impulse_32767_at1983` | 3–4 | impulse onset |
+| `burst_1k_a8192_onset2000` | 4 | burst onset |
+| `masker_1k_a8192` | 3 | established tone |
+| `target_2k_a10.24` | 6 | quiet tone with the partially floored short block |
+
+To keep the fixture small, only the probe E fields are stored (93 KB). With them removed, every input's probe E output was byte-identical to its stored probe D, C or B file; the verifier checks this through the recorded hashes.
+
+**Traced source behaviour, checked against the capture:**
+
+| Item | Source behaviour (l3psy.c, original lines) | Precision | Capture evidence |
+| --- | --- | --- | --- |
+| Table | `L3para_read` reads `tables/psy_data` (SHA-256 `9094946e…`), block `freq = 44100.0 partition = 62`: 63 long partitions `No=0..62` with `#lines` 1 (×15), 2 (×13), 3 (×7), 4 (×3), 5 (×3), 6, 6, 7, 7, 7, 9, 9, 9, 10, 10, 11, 14, 14, 15, 20, 20, 21, 27, 27, 36, 73, 18. **They sum to 465.** Then `partition_l[k2++] = i` for each line (ll. 781–790) | int | `partition_l` equals these counts in order |
+| Unassigned bins | `partition_l` is a `static int` array, so entries 465–512 (≈ 20.03–22.05 kHz, **Nyquist included**) keep their zero initialisation. The loop's `if (tp >= 0)` never rejects a bin, so they are accumulated into **partition 0**, together with DC. Partition 0 holds 49 bins; no table entry is unused | — | `partition_l[465..512] = 0`. For the 1983 impulse at call 3 (flat spectrum), eb[0]/eb[1] = 49 |
+| `numlines` | After the long table, `L3para_read` reads the short table (`freq = 44100.0 partition = 38`, 39 partitions, 109 lines) into the **same** `numlines` array (l. 869). So at partition time `numlines[0..38]` holds short-partition counts and `numlines[39..62]` long ones. `eb`/`cb` are unaffected, because `partition_l` was built earlier; the perceptual-entropy sum `pe -= numlines[b]·…` (l. 625) uses the overwritten values. That matters for the block-switching stage | int | Captured `numlines` = short table, then long table entries 39–62 |
+| Accumulation | `eb[b] = cb[b] = 0` for b < 63, then for j = 0…512 in order: `eb[tp] += energy[j]; cb[tp] += cw[j] * energy[j]` (ll. 553–565) | `eb` is `static double`: double accumulation of the float32 energies. `cb` is a `FLOAT*` work array: a double product and sum, **stored as float32 after every addition** | Reconstruction in bin order with float32 stores is exact on all 8 calls. A double-only `cb`, or a mapping with all partition boundaries moved by one bin, fails to reproduce the capture |
+| Inputs | `energy` is the long post-floor energy and `cw` the unpredictability (§3.1, §3.2) | float32; double | `partition_energy` = probe C energy where probe C captured the call, and float32(√) of bins 0–5 = probe D `r_new`; `partition_cw` = probe D `cw` |
+| Silence | All bins below 512 are floored, Nyquist is 0 | — | eb[b] = #lines(b) × float32(0.0005); partition 0 gets 48 floored bins (DC, 465–511) |
+
+**Comparisons** (`capture/compare_partition_inputs.py`; strata by eb / max(eb) of the call):
+
+| Reconstruction | Quantity | Strong (≥ 1e−6) | Weak (1e−9–1e−6) | Very weak (< 1e−9) |
+| --- | --- | --- | --- | --- |
+| A: captured energy + captured `cw` | eb, cb | exact (8/8 calls) | exact | exact |
+| B: Python spectra + Python `cw` | eb, relative | 1.8e−5 (quiet target, call 6, p16) | 2.6e−4 (masker, call 3, p27) | 4.9e−3 (masker, call 3, p43) |
+| B | cb, relative | **2.5e−3** (burst, call 4, p50) | 2.6e−4 (masker, call 3, p27) | 4.6e−3 (masker, call 3, p49) |
+| C: captured energy + Python `cw` | eb | exact | exact | exact |
+| C | cb, relative | **2.5e−3** (burst, call 4, p50) | 1.7e−4 (quiet target, call 6, p1) | 4.7e−3 (masker, call 3, p49) |
+
+Largest absolute errors: eb 2.6e5 (burst, call 4, p19) and cb 6.4e5 (burst, call 4, p50), both in strong partitions. Their relative size is given in the table.
+
+**Finding for review:**
+- In strong partitions, the `cb` error comes from `cw`, not from the long FFT: run C reproduces run B's strong-partition `cb` error with exact long energies.
+- Mechanism: in burst call 4, partition 50 (long bins 159–168, 3.5e−5 of the call's peak) takes `cw` from short bins 40–42. There, short block 2 is 1e−11–1e−12 of its own peak, so the Python short spectrum's `cw` differs by up to 3.0e−3.
+- Weighting by energy therefore does not damp `cw` differences when the long partition is strong but the short bins feeding its `cw` are weak.
+- The end-to-end tolerance stays open until the effect on the threshold calculation is measured. In dist10, `cb` enters only through the tonality ratio `ctb/ecb` after spreading.
+
+**Left uncovered:** stereo, and rates other than 44.1 kHz (other rates have their own `#lines` sums and unassigned ranges). Also not checked here: how the overwritten `numlines` affects `pe` and block switching.
 
 ## 4. Remaining implementation decisions and open questions
 

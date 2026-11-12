@@ -45,6 +45,18 @@
    - partially floored active short block (provenance ``partial_floor_case``, quiet 2 kHz target call 6 block 2):
      exactly short bins 42 and 86 floored, to float32(0.0005) with phase 0; every other bin, Nyquist 128 included,
      keeps its pre-floor energy; floored energies <= 0.5 x 0.0005 and unfloored >= 2 x 0.0005.
+5. Probe E, partition inputs (``expected_partition``):
+   - downstream: for every input, the probe E output with its fields removed hashed to the stored probe D, C or B
+     file (recorded hashes equal the stored files' hashes);
+   - mapping: partition_l = the 44.1 kHz long psy_data #lines repeated in partition order (465 bins), then 0 for
+     the 48 unassigned bins 465..512 (static zero initialisation), so partition 0 holds DC and 465..512; numlines at
+     partition time is the short table (entries 0..38, overwritten by the short-block read) then the long table;
+   - inputs: partition_energy equals probe C's long energy where probe C captured the call and float32(sqrt) of
+     bins 0..5 equals probe D's r_new; partition_cw equals probe D's cw;
+   - accumulation: eb (double, bin order) and cb (float32 store after each double multiply-add) reconstruct exactly;
+     a double-only cb and every mapping with all partition boundaries moved by one bin fail to reproduce them;
+   - silence: eb[b] = #lines(b) x float32(0.0005) (partition 0: 48 floored bins, Nyquist 0); the 1983 impulse at
+     call 3 (flat spectrum) gives eb[0] / eb[1] = 49 within 1e-5.
 
 Usage: python verify_fixture.py   (from any directory; exits non-zero if any check fails)
 Re-running the reference itself needs Docker and the pinned archive; see ../README.md.
@@ -92,6 +104,7 @@ def check_hashes(provenance: dict, failures: list[str]) -> None:
         ("expected_long_mapping_sha256", "expected_long_mapping"),
         ("expected_long_fft_sha256", "expected_long_fft"),
         ("expected_short_sha256", "expected_short"),
+        ("expected_partition_sha256", "expected_partition"),
     )
     for group, folder in groups:
         recorded = provenance[group]
@@ -111,6 +124,9 @@ def check_hashes(provenance: dict, failures: list[str]) -> None:
         ("probe_short", "patch", "patch_sha256"),
         ("probe_short", "harness", "harness_source_sha256"),
         ("probe_short", "window_file", "window_sha256"),
+        ("probe_partition", "patch", "patch_sha256"),
+        ("probe_partition", "harness", "harness_source_sha256"),
+        ("probe_partition", "mapping_file", "mapping_sha256"),
     ):
         entry = provenance[section]
         if sha256(FIXTURE / entry[key]) != entry[digest_key]:
@@ -478,6 +494,114 @@ def _check_partial_short_floor(case: dict, seen: dict, failures: list[str]) -> N
         failures.append(f"{where}: Nyquist bin 128 was altered or is not an active bin")
 
 
+# --- probe E: partition inputs (l3psy.c ll. 553-565) ---
+
+
+def accumulate_partitions(energy: np.ndarray, cw: list[float], mapping: list[int], cb_float32: bool = True):
+    """eb[b] += energy[j] in double and cb[b] += cw[j] * energy[j] with a float32 store, in bin order j = 0..512."""
+    eb = [0.0] * 63
+    cb = np.zeros(63, dtype=np.float32 if cb_float32 else np.float64)
+    for j in range(513):
+        b = mapping[j]
+        e = float(energy[j])
+        eb[b] = eb[b] + e
+        cb[b] = float(cb[b]) + cw[j] * e  # assignment into a float32 array rounds, as storing into FLOAT does
+    return np.array(eb), cb
+
+
+def _reference_stored_file(name: str) -> pathlib.Path:
+    for folder in ("expected_short", "expected_long_fft", "expected_long_mapping"):
+        if (FIXTURE / folder / f"{name}.jsonl").exists():
+            return FIXTURE / folder / f"{name}.jsonl"
+    raise FileNotFoundError(name)
+
+
+def check_partition(provenance: dict, failures: list[str]) -> None:
+    entry = provenance["probe_partition"]
+    for name, digest in entry["stripped_outputs_sha256"].items():
+        if sha256(_reference_stored_file(name)) != digest:
+            failures.append(f"probe E output for {name} without its fields is not the stored earlier capture")
+    record = json.loads((FIXTURE / entry["mapping_file"]).read_text())
+    mapping, long_lines = record["partition_l"], record["psy_data_44100_long_lines"]
+    short_lines = record["psy_data_44100_short_lines"]
+    assigned = [b for b, n in enumerate(long_lines) for _ in range(n)]
+    if (len(long_lines), sum(long_lines), len(short_lines)) != (63, 465, 39):
+        failures.append("psy_data 44.1 kHz line counts are not 63 long partitions over 465 bins and 39 short ones")
+    if mapping != assigned + [0] * (513 - len(assigned)):
+        failures.append("partition_l is not the long #lines in order followed by partition 0 for bins 465..512")
+    if [j for j, b in enumerate(mapping) if b == 0] != [0, *range(465, 513)]:
+        failures.append("partition 0 does not hold exactly DC and bins 465..512")
+    if record["numlines_at_partition_time"] != short_lines + long_lines[39:]:
+        failures.append("numlines at partition time is not the short table over entries 0..38, then the long table")
+
+    short = {(p.stem, r["call"]): r for p in sorted((FIXTURE / "expected_short").glob("*.jsonl")) for r in
+             records("expected_short", p.stem) if "cw" in r}  # fmt: skip
+    seen = {}
+    for path in sorted((FIXTURE / "expected_partition").glob("*.jsonl")):
+        name = path.stem
+        long_fft = (
+            {r["call"]: r for r in records("expected_long_fft", name) if "energy" in r}
+            if (FIXTURE / "expected_long_fft" / path.name).exists()
+            else {}
+        )
+        for r in records("expected_partition", name):
+            where = f"{name} call {r['call']}"
+            seen[(name, r["call"])] = r
+            energy = np.array(r["partition_energy"], dtype=np.float32)
+            d = short.get((name, r["call"]))
+            if d is None:
+                failures.append(f"{where}: probe E call is not a probe D call")
+                continue
+            if r["partition_cw"] != d["cw"]:
+                failures.append(f"{where}: partition cw is not probe D's cw")
+            if not np.array_equal(np.sqrt(energy[:6].astype(np.float64)).astype(np.float32), np.array(
+                d["long_history"]["r_new"], dtype=np.float32
+            )):  # fmt: skip
+                failures.append(f"{where}: partition energy bins 0..5 disagree with probe D's r_new")
+            if r["call"] in long_fft and not np.array_equal(
+                energy, np.array(long_fft[r["call"]]["energy"][:513], dtype=np.float32)
+            ):
+                failures.append(f"{where}: partition energy is not probe C's long energy")
+            eb, cb = accumulate_partitions(energy, r["partition_cw"], mapping)
+            if eb.tolist() != r["eb"] or not np.array_equal(cb, np.array(r["cb"], dtype=np.float32)):
+                failures.append(f"{where}: eb/cb do not reconstruct exactly from energy, cw and the mapping")
+    if {tuple(k) for k in entry["selected_calls"]} != set(seen):
+        failures.append(f"probe E selected calls {sorted(seen)} differ from provenance.json")
+
+    # sensitivity: a double-only cb and boundary shifts by one bin must be detectable on the captured calls
+    double_cb_differs = any(
+        not np.array_equal(
+            accumulate_partitions(np.array(r["partition_energy"], dtype=np.float32), r["partition_cw"], mapping, False)[
+                1
+            ].astype(np.float32),
+            np.array(r["cb"], dtype=np.float32),
+        )
+        for r in seen.values()
+    )
+    if not double_cb_differs:
+        failures.append("the capture cannot tell a float32 cb store from double accumulation")
+    for shift in (-1, 1):
+        shifted = [b for b, n in enumerate(long_lines) for _ in range(n)]
+        shifted = ([0] + shifted[:-1]) if shift == 1 else (shifted[1:] + [62])
+        shifted += [0] * (513 - len(shifted))
+        if all(accumulate_partitions(np.array(r["partition_energy"], dtype=np.float32), r["partition_cw"], shifted)[
+            0
+        ].tolist() == r["eb"] for r in seen.values()):  # fmt: skip
+            failures.append(f"a mapping with boundaries moved by {shift:+d} bin reproduces the captured eb")
+
+    silence = seen.get(("silence_12granules", 2))
+    floor = float(np.float32(FLOOR))
+    if silence is not None:
+        expected = [0.0] * 63
+        for j, b in enumerate(mapping):
+            expected[b] += floor if j < 512 else 0.0
+        if silence["eb"] != expected:
+            failures.append("silence eb is not #lines x float32(0.0005) per partition (Nyquist 0)")
+    impulse = seen.get(("impulse_32767_at1983", 3))
+    if impulse is None or abs(impulse["eb"][0] / impulse["eb"][1] - 49) > 49e-5:
+        failures.append("the flat 1983 impulse spectrum does not show 49 bins in partition 0")
+
+
 def main() -> int:
     provenance = json.loads((FIXTURE / "provenance.json").read_text(encoding="utf-8"))
     failures: list[str] = []
@@ -485,6 +609,7 @@ def main() -> int:
     check_relations(failures)
     check_long_fft(provenance, failures)
     check_short(provenance, failures)
+    check_partition(provenance, failures)
     for failure in failures:
         print("FAIL:", failure)
     if not failures:
