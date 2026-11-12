@@ -796,3 +796,44 @@
   - returning the shared window: the protection test fails;
   - a whole-array floor in either function: the memory test fails.
 - Checks (Windows 11): fixture verifier passed; spectrum, framing and architecture tests 374 passed; full suite 4,591 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; index tree unchanged. Left uncommitted.
+
+## 2026-11-12 — dist10 short-window FFTs and unpredictability reference capture (Task 3D, Claude Code)
+- Scope: reference evidence and contract revision 4 (§3.2). There is no Python short FFT or unpredictability code. Probes A–C, their outputs, framing and the long-window kernel are unchanged, and the staged index was left as found.
+- Probe D is observation-only and built on probe C (`make_probe_short.py`, `l3psy_subs_short_probe.diff`, `harness_short.c`, `run_short_in_container.sh`; outputs `expected_short/`, 557 KB). It records:
+  - the three short-FFT inputs;
+  - the short energy before and after the floor, and the phase, for bins 0–128;
+  - the long-predictor ages and `r`/`phi_sav` history for bins 0–5;
+  - `cw[0..512]` before partitioning, and the short window.
+
+  Selected calls are consecutive: silence 0–2, the 1983 impulse 2–5, the burst 3–5, and the 8192 masker 0–4.
+- Build: a fresh extraction of the pinned archive, with the probe B and C diffs regenerated identically; the same offline container. Two runs were byte-identical in outputs, window files and binary (`7ba06592…`). With the D fields removed, every line equals the stored probe C/B line, and the five inputs without D calls produced output byte-identical to the stored files.
+- Traced and confirmed:
+  - short blocks are `window_s[j]·savebuf[128(2+s)+j]`, i.e. stream [576k − 512 + 128s, +256);
+  - the short window is float32 of the half-sample-offset Hann formula;
+  - the short floor applies to bins 0–127 only;
+  - the long predictor has two float32 age slots, alternating 1/0/1 and 0/1/0, with `oldest` aliasing `new` (two calls back) and zero start;
+  - silence gives cw[0..5] = 1, 1/3, 0 at calls 0–2, and the tone gives 1 at call 0;
+  - lines 6–205 use short bin (j + 2)/4, predicting block 1 from 2·r(block 0) − r(block 2) within the call, in groups of four;
+  - lines 206–512 are 0.4;
+  - `cw` reconstructs in double from the captured float32 inputs within 2.2e−16.
+
+  The zero-denominator `cw = 0` branch is unreachable: the denominator is at least √float32(0.0005) because of the floor.
+- Verifier: new checks on the hashes, downstream identity, short window, exact block offsets, short FFT and floor, history identities, `r_new` against the long energy where probe C overlaps, the `cw` reconstruction and expected evidence. Wrong rules swapped into the verifier were all detected:
+  - offsets: 20–23 failures;
+  - bin mapping: 7;
+  - predictor block order: 7;
+  - history order: 23–38.
+- Uncovered: the unreachable branch; a partially floored active short block (every captured block is either silent or above the floor); stereo. Left uncommitted for Codex review.
+
+## 2026-11-12 — Task 3D extension: partially floored short-window case (Claude Code)
+- Scope: fixture and verifier only. No new input was needed, and there are no code changes.
+- Case: the existing quiet 2 kHz target `target_2k_a10.24`, call 6, short block 2 floors exactly short bins 42 and 86 of 0–127. The floored pre-floor energies are at most 1.267e−4 (≤ 0.25 × 0.0005), every other bin 0–127 has at least 2.055e−2 (≥ 41 × 0.0005), and Nyquist has 42.41. Float32 rounding near the cutoff therefore cannot decide the mask. Bin 42 also lies in the predictor range (k = 2–51). A full scan of the two quiet tones found further single-bin partial floors in `masker_1k_a81.92` (calls 1, 4 and 7); these were not added.
+- Capture: the only change is the probe D selection (`target_2k_a10.24` call 6) in `run_short_in_container.sh`. From a fresh extraction, the probe B, C and D diffs were regenerated identically, and two runs were byte-identical with the same harness binary (`7ba06592…`). All previously stored `expected_short` files, the remaining unselected-output hashes and `window_short.json` were reproduced byte for byte. The new file's lines, with the D fields removed, equal `expected_long_fft/target_2k_a10.24.jsonl`.
+- Verifier: the generic short checks now also cover the new call. A new explicit check, driven by provenance `partial_floor_case`, checks:
+  - the floored set is exactly {42, 86} in an active block;
+  - floored bins are float32(0.0005) with phase 0;
+  - all other bins, Nyquist included, keep their pre-floor energy;
+  - the energies lie clearly on both sides of the cutoff (≤ 0.5× and ≥ 2×).
+
+  Injected errors were each detected: a non-float32 floor value, a kept phase, an extra floored bin, a floored Nyquist and an altered unfloored energy. The unchanged record passes.
+- Checks: reported in the handoff. Left uncommitted.

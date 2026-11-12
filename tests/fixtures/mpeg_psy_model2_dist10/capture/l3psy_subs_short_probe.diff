@@ -1,0 +1,62 @@
+--- l3psy_fft_probe.c
++++ l3psy_short_probe.c
+@@ -37,2 +37,10 @@
+ int probe_c_fft_armed;
++/* --- short-FFT / unpredictability probe D (fixture capture only; copies values, writes no encoder variable) --- */
++FLOAT probe_d_window_s[BLKSIZE_s], probe_d_wsamp_s[3][BLKSIZE_s], probe_d_prefloor_s[3][BLKSIZE_s];
++FLOAT probe_d_energy_s[3][BLKSIZE_s], probe_d_phi_s[3][BLKSIZE_s];
++FLOAT probe_d_r_old[6], probe_d_r_oldest[6], probe_d_phi_old[6], probe_d_phi_oldest[6];
++FLOAT probe_d_r_new[6], probe_d_phi_new[6];
++double probe_d_cw[HBLKSIZE];
++int probe_d_age_new, probe_d_age_old, probe_d_age_oldest;
++FLOAT *probe_d_short_target; int probe_d_short_armed;
+ #include <assert.h>
+@@ -496,2 +504,7 @@
+ 	    probe_c_energy[probe_c_n] = energy[probe_c_n]; probe_c_phi[probe_c_n] = phi[probe_c_n]; } }
++	{ int probe_d_n; for ( probe_d_n = 0; probe_d_n < 6; probe_d_n++ ) { /* probe D: history before the loop */
++	    probe_d_r_old[probe_d_n] = r[chn][old][probe_d_n]; probe_d_r_oldest[probe_d_n] = r[chn][oldest][probe_d_n];
++	    probe_d_phi_old[probe_d_n] = phi_sav[chn][old][probe_d_n];
++	    probe_d_phi_oldest[probe_d_n] = phi_sav[chn][oldest][probe_d_n]; }
++	  probe_d_age_new = new; probe_d_age_old = old; probe_d_age_oldest = oldest; }
+ 	for ( j = 0; j < 6; j++ )
+@@ -518,2 +531,4 @@
+ **********************************************************************/ 
++	{ int probe_d_n; for ( probe_d_n = 0; probe_d_n < 6; probe_d_n++ ) { /* probe D: history as stored */
++	    probe_d_r_new[probe_d_n] = r[chn][new][probe_d_n]; probe_d_phi_new[probe_d_n] = phi_sav[chn][new][probe_d_n]; } }
+ 	for ( sblock = 0; sblock < 3; sblock++ )
+@@ -526,3 +541,7 @@
+ 	    
++	    { int probe_d_n; for ( probe_d_n = 0; probe_d_n < BLKSIZE_s; probe_d_n++ ) /* probe D */
++		probe_d_wsamp_s[sblock][probe_d_n] = wsamp_r[probe_d_n]; }
++	    probe_d_short_target = probe_d_prefloor_s[sblock]; probe_d_short_armed = 1; /* probe D */
+ 	    fft( wsamp_r, wsamp_i, &energy_s[sblock][0], &phi_s[sblock][0], 256 );
++	    probe_d_short_armed = 0; /* probe D */
+         }
+@@ -557,2 +576,8 @@
+ 	    cw[j] = 0.4;
++	{ int probe_d_n, probe_d_b; /* probe D: cw before partitioning, short spectra, short window */
++	  for ( probe_d_n = 0; probe_d_n < HBLKSIZE; probe_d_n++ ) probe_d_cw[probe_d_n] = cw[probe_d_n];
++	  for ( probe_d_b = 0; probe_d_b < 3; probe_d_b++ ) for ( probe_d_n = 0; probe_d_n < BLKSIZE_s; probe_d_n++ ) {
++	    probe_d_energy_s[probe_d_b][probe_d_n] = energy_s[probe_d_b][probe_d_n];
++	    probe_d_phi_s[probe_d_b][probe_d_n] = phi_s[probe_d_b][probe_d_n]; }
++	  for ( probe_d_n = 0; probe_d_n < BLKSIZE_s; probe_d_n++ ) probe_d_window_s[probe_d_n] = window_s[probe_d_n]; }
+ 	
+--- subs_fft_probe.c
++++ subs_short_probe.c
+@@ -27,2 +27,4 @@
+ FLOAT probe_c_energy_prefloor[BLKSIZE];
++/* --- short-FFT probe D (fixture capture only; copies values, writes no encoder variable) --- */
++extern int probe_d_short_armed; extern FLOAT *probe_d_short_target;
+ 
+@@ -133,2 +135,3 @@
+     if (probe_c_fft_armed) probe_c_energy_prefloor[i] = energy[i]; /* probe C, before floor */
++    if (probe_d_short_armed) probe_d_short_target[i] = energy[i]; /* probe D, before floor */
+     if(energy[i] <= 0.0005){phi[i] = 0;energy[i] = 0.0005;}
+@@ -137,2 +140,3 @@
+     if (probe_c_fft_armed) probe_c_energy_prefloor[ip] = energy[ip]; /* probe C */
++    if (probe_d_short_armed) probe_d_short_target[ip] = energy[ip]; /* probe D */
+     if(energy[ip] == 0)phi[ip] = 0;
+@@ -160,2 +164,3 @@
+        if (probe_c_fft_armed) { FLOAT probe_c_t = probe_c_energy_prefloor[j]; /* probe C: same reorder */ probe_c_energy_prefloor[j] = probe_c_energy_prefloor[i]; probe_c_energy_prefloor[i] = probe_c_t; }
++       if (probe_d_short_armed) { FLOAT probe_d_t = probe_d_short_target[j]; /* probe D: same reorder */ probe_d_short_target[j] = probe_d_short_target[i]; probe_d_short_target[i] = probe_d_t; }
+     }

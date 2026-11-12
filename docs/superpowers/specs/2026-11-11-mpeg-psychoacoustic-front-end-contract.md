@@ -6,6 +6,8 @@ Revision 2 supersedes these statements of revision 1: the thesis is now read (§
 
 Revision 3 (2026-11-12, Task 3B) adds the long-window FFT reference capture (§3.1). It corrects revision 2's statement that the floor applies to "the even index of each pair only". That index is the FFT's pre-reorder position. In natural bin order the floor can only hit bins 0–511; it never hits Nyquist (512) or bins 513–1023. The capture confirms this.
 
+Revision 4 (2026-11-12, Task 3D) adds the short-window FFT and unpredictability reference capture (§3.2). It traces the three short-block offsets, the short-bin mapping of lines 6–205, the two-slot long-predictor history and the constant lines, and records that the zero-denominator branch is unreachable.
+
 Labels: **[T]** defined by Ronan's thesis; **[S]** defined by the dist10 source, our chosen backend; **[R]** observed in the reference run; **[P]** project choice proposed for review; **[U]** unresolved.
 
 ## 1. Source trace
@@ -156,6 +158,58 @@ Each selected call records `windowed_samples`, `energy_prefloor`, `energy` and `
 The floor value itself cannot be told apart at the capture's precision. A float64 pipeline that stores 0.0005 differs from float32(0.0005) by 2.4e−11, which vanishes when the result is rounded to float32. The contract specifies float32(0.0005) because that is what dist10 stores.
 
 Limits: nine calls of synthetic signals at one rate. The tolerances above describe the float32 reference against a float64 FFT; they are not yet the tolerance for a reimplementation (§4). The short FFTs, tonality, spreading and thresholds are not covered by probe C.
+
+### 3.2 Short-window FFTs and unpredictability (probe D, Task 3D, 2026-11-12)
+
+**Probe D** is a fourth observation-only patch, built on probe C (`capture/l3psy_subs_short_probe.diff` from `capture/make_probe_short.py`, `capture/harness_short.c`, `capture/run_short_in_container.sh`; outputs `expected_short/`). One binary prints probe B's fields and probe C's arrays exactly as before, and appends for the selected calls:
+- `short_windowed_samples`: the three short-FFT inputs, 3 × 256;
+- `short_energy_prefloor`, `short_energy` and `short_phi`: 3 × 129, natural short bins 0–128;
+- `long_history`: the ages `new`/`old`/`oldest`; `r` and `phi_sav` for bins 0–5, `old` and `oldest` before the long predictor loop, `new` after it;
+- `cw[0..512]`: before partitioning.
+
+The short Hann coefficients are in `expected_short/window_short.json`. Probe D writes only its own variables. The short-FFT pre-floor copy is armed only by the three short-block calls.
+
+Selected calls are consecutive, so the history can be checked call to call:
+
+| Input | Calls | Purpose |
+| --- | --- | --- |
+| `silence_12granules` | 0–2 | zero, one-call and established history |
+| `impulse_32767_at1983` | 2–5 | short-block offsets |
+| `burst_1k_a8192_onset2000` | 3–5 | onset; calls 4–5 take the short-block path |
+| `masker_1k_a8192` | 0–4 | sustained tone: start-up and established predictor |
+| `target_2k_a10.24` | 6 | partially floored active short block (block 2, bins 42 and 86), added in the Task 3D extension |
+
+**Traced source behaviour, checked against the capture:**
+
+| Item | Source behaviour (l3psy.c, original lines) | Precision | Capture evidence |
+| --- | --- | --- | --- |
+| Short window | `window_s[j] = 0.5·(1 − cos(2·PI·(j − 0.5)/256))`, j = 0…255 (l. 184), the same half-sample offset as the long window | float32 | Equal to float32 of the formula |
+| Short blocks | Block s = 0, 1, 2: `wsamp_r[j] = window_s[j] * savebuf[128·(2 + s) + j]` (ll. 506–512). In stream samples, call k's blocks are **[576k − 512 + 128s, +256)**: [576k−512, 576k−256), [576k−384, 576k−128), [576k−256, 576k). All three lie inside the long window [576k − 768, 576k + 256); block 1 has the same centre (576k − 256) | float32 product | Exact for every block. The 1983 impulse appears at positions 191 and 63 of call 4's blocks 0 and 1, not in block 2 (which starts at 2048), and in no block of call 3, although call 3's long window holds it |
+| Short FFT | The same `fft()` as the long FFT with N = 256: unnormalised forward transform, natural bins after an 8-bit bit reversal. Floor `energy ≤ 0.0005` → float32(0.0005), phase 0, on even pre-reorder positions = **natural short bins 0–127**; bin 128 (Nyquist) and 129–255 (mirrors) are never floored. Odd positions with zero energy get phase 0 | float32 storage | Pre-floor energy within 1.7e−7 of each block's peak against a float64 FFT; phase on strong unfloored bins within 1e−4 rad; floor set exact: silent blocks floor 0–127 and leave 128 at 0 |
+| Long predictor, bins 0–5 | `r[chn][age][j]` and `phi_sav[chn][age][j]` are float32 with **two** age slots. Each call (chn 0) first flips `new`/`old`/`oldest`: from the initial 0/1/0, call k has new = oldest = 1 − k mod 2 and old = k mod 2 (ll. 447–459). `oldest` aliases the `new` slot, read before it is overwritten, so it holds the value from two calls back. `r' = 2·r_old − r_oldest`, `φ' = 2·φ_old − φ_oldest`; `r_new = sqrt(energy[j])` of the floored long energy, `φ_new = phi[j]` (ll. 484–501). History starts at zero (ll. 186–189) | r, φ float32; r', φ', cw double | Ages alternate as stated. Each call's `old`/`oldest` equal the values stored by calls k − 1 / k − 2, and zero before call 0. `r_new` = float32(√energy) and `φ_new` = long phase where probe C captured the call. Silence gives cw[0..5] = 1, 1/3 and 0 at calls 0, 1 and 2 (r' = 0, then 2r, then r); the tone gives cw[0..5] = 1 at call 0 |
+| Short predictor, lines 6–205 | For j = 6, 10, …, 202: short bin `k = (j + 2)/4` (integer division; k = 2…51). `r' = 2·sqrt(e_s[0][k]) − sqrt(e_s[2][k])`, `φ' = 2·φ_s[0][k] − φ_s[2][k]`, compared with block 1: `r2 = sqrt(e_s[1][k])`, `φ2 = φ_s[1][k]`. `cw[j] = cw[j+1] = cw[j+2] = cw[j+3]` (ll. 521–539). This is an **interpolation within the current call** (blocks 0 and 2 around block 1), using no history from earlier calls | double from float32 inputs | Constant groups of four; reconstruction within 1e−12 (at most 2.2e−16 observed); silent short blocks give cw = 0 |
+| Constant lines | `cw[j] = 0.4` for j = 206…512 (ll. 545–546) | double | Exact on every call |
+| Unpredictability formula | `cw = sqrt((r_new cos φ_new − r' cos φ')² + (r_new sin φ_new − r' sin φ')²) / (r_new + |r'|)`. **Zero-denominator branch:** `if (temp3 != 0) … else cw = 0` in both predictors | double | Never taken. The denominator is at least `r_new` (or `r2`), which is at least √float32(0.0005) ≈ 0.02236, because bins 0–5 and short bins 2–51 are always floored when weaker. The branch is unreachable for any input; the capture's smallest denominator is positive |
+| Use | `cw` feeds `cb[tp] += cw[j]·energy[j]` in the partition step (ll. 553–565), out of scope here. `cw` is computed on every call, before the block-switching decision, so short-path calls (burst 4–5, tone 0–1) have it too | — | Captured on those calls |
+
+**Downstream unchanged.** With probe D fields removed, every line of the four stored inputs equals the stored probe C or probe B line. For the five inputs without probe D calls, the whole output was byte-identical to the stored probe C or B file.
+
+**Which comparison detects which error.** I swapped each traced rule in the verifier for a wrong variant; the listed checks fail:
+
+| Wrong rule | Detected by |
+| --- | --- |
+| Short-block offset (+1 sample, blocks from the window start `128s`, blocks on the new granule `128(2+s) + 256`) | Exact windowed-sample comparison against the raw input (20–23 failures); the impulse positions 191/63 |
+| Short bin mapping (`j/4`, `(j+2)/4 + 1`) | `cw` reconstruction on the 7 calls with active short blocks |
+| Short predictor block order (2·b2 − b0 for b1; extrapolating b2 from b0, b1) | `cw` reconstruction (7 calls) |
+| History order (old/oldest swapped, both from the previous call, one call late) | Stored-history identities (`old` = call k − 1, `oldest` = call k − 2, zero before call 0) and `cw` (8–10 calls); the silence sequence 1, 1/3, 0 |
+
+**Left uncovered:**
+- The zero-denominator branch, which is unreachable, as argued above.
+- ~~A partially floored active short block~~: covered since the Task 3D extension (2026-11-12). The quiet 2 kHz target (`target_2k_a10.24`) call 6, block 2 floors exactly short bins 42 and 86, at pre-floor energy ≤ 1.27e−4, while all other bins 0–127 have ≥ 2.06e−2. Floored bins take float32(0.0005) with phase 0, and Nyquist is untouched.
+- Stereo, where the ages flip only on chn 0. Outside profile v1.
+- History through more than one short-path call in a row, after an established tone; the burst covers onset only.
+
+Limits: 15 calls, one rate, synthetic signals. The tolerances describe the float32 reference, not a reimplementation tolerance.
 
 ## 4. Remaining implementation decisions and open questions
 
