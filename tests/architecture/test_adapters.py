@@ -200,6 +200,10 @@ ANALYSIS_EDGES = {
     "unpredictability": (set(), {"numpy"}),
     # dist10 long partition accumulator eb/cb (front-end contract §3.3, Task 3H, 2026-11-12): stdlib and NumPy only.
     "partitions": (set(), {"numpy"}),
+    # dist10 spreading and tonality input (front-end contract §3.4, Task 3J, 2026-11-12): stdlib and NumPy only.
+    "spreading": (set(), {"numpy"}),
+    # dist10 partition thresholds (front-end contract §3.5, Task 3L, 2026-11-16): stdlib and NumPy only.
+    "thresholds": (set(), {"numpy"}),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -313,6 +317,8 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
         "short_spectrum",
         "unpredictability",
         "partitions",
+        "spreading",
+        "thresholds",
     ],
 )
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
@@ -325,7 +331,17 @@ def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(m
 
 
 @pytest.mark.parametrize(
-    "module", ["masking", "framing", "long_spectrum", "short_spectrum", "unpredictability", "partitions"]
+    "module",
+    [
+        "masking",
+        "framing",
+        "long_spectrum",
+        "short_spectrum",
+        "unpredictability",
+        "partitions",
+        "spreading",
+        "thresholds",
+    ],
 )
 def test_masking_kernel_and_framing_load_no_other_project_module_soundfile_or_scipy(module):  # G4
     loaded = _loaded_after(f"import {ANALYSIS}.{module}")

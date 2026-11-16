@@ -10,6 +10,10 @@ Revision 4 (2026-11-12, Task 3D) adds the short-window FFT and unpredictability 
 
 Revision 5 (2026-11-12, Task 3G) adds the partition-input capture (§3.3). Bins 465–512 are not covered by the 44.1 kHz long table and accumulate into partition 0, and the short table overwrites `numlines[0..38]`.
 
+Revision 6 (2026-11-12, Task 3I) adds the spreading and tonality-input capture (§3.4). It covers the matrix orientation (row = output), the float32 `ecb` store, the 0.01 lower clamp, and the zero-energy guard, which is unreachable.
+
+Revision 7 (2026-11-16, Task 3K) adds the partition-threshold capture (§3.5): the `minval`, `qthr` and `norm` tables, the tonality factor and its clamp, the SNR, the float32 `nb`, the two-call pre-echo history, and `thr` before band mapping. It makes the §2.2 "Threshold" and "Temporal state" rows precise: the history stores the unbounded float32 `nb`, not `thr`, and is updated on short-path calls too.
+
 Labels: **[T]** defined by Ronan's thesis; **[S]** defined by the dist10 source, our chosen backend; **[R]** observed in the reference run; **[P]** project choice proposed for review; **[U]** unresolved.
 
 ## 1. Source trace
@@ -282,6 +286,153 @@ Largest absolute errors: eb 2.6e5 (burst, call 4, p19) and cb 6.4e5 (burst, call
 - **Retained case:** burst call 4, partition 50 is kept as the named case for the threshold comparison. The tolerance remains open.
 - **Overflow:** finite inputs whose `cb` sum exceeds the float32 range are rejected with `ValueError`, naming the first call and partition, whatever the caller's NumPy error policy. The reference's double-to-float store is undefined behaviour in C for out-of-range values. `eb` cannot overflow, since 513 × float32 max is about 1.7e41. Profile v1 int16 inputs stay far below the float32 limit: the largest possible windowed-FFT energy is about 1.1e15.
 
+### 3.4 Spreading and tonality inputs `ecb`, `ctb` and `ctb/ecb` (probe F, Task 3I, 2026-11-12)
+
+**Probe F** is a sixth observation-only patch, built on probe E (`capture/l3psy_spreading_probe.diff` from `capture/make_probe_spreading.py`, `capture/harness_spreading.c`, `capture/run_spreading_in_container.sh`; outputs `expected_spreading/`). It records:
+- after the long convolution: `ecb`, `ctb` and the matrix `s3_l` (stored once, in `s3_44100.json`, with the `psy_data` `bval` strings);
+- in the tonality loop: whether the division ran, `ctb/ecb`, the value after the lower clamp, and the value passed to `tbb`.
+
+Calls: all eight probe E calls, which include silence and start-up, the impulse and burst onsets (burst call 4), the established tone and the quiet tone. Only the F fields are stored (65 KB with the matrix). Every input's output, with the E and F fields removed, was byte-identical to its stored D, C or B file, and the E fields equalled `expected_partition`.
+
+**Traced source behaviour, checked against the capture:**
+
+| Item | Source behaviour (l3psy.c, original lines) | Precision | Capture evidence |
+| --- | --- | --- | --- |
+| Matrix | `L3para_read` (ll. 819–838), over `part_max = cbmax = 63` at 44.1 kHz:<br>`tempx = (bval[i] − bval[j]) × (3.0 if j ≥ i else 1.5)`;<br>`x = 8(t² − 2t)` with `t = tempx − 0.5` when 0.5 ≤ tempx ≤ 2.5, else 0;<br>`tempx += 0.474`;<br>`tempy = 15.811389 + 7.5·tempx − 17.5·√(1 + tempx²)`;<br>**`s3_l[i][j] = 0` if `tempy ≤ −60`** (the cutoff tests `tempy` alone, before `x` is added), else `exp((x + tempy)·LN_TO_LOG10)`, with the truncated `LN_TO_LOG10 = 0.2302585093` (common.h l. 199). `bval` comes from `psy_data`. **Row i is the output (centre) partition, column j the input (masker) partition.** Spreading toward lower output partitions (j > i) is twice as steep as toward higher ones | double | 3,114 of 3,969 entries are zero, with the same zero pattern as the formula on the `psy_data` `bval`; the values agree within 1.8e−16 relative (libm); the diagonal is about 1; the matrix is not symmetric |
+| Convolution | `ecb[b] = ctb[b] = 0`; for b = 0…62, k = 0…62: `ecb[b] += s3_l[b][k]·eb[k]; ctb[b] += s3_l[b][k]·cb[k]` (ll. 573–586) | `ecb` is a `FLOAT*` work array: double product and sum, **stored as float32 after every term**. `ctb` is `static double` | Reconstruction from the probe E `eb`/`cb` is exact on 8 of 8 calls. A transposed matrix fails on every call, and a double-only `ecb` fails |
+| Ratio | `if (ecb[b] != 0.0) { cbb = ctb[b]/ecb[b]; if (cbb < 0.01) cbb = 0.01; cbb = log(cbb); } else cbb = 0.0;` then `tbb = −0.299 − 0.43·cbb`, clamped to [0, 1] (ll. 591–602). There is a lower clamp only; no upper clamp | double | Ratio and clamp are exact. The tonality input is log of the clamped ratio within 5.6e−17. The clamp is active in silence and start-up (43–46 partitions per call, where `cw` = 0 makes `ctb` 0) and in impulse call 3 |
+| Zero-energy guard | The division is skipped when `ecb[b] == 0` | — | Never taken: 63 of 63 divided in every call. Floored energies make every `eb > 0`, and `s3_l[b][b] ≈ 1`, so `ecb > 0`. Unreachable for profile v1 input |
+
+**Comparisons** (`capture/compare_spreading_inputs.py`):
+
+| Run | Quantity | Worst | Where (input, call, output partition) |
+| --- | --- | --- | --- |
+| A: captured `eb`/`cb` → captured `s3_l` | all | exact (8/8) | — |
+| B: Python partition sums → `s3_l` | `ecb`, relative | 1.69e−3 | masker, call 3, p43 |
+| B | `ctb`, relative | 2.75e−3 | masker, call 3, p50 |
+| B | ratio, relative | 2.80e−3 | masker, call 3, p50 |
+| B | tonality input, absolute | 2.80e−3 | masker, call 3, p50 |
+| B at the retained case | `ctb` and ratio, relative | 1.13e−3 | burst, call 4, p50 |
+
+**Isolating the retained case** (burst call 4): replacing only input partition 50's captured `cb` (257745504) with the Python value (257107760, −0.247%):
+- `ecb` is unchanged.
+- `ctb` changes in exactly the output partitions 47–62, the nonzero rows of `s3_l` column 50.
+- The largest changes are in p50 (1.08e−3 relative in `ctb` and ratio; ratio 0.525961 → 0.525396), p51 (6.1e−4) and p49 (1.6e−4). Everything else is below 6e−5.
+- The tonality input moves by the same amounts in absolute terms. In `tbb = −0.299 − 0.43·cbb` that is a change of up to 4.6e−4. Its effect on SNR and the threshold is for the threshold comparison.
+
+The end-to-end tolerance remains open until then. The largest Python-chain differences in this stage come from the established tone (masker, call 3), not from the burst case.
+
+**Implementation (Task 3J, 2026-11-12).** `adapters.dsp_analysis.spreading`:
+- `dist10_spreading_matrix()` builds `s3[output][input]` from the embedded 44.1 kHz `bval` of the pinned `psy_data` (SHA-256 cited in the module). It keeps the asymmetric ×3.0/×1.5 slopes, the cutoff on `tempy` before the bump, and `LN_TO_LOG10 = 0.2302585093`.
+- `dist10_spread_tonality_input(eb, cb)` returns float32 `ecb` (rounded after every term, ascending input partition), float64 `ctb`, the `divided` mask, the unclamped `ratio`, and `log_ratio`: log of the ratio clamped below at 0.01, or 0.0 where the division is skipped.
+- Calls are processed in chunks, and an `ecb` beyond float32 is rejected with `ValueError`.
+
+Against Probe F:
+- **Matrix:** same zero pattern; 3,902 of 3,969 entries bit-identical; the rest within 1.8e−16 relative (libm).
+- **With the captured matrix:** exact on all 8 calls (log ratio within 1e−15).
+- **With the generated matrix:** `ecb` bit-identical (0 ulp), `ctb` within 4.2e−16 relative, log ratio within 4.4e−16.
+- **Full Python chain** (report only): worst ratio 2.80e−3 relative and log ratio 2.80e−3 absolute, both at the retained masker call 3, p50. At the retained burst call 4, p50: ratio 1.13e−3, log ratio 1.13e−3.
+
+Overflow and the caller's NumPy policy:
+- `ecb` beyond float32, and `ctb` or `ctb/ecb` beyond float64, are rejected with `ValueError` naming the first call and output partition.
+- With the dist10 matrix (largest entry about 1.0), `ctb` and the ratio cannot overflow: `ctb` is at most 63 × float32 max ≈ 2.1e40, and the ratio at most that over the smallest nonzero float32 `ecb`, about 1.5e85. Only a supplied matrix with large entries reaches these checks.
+- Underflow in the float32 `ecb` store (rounding to a subnormal or to zero, as the reference does) is not an error. So a raising NumPy policy no longer changes the result.
+
+Testing the cutoff after adding the bump would give the same 44.1 kHz matrix. The bump is nonzero only where `tempy` lies between about −1.3 and −16.8, far from −60. So the order is fixed by the source, not by the fixture.
+
+### 3.5 Tonality, SNR and partition thresholds (probe G, Task 3K, 2026-11-16)
+
+**Probe G** is a seventh observation-only patch, built on probe F (`capture/l3psy_threshold_probe.diff` from `capture/make_probe_threshold.py`, `capture/harness_threshold.c`, `capture/run_threshold_in_container.sh`; outputs `expected_threshold/`). It records:
+- in the tonality loop: `tbb` after `tbb = −0.299 − 0.43·cbb` (raw), after the [0, 1] clamp, and `SNR_l[b]`;
+- after the `nb` loop: `nb`, the history `nb_1`/`nb_2` as read, and the tables `minval`, `qthr_l` and `norm_l` (stored once, in `tables_44100.json`, with the `psy_data` strings);
+- in the pre-echo loop: `temp_1` and `thr[b]`, the final partition threshold before band mapping; after the loop, the history as stored.
+
+It also repeats probe F's `ecb` and tonality input on its own calls, so every call can be reconstructed. Calls: every call of the 1 kHz tone at 8192 from start-up to established history (calls 0–5; call 3 is the named masker case) and every call of the burst (calls 0–3 silent, call 4 the onset and named case, 5–7). Only the G fields are stored (144 KB). Every input's output, with the E, F and G fields removed, was byte-identical to its stored D, C or B file. The E and F fields equalled `expected_partition` and `expected_spreading`, and the window, mapping and matrix files equalled the stored ones. So the earlier probes are unchanged.
+
+**Tables.** `L3para_read` reads the 44.1 kHz long block of `tables/psy_data` (block `freq = 44100.0 partition = 62`, rows No = 0…62) with `fscanf("… minval=%lf qthr=%lf norm=%lf bval=%lf")` into `static double` arrays (l. 784). Nothing changes them afterwards: the only other assignment to `minval` (ll. 845 and 927) sits under `#ifdef DEBUGP`, which the build does not define. So the values are the doubles nearest the decimal text:
+- `minval` (dB): 1 decimal; 24.5 (p0–4), 20 (p5–11), 18 (p12–14), 12 (p15), 6 (p16–17), 3 (p18–21), 0 (p22–62);
+- `qthr` (threshold in quiet, unnormalised FFT energy of int16 counts): 3 decimals, 0.009 to 660.124;
+- `norm`: 3 decimals, 0.475 to 0.951.
+
+The captured arrays equal `float()` of the `psy_data` strings exactly. They are table data from the ISO distribution; their derivation is not traced here [U].
+
+**Traced source behaviour, checked against the capture** (l3psy.c, original lines; `maximum(x, y) = x > y ? x : y`, `minimum(x, y) = x < y ? x : y`, ll. 33–34):
+
+| Step | Source | Precision | Capture evidence |
+| --- | --- | --- | --- |
+| 1. Raw tonality | `tbb = −0.299 − 0.43·cbb`, with `cbb` the tonality input of §3.4 (l. 602) | double | exact, 882 of 882 partition values (14 calls × 63) |
+| 2. Clamp | `tbb = minimum(1.0, maximum(0.0, tbb))` (l. 603) | double | exact. Both ends and the interior occur: `tbb = 1` on 45–48 partitions in the silent burst windows and at tone call 0; `tbb = 0` on 49–55 partitions in the other active calls |
+| 3. SNR | `SNR_l[b] = maximum(minval[b], 29·tbb + 6·(1 − tbb))` (l. 604; TMN = 29, NMT = 6 dB) | double | exact. `minval` decides 5–16 partitions per call, the tonality term the rest. Where `tbb = 0` and `minval = 6` (p16–17) the two are equal, and the macro returns the tonality term, which has the same value |
+| 4. Unbounded threshold | `nb[b] = ecb[b]·norm_l[b]·exp(−SNR_l[b]·LN_TO_LOG10)` (l. 608), with the truncated `LN_TO_LOG10 = 0.2302585093` | `ecb` float32 widened, double product, **`nb` stored as float32** (`FLOAT*` work array) | reconstructed with Python's `math.exp`: bit-identical on 882 of 882 |
+| 5. Pre-echo limit | `temp_1 = minimum(nb[b], minimum(2.0·nb_1[chn][b], 16.0·nb_2[chn][b]))` (l. 613) | double | exact |
+| 6. Final threshold | `thr[b] = maximum(qthr_l[b], temp_1)` (l. 614). The quiet floor is applied **after** the limit | double | exact |
+| 7. History | read in steps 5–6, then `nb_2[chn][b] = nb_1[chn][b]; nb_1[chn][b] = nb[b]` (ll. 615–616), inside the same loop after `thr[b]`. **The stored value is the unbounded float32 `nb`**, not `temp_1` or `thr`. `nb_1`/`nb_2` are `static double` (l. 75) with static zero initialisation and no reset | double holding a float32 value | `nb_1`/`nb_2` read at call 0 are all zero; at call k they equal the `nb` of calls k − 1 and k − 2; each call stores `(nb, previous nb_1)` |
+
+The history update sits before the block-switching branch (l. 632), so it runs on short-path calls too (tone calls 0–1 and burst calls 4–5, `pe ≥ 1800`); the capture confirms this. With zero history, `temp_1 = minimum(nb, 0) = 0` at calls 0 and 1, so `thr = qthr` there whatever the signal. At call 0 the inner `minimum(0, 0)` is a tie of equal values.
+
+**Which term sets `thr`** (strict winner per partition; no ties occurred):
+
+| Input | Calls | qthr | nb | 2·nb₋₁ | 16·nb₋₂ |
+| --- | --- | --- | --- | --- | --- |
+| tone | 0–1 (zero history) | 63 | — | — | — |
+| tone | 2 | 1 | 50 | — | 12 |
+| tone | 3 | 1 | 62 | — | — |
+| tone | 4–5 | 3 | 60 | — | — |
+| burst | 0–3 (silent window) | 63 | — | — | — |
+| burst | 4 (onset) and 5 | 63 | — | — | — |
+| burst | 6 | 2 | 59 | 2 | — |
+| burst | 7 | 1 | 59 | 3 | — |
+
+At burst calls 4–5 the history comes from silent windows, so the pre-echo limit falls far below `qthr` and threshold in quiet decides every partition (as §3 reported at band level). Burst call 5 and tone call 5 analyse the same window (the burst is the tone with zeros before sample 2000): `ecb`, `nb` and everything up to step 4 are identical, but `thr` differs, set by `qthr` for the burst and by `nb` for the tone. This is the history effect isolated by the data.
+
+**Named cases** (both partition 50: `minval` 0, `qthr` 0.18, `norm` 0.489):
+- Masker (tone) call 3: tonality input −0.5459, raw `tbb` −0.0643, clamped to 0, SNR 6 dB, `nb` = 58.46. Pre-echo terms 2·nb₋₁ = 115.5 and 16·nb₋₂ = 7.26e6, so `thr = nb = 58.46`.
+- Burst call 4: tonality input −0.6425, raw `tbb` −0.0227, clamped to 0, SNR 6 dB, `nb` = 1.386e8. The silent history gives 2·nb₋₁ = 1.26e−5 and 16·nb₋₂ = 1.00e−4, so `temp_1` = 1.26e−5 and `thr = qthr = 0.18`.
+
+**Wrong variants the verifier rejects** (`verify_fixture.py` §7). Each changes `thr` on at least one captured call:
+
+| Variant | Calls where `thr` changes (partitions) |
+| --- | --- |
+| Swapped history ages (2·nb₋₂, 16·nb₋₁) | tone call 2 (14); burst calls 6 (4) and 7 (6) |
+| Final `thr` stored in history (replayed from call 0) | from tone call 2 and burst call 4 on (53–63 per call) |
+| Quiet floor before the limit (`min(max(qthr, nb), 2·nb₋₁, 16·nb₋₂)`) | 63 on every call with zero or silent history (tone 0–1, burst 0–5); 0–2 once history is established (tone 2–5, burst 6–7) |
+
+The verifier also rejects stored records whose history ages are swapped, whose stored history is `thr`, or whose `thr` follows the floor-first order. The evidence for swapped ages is thin: only three calls, because `16·nb₋₂` and `2·nb₋₁` each decide only at the end of start-up.
+
+**Comparisons** (`capture/compare_threshold_inputs.py`):
+- **A: captured inputs and history → thresholds:** exact on all 14 calls (steps 1–3 and 5–7 exact; `nb` bit-identical).
+- **B: Python chain** (spectra, `cw`, partition sums, spreading) on every call from 0, through the same arithmetic, with the history replayed from zero using the Python `nb`. Worst residuals:
+
+| Stage | Worst | Where (input, call, partition) |
+| --- | --- | --- |
+| `ecb`, relative | 2.81e−3 | burst, call 5, p40 |
+| tonality input, absolute | 2.80e−3 | tone, call 3, p50 |
+| raw `tbb`, absolute | 1.20e−3 | tone, call 3, p50 |
+| clamped `tbb`, absolute | 5.80e−4 | burst, call 5, p47 |
+| SNR, absolute (dB) | 1.33e−2 | burst, call 5, p47 |
+| `nb`, relative | 3.32e−3 | burst, call 5, p47 |
+| `temp_1` and `thr`, relative | 3.32e−3 | tone, call 5, p47 (the same window as burst call 5) |
+
+- **Decisions:** no difference changes which term sets `thr`, which side of the clamp `tbb` falls on, or whether `minval` or the tonality term sets the SNR (0 of 882 each).
+- **Margins in the captures:** `thr`'s winner leads its runner-up by at least 1.28e−2 relative (tone, call 2, p62), about 4 times the worst `thr` residual. The raw `tbb` comes within 4.6e−4 of a clamp end (burst, call 4, p33, raw 4.59e−4), less than the worst raw-`tbb` residual (1.2e−3) elsewhere. At that partition the Python residual is only 1.3e−6, so the side does not change here. A clamp-side flip is therefore possible on other inputs.
+- **Named cases:** at tone call 3, p50 the tonality input moves by 2.80e−3, but `tbb` is clamped to 0 on both sides, so the SNR is identical and `thr` moves only with `ecb` (4.78e−5 relative). At burst call 4, p50 (the Task 3G `cb` case) the tonality input moves by 1.13e−3; the clamp absorbs it again, `nb` moves by 1.15e−7 relative, and `thr = qthr` exactly on both sides. The partition-50 difference therefore does not reach the threshold at either named case.
+
+**Not covered by the captures:**
+- the zero-energy branch (`ecb = 0`, so `cbb = 0`, raw `tbb` = −0.299 and SNR from 6 dB): unreachable for profile v1 (§3.4);
+- ties between `qthr` and `temp_1`, and between nonzero pre-echo terms (`nb` = 2·nb₋₁, 2·nb₋₁ = 16·nb₋₂): none occur; the macros' tie rules return equal values, so a tie cannot change `thr`, only the label of the deciding term;
+- the short-block threshold path (l. 693, which uses `norm_l` and `+SNR_s`): out of scope for the long-block contract;
+- stereo history (`chn = 1`) and other rates.
+
+The end-to-end tolerance stays open until the effect on band thresholds (`thm`) and masking margins is measured. The Python threshold kernel and the scale-factor-band mapping are later tasks.
+
+**Implementation (Task 3L, 2026-11-16).** `adapters.dsp_analysis.thresholds.dist10_partition_thresholds(ecb, log_ratio)` takes float32 `ecb` and float64 `log_ratio` (`SpreadTonalityInput.ecb` and `.log_ratio`), `(calls, 63)` in call order, for one clip. It returns `PartitionThresholds`: `tonality` (clamped `tbb`), `snr`, float32 `nb`, `pre_echo_limit` and `thr`, all read-only. This supersedes the sentence above for the kernel; band mapping remains a later task.
+- The `minval`, `qthr` and `norm` tables are embedded as the decimal values of the pinned `psy_data`, with its SHA-256 cited.
+- The operation order, dist10's macro tie rules, the float32 `nb` store and the quiet floor after the limit follow steps 1–7.
+- The history starts at zero for every invocation and every call is processed. Because `nb` does not depend on the history, the limit is formed from `nb` shifted by one and two calls. Calls are processed in chunks of 1,024, with the last two `nb` rows carried across chunks.
+- No value can overflow (`nb ≤ ecb`), and float32 underflow is not an error under any NumPy policy.
+
+Against Probe G, with each clip replayed from call 0 using the captured spread inputs, every output is exact on all 14 calls, `nb` included (NumPy `exp`). With the full Python chain (report only), the worst `thr` difference is 3.32e−3 relative (tone, call 5, p47) and no quiet-floor decision changes. At the named cases, `thr` is 58.4603 → 58.4631 (4.78e−5) at tone call 3, p50 and 0.18 on both sides at burst call 4, p50.
+
 ## 4. Remaining implementation decisions and open questions
 
 1. **Block-switching option** (a) or (b) (§2.2). Under (b), decide whether onset frames whose threshold is capped by pre-echo control need their own label in the evidence.
@@ -305,6 +456,8 @@ Task 3E (2026-11-12) applies the same strategy to the short window (`adapters.ds
 - float32 pre-floor energy, with the floor on bins 0–127 and phase zeroed there.
 
 Against all 48 Probe D blocks: the energy error is at most 1.93e−7 of the block's peak, and the phase error at most 3.74e−5 rad on 1,021 strong unfloored bins. The floor masks are identical, including exactly bins 42 and 86 in the quiet target's call 6, block 2. The nearest captured nonzero energy is 3.7e−4 below the cutoff.
+
+Task 3K (2026-11-16, §3.5): through the partition thresholds, the Python chain's worst residual is 3.3e−3 relative in `thr`, and no decision changes (deciding term, clamp side, SNR term). Two decisions are sensitive in principle: the raw `tbb` can lie closer to a clamp end (4.6e−4 observed) than the chain's worst raw-`tbb` residual (1.2e−3), and the `thr` winner's lead (1.3e−2 at least) is only about 4 times the worst `thr` residual. A tolerance therefore cannot be stated per stage alone; it waits for the band-threshold and margin comparison [U].
 6. **Deferred profile items**: float-WAV conversion, stereo, 48 kHz (needs a fixture), multi-masker sums (sum domain and clipping).
 7. **Time aggregation** of per-frame margins: the thesis states none; Eq. 7.13 is per band. Out of scope here.
 8. Retry the SoundSoftware author repository; if it is reachable, compare its threshold and band code with dist10.

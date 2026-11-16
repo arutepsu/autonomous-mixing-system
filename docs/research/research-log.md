@@ -994,3 +994,130 @@
 
   Before the fix, 4 failed. Removing the rejection or the local guard fails the same 4 (restored, SHA-256 checked).
 - Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — dist10 spreading and tonality inputs: trace, reference capture and comparisons (Task 3I, Claude Code)
+- Start: clean tree at `4d1d806` (Task 3H committed), index tree `e6d9b134…`. Scope: reference evidence and contract revision 6 (§3.4). There is no production spreading, tonality or threshold code, and the earlier fixtures and kernels are unchanged.
+- Trace (l3psy.c):
+  - `s3_l[i][j]` is built in double from the `psy_data` `bval`; i is the output partition and j the input. The slope factor is ×3.0 for j ≥ i and ×1.5 otherwise; the bump is `8(t² − 2t)`; the zero cutoff is `tempy ≤ −60`, tested before the bump is added; the value uses `exp(·×0.2302585093)`.
+  - Convolution: b outer, k inner, ascending. `ecb` is a `FLOAT*`, stored as float32 per term; `ctb` is double.
+  - Ratio: `ctb/ecb` only if `ecb != 0`, then a lower clamp of 0.01 (no upper clamp), then `log`. Otherwise 0.
+- Probe F: observation-only, built on probe E (`make_probe_spreading.py`, `l3psy_spreading_probe.diff`, `harness_spreading.c`, `run_spreading_in_container.sh`). Calls: all 8 probe E calls.
+  - Build: a fresh extraction, with the B–E diffs regenerated identically; two runs byte-identical (binary `4c9c692d…`).
+  - Downstream: every output, with the E and F fields removed, was byte-identical to the stored D/C/B file, and the E fields equalled `expected_partition`. Only the F fields and the matrix (with the `bval` strings) are stored, 65 KB.
+- Findings:
+  - 3,114 of 3,969 matrix entries are zero, with the formula's zero pattern and values within 1.8e−16; the matrix is not symmetric.
+  - Direct reconstruction of `ecb`/`ctb`/ratio/clamp is exact on 8 of 8 calls, and the log within 5.6e−17.
+  - The division ran in all 63 partitions of every call: the zero-energy guard is unreachable for floored input. The clamp is active in silence and start-up and in impulse call 3.
+- Python chain (`capture/compare_spreading_inputs.py`): worst relative residuals are `ecb` 1.69e−3 (masker, call 3, p43), `ctb` 2.75e−3, ratio 2.80e−3 and tonality input 2.80e−3 absolute (masker, call 3, p50). At the retained case (burst, call 4, p50), `ctb` and ratio are 1.13e−3. Replacing only the burst's input `cb[50]` (−0.247%) leaves `ecb` unchanged and changes `ctb` exactly in outputs 47–62 (the nonzero rows of column 50): p50 by 1.08e−3, p51 by 6.1e−4, p49 by 1.6e−4, the rest below 6e−5. So the 0.247% `cb` difference reaches the ratio attenuated to at most 0.108%. The resulting `tbb` change is up to 4.6e−4, to be assessed in the threshold comparison.
+- Verifier: new checks on the hashes, stripped outputs, matrix zero pattern, values and asymmetry, exact convolution, transposed and double-`ecb` detectability, ratio, clamp and log, the never-skipped division and the exercised clamp. Injected errors were each detected:
+
+  | Injected error | Failures |
+  | --- | --- |
+  | Transposed matrix | 26 |
+  | Entry below the cutoff made nonzero | 13 |
+  | Clamp omitted | 3 |
+  | Skip flag | 1 |
+  | `ctb` changed by 1e−12 | 1 |
+
+  The unchanged copy passes.
+- Open: the end-to-end tolerance, pending the threshold comparison. Left uncommitted for Codex review.
+
+## 2026-11-12 — dist10 spreading and tonality input (Task 3J, Claude Code)
+- Start: HEAD `4d1d806` with Task 3I's evidence uncommitted (preserved, untouched), index tree `e6d9b134…`. Scope: spreading and the log ratio only. There is no `tbb`/SNR, threshold history or band mapping.
+- Change: new `adapters.dsp_analysis.spreading` (standard library and NumPy) with:
+  - `DIST10_LONG_BVAL_44100`: the 63 `bval` of the pinned `psy_data`, embedded with its SHA-256;
+  - `dist10_spreading_matrix()`: a fresh read-only copy, rows = output partition;
+  - `dist10_spread_tonality_input(eb, cb, *, spreading_matrix=None) -> SpreadTonalityInput(ecb float32, ctb float64, divided, ratio, log_ratio)`.
+
+  Inputs are ascending, `ecb` is rounded to float32 per term, zero matrix entries are skipped (they add exactly 0), and the ratio is formed only where `ecb != 0`, with a 0.01 lower clamp before the log and 0.0 where skipped. Calls are processed in chunks of 1,024, validation included. A float32 `ecb` overflow is rejected (`eb` sums can reach about 1.7e41). Inputs are validated: plain arrays, float64 `eb`, float32 `cb`, float64 (63, 63) matrix, finite and non-negative. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_spreading.py` was written first; red evidence is a collection error and 4 architecture failures. Coverage:
+  - the generated matrix against Probe F: zero pattern, ≤ 1e−15 relative, at least 3,900 bit-identical entries (observed 3,902);
+  - asymmetry and row orientation, the cutoff rule per entry, and matrix protection;
+  - exact `ecb`/`ctb`/`divided`/ratio on all 8 calls with the captured matrix;
+  - with the generated matrix, `ecb` within one ulp (observed 0), `ctb` within 1e−14 (observed 4.2e−16) and log within 1e−14 (observed 4.4e−16);
+  - the captured silence clamp (46 partitions), single-partition orientation, order-sensitive float32 `ecb`, the zero-energy skip branch, clamp before the log, no upper clamp, read-only outputs, empty input, chunk boundaries, memory growth, overflow and validation.
+
+  The full-chain report retains burst (4, 50): ratio 1.130e−3 and log 1.131e−3. It also retains masker (3, 50), which is the chain's worst case: ratio 2.797e−3 and log 2.801e−3.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 48:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Slopes swapped | 11 |
+  | Exact ln(10)/10 | 10 |
+  | Transposed matrix | 19 |
+  | `ecb` in float64 | 18 |
+  | Descending order | 17 |
+  | No clamp | 10 |
+  | Clamp after the log | 18 |
+  | Skip gives log(0.01) | 1 |
+  | No overflow rejection | 1 |
+  | Cutoff after the bump | 0 (equivalent at 44.1 kHz: the bump region has `tempy` between −1.3 and −16.8, far from −60; documented) |
+- Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: reject ctb and ratio overflow in the spreading kernel (Codex review of Task 3J)
+- Finding: `ctb` (float64) and `ctb/ecb` could become `inf` without an error: `ctb` silently, because the existing overflow suppression covered it, and the ratio with a divide warning. Reproduced with a supplied matrix: `s3[7][3] = 1e300` with `cb` = float32 max for `ctb`, and `s3[0][0] = 1e230` with `eb[0] = 1e−275` (a subnormal `ecb`) for the ratio. With the dist10 matrix (largest entry ≈ 1.0) neither can overflow: `ctb` ≤ 63 × float32 max ≈ 2.1e40, ratio ≤ ≈ 1.5e85.
+- Fix: after each chunk, `ecb`, `ctb` and the ratio are checked for `inf`, and a `ValueError` names the first call and output partition. The division now runs inside the local error-state guard.
+- Further finding, from the new finite-limit regression: under a caller's `errstate(under="raise")`, the float32 `ecb` store raised `FloatingPointError` when a tiny term rounded to a subnormal or to zero, which is the reference's own float32 behaviour. The guard now also ignores underflow. The formula, accumulation order and Probe F results are unchanged.
+- The full chain (framing → spectra → `cw` → partitions → spreading) also runs under `errstate(all="raise")` without error on all nine fixture inputs and on random and sparse int16 windows.
+- Regressions:
+  - `ctb` overflow (call 0, partition 7);
+  - ratio overflow (call 0, partition 0);
+  - first affected call in a later chunk (call 1200);
+  - finite limits with the dist10 matrix under a raising policy.
+
+  Before the fix, 4 failed. Removing the `ctb` check, the ratio check or the underflow guard fails 2, 1 and 2 tests respectively (restored, SHA-256 checked).
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — Correction: check spreading accumulators before dividing (Codex review of Task 3J)
+- Finding: the `ecb`/`ctb` overflow checks ran after `ctb/ecb`. When both overflowed, the division computed `inf/inf`. That gave an "invalid value encountered in divide" warning under the default policy, and a `FloatingPointError` instead of `ValueError` under `errstate(all="raise")`. Reproduced with `s3[4][2] = 1e300`, `eb[2] = 1e300` and `cb[2]` = float32 max.
+- Fix: `ecb` and `ctb` are checked for `inf` right after accumulation and before the division. The division runs only on finite accumulators, and its quotient is then checked for overflow. The underflow handling, formula, order and Probe F results are unchanged.
+- Regressions: both accumulators overflowing gives `ValueError` (naming `ecb`, partition 4) under a raising policy, and with warnings as errors no division warning is emitted. An additional ordering guard (`ctb` overflow with finite `ecb`, partition 9) already passed. Before the fix, 2 failed; moving the checks back after the division fails the same 2 (restored, SHA-256 checked).
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-16 — dist10 tonality and partition-threshold reference capture (Task 3K, Claude Code)
+- Start: branch `feature/budget`, HEAD `4d1d806`, with the Task 3I/3J work and its Codex corrections uncommitted (6 modified and 8 untracked paths; preserved and not edited except where this task appends to the same documents and verifier). The pre-existing fixture README edit had converted that file to CRLF (HEAD is LF); left as found.
+- Trace (l3psy.c, original lines; contract §3.5): `L3para_read` reads the 44.1 kHz long `psy_data` columns `minval` (1 decimal, dB), `qthr` (3 decimals, unnormalised FFT energy) and `norm` (3 decimals) with `%lf` into static double arrays (l. 784); the only other `minval` assignments are under `#ifdef DEBUGP`. Per partition: `tbb = −0.299 − 0.43·cbb` → clamp to [0, 1] → `SNR = maximum(minval, 29 tbb + 6 (1 − tbb))` → `nb = ecb·norm·exp(−SNR·0.2302585093)` stored as float32 (`FLOAT*`) → `temp_1 = minimum(nb, minimum(2 nb_1, 16 nb_2))` → `thr = maximum(qthr, temp_1)`, all in double except `nb`. The history is read in the same loop iteration before `nb_2 = nb_1; nb_1 = nb`; it stores the unbounded float32 `nb`, starts from static zero, and is updated before the block-switching branch, so also on short-path calls.
+- Capture: probe G (`capture/make_probe_threshold.py` → `l3psy_threshold_probe.diff`, SHA-256 `28bc6723…`; `harness_threshold.c` `ef05a93c…`; `run_threshold_in_container.sh` `097560af…`), observation only, built on probe F. Fresh extraction of the pinned archive (SHA-256 `79f8321b…` checked); the B–F diffs regenerated byte-identically. Command: `docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2…cd525e sh /w/run_threshold_in_container.sh`, run twice: outputs, window, mapping, matrix and tables files and the binary (`608b4648…`; patched source `50a22ae3…`) byte-identical. Calls: tone 8192 calls 0–5 and burst calls 0–7 (14 calls). Stored: `expected_threshold/masker_1k_a8192.jsonl` (`a8cf8e81…`), `burst_1k_a8192_onset2000.jsonl` (`ff257f84…`), `tables_44100.json` (`105d620d…`). With the E, F and G fields removed every output equals the stored D/C/B file; the E/F fields equal the stored captures. So the earlier probe outputs are unchanged.
+- Comparison A (captured inputs and history): raw tonality, clamp, SNR, `temp_1` and `thr` exact; `nb` bit-identical with Python's `math.exp` on 882 of 882 partition values.
+- Comparison B (Python chain from call 0, history replayed from zero; `compare_threshold_inputs.py`): worst `ecb` 2.81e−3 rel (burst 5, p40), tonality input 2.80e−3 abs and raw `tbb` 1.20e−3 abs (tone 3, p50), clamped `tbb` 5.8e−4 and SNR 1.33e−2 dB (burst 5, p47), `nb`, `temp_1` and `thr` 3.32e−3 rel (p47 of the shared tone/burst call-5 window). No change of the deciding term, clamp side or SNR term (0 of 882 each).
+- Named cases: tone call 3, p50: `thr = nb` = 58.46, Python moves it only with `ecb` (4.8e−5), because `tbb` is clamped to 0 on both sides. Burst call 4, p50: `thr = qthr` = 0.18 on both sides (silent history makes the pre-echo limit 1.26e−5); the Task 3G `cb` difference is absorbed by the clamp and the quiet floor.
+- History effect, observed: burst call 5 and tone call 5 analyse the same window, with identical values up to `nb`, but `thr` is set by `qthr` for the burst and by `nb` for the tone.
+- Verifier (`verify_fixture.py` §7): exact reconstruction, history ages and stored value, table parse, coverage of every deciding term (`qthr`, `nb`, 2·nb₋₁, 16·nb₋₂), both SNR terms and both clamp ends, and three wrong variants: swapped ages (changes `thr` on tone call 2 and burst calls 6–7 only), `thr` stored in history (53–63 partitions per call from tone call 2 / burst call 4), quiet floor before the limit (63 partitions on every zero- or silent-history call). Tampering the stored call-3 records (swapped read ages, `thr` stored, floor-first `thr`) gives 6, 2 and 2 failures. Verifier passes on the stored fixture.
+- Uncovered: the zero-energy branch (unreachable, §3.4); ties `qthr = temp_1` and between nonzero pre-echo terms (none occur; the macros return equal values, so only the label would change); the short-block threshold path; stereo; other rates.
+- Open questions: the end-to-end tolerance stays open until the effect on band thresholds and margins is measured. The nearest clamp end (4.6e−4) is closer than the chain's worst raw-`tbb` residual (1.2e−3, elsewhere), and the `thr` winner's lead (≥ 1.28e−2) is about 4 times the worst `thr` residual, so other inputs could flip a decision. The derivation of the `psy_data` `minval`/`qthr`/`norm` values is not traced. The Python threshold kernel and band mapping are later tasks.
+- Left uncommitted for Codex review.
+
+## 2026-11-16 — dist10 partition-threshold kernel (Task 3L, Claude Code)
+- Start: the Task 3I–3K work uncommitted (preserved). Scope: partition thresholds only; no band mapping, short-block thresholds or perceptual entropy.
+- Change: new `adapters.dsp_analysis.thresholds` (standard library and NumPy) with the embedded 44.1 kHz `DIST10_LONG_MINVAL_44100`, `DIST10_LONG_QTHR_44100` and `DIST10_LONG_NORM_44100` (pinned `psy_data`, SHA-256 cited) and `dist10_partition_thresholds(ecb, log_ratio) -> PartitionThresholds(tonality, snr, nb float32, pre_echo_limit, thr)`. It follows contract §3.5 steps 1–7, with zero history per invocation and every call processed (start-up and short-path calls included). The history stores the float32 `nb`, the quiet floor comes after the limit, and processing is chunked at 1,024 calls with the last two `nb` rows carried across chunks. Since `nb` is independent of the history, the limit is formed from `nb` shifted by one and two calls. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_thresholds.py` was written first; red evidence is a collection error (module missing). Coverage (45 tests):
+  - the tables against Probe G and the `psy_data` strings;
+  - exact replay of all 14 captured calls from call 0 with the captured `ecb` and tonality input, including the short-path calls (tone 0–1, burst 4–5) and every deciding term;
+  - the history read against the captured history, and the shared tone/burst call-5 window with different `thr`;
+  - start-up calls, age order (both orders discriminated), `nb` rather than `thr` stored, quiet-floor precedence, the float32 `nb`, the clamp and SNR floor;
+  - a scalar transcription on random input; independent clips; chunk boundaries at 1,024 and 2,048; bounded memory; underflow under a raising policy; the largest `ecb`; read-only outputs; empty input; validation.
+- Full-chain report (no tolerance): worst `thr`, `nb` and limit 3.32e−3 relative, SNR 1.33e−2 dB and tonality 5.8e−4 absolute (tone/burst call 5, p47); 0 quiet-floor decisions changed. Named: tone (3, 50) `thr` 58.4603 → 58.4631 (4.78e−5); burst (4, 50) 0.18 on both sides.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 45:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Swapped history ages | 9 |
+  | Floored `max(qthr, nb)` stored in history | 9 |
+  | `thr` stored in history (sequential rewrite) | 16 |
+  | Quiet floor before the limit | 11 |
+  | History reset at each chunk | 1 |
+  | Non-zero start history | 8 |
+  | `nb` kept in float64 | 16 |
+  | Exact ln(10)/10 | 1 (constant test only: on the captured calls the change never moves a float32 `nb`) |
+  | No tonality clamp | 19 |
+  | No `minval` floor | 18 |
+  | `rpelev` 2 → 4 | 8 |
+  | One `qthr` value off by 0.001 | 11 |
+  | `qthr` floor omitted | 22 |
+- Open: the end-to-end tolerance, pending the band-threshold and margin comparison (next increment: scale-factor-band mapping). Left uncommitted for Codex review.
+
+## 2026-11-16 — Correction: normalise ndarray subclasses in the threshold kernel (Codex review of Task 3L)
+- Finding: `dist10_partition_thresholds` validated and computed on the caller's ndarray subclass. An `np.matrix` failed with a matrix-multiplication shape error, because `*` is matmul for it. A subclass with overridden indexing passed NaN through validation and was computed from its hidden slice values, so the result was silently wrong (reproduced before the fix). The sibling kernels (framing, spectra, unpredictability, partitions, spreading, masking) already normalise with `np.asarray`.
+- Fix: after masked arrays are rejected, inputs are read as plain ndarray views (`np.asarray`, no copy), so validation and computation see the same data with ndarray semantics. The formula, float32 `nb` rounding, history and Probe G results are unchanged.
+- Regression: `np.matrix` inputs give results identical to plain arrays, as plain ndarray outputs. A slice-hiding subclass carrying NaN, −inf or a negative `ecb` is rejected with the matching `ValueError`. Before the fix the test failed. The test filters only numpy's `np.matrix` PendingDeprecationWarning, which its own construction triggers.
+- Checks: fixture verifier passes. Threshold and architecture tests with warnings as errors: 272 passed. Full suite: 4916 passed, 4 skipped. Ruff check and scoped format are clean. Left uncommitted.

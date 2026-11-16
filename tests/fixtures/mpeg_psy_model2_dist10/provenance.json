@@ -53,6 +53,17 @@
     "silence_12granules.jsonl": "3c9fdf2c4953116330c9eb2c43ce1b735c55f9532912bbd907f495980007ec1f",
     "target_2k_a10.24.jsonl": "eb2173b2bf63b0ab74e5fbfc1a8bda0704ff4159ab1ccd23b7138a87571f5fa9"
   },
+  "expected_spreading_sha256": {
+    "burst_1k_a8192_onset2000.jsonl": "c839b514b847932a2a8e8c81d8d280dc2676c35f8eb018b449ba4d065e4101ca",
+    "impulse_32767_at1983.jsonl": "f2529bca37f652d5305d2c3c15f63e0bb4d0ce39475c5b769ec079fcdd2f6f32",
+    "masker_1k_a8192.jsonl": "7c406ca9081aca9455a77cf99810ac14b88c9291654f1bf455cdb65c7e6e1203",
+    "silence_12granules.jsonl": "b8cd1ce4203d1d7cb5ba6ade9cb5498a87d55dba81df3b76ef0cc9015ff490d3",
+    "target_2k_a10.24.jsonl": "4a2e02a1c3c898568d64d7ba36c46a3354f4fbe2fbc220820dc8668c8b578765"
+  },
+  "expected_threshold_sha256": {
+    "burst_1k_a8192_onset2000.jsonl": "ff257f8416eb26823e5a33bff93a1eb28879a9d2fcb02d12fb1c60943edc6ac1",
+    "masker_1k_a8192.jsonl": "a8cf8e817a52348f2d3d37ebb7b73cbb7d92982db683bc58754c770ff7894378"
+  },
   "inputs_sha256": {
     "burst_1k_a8192_onset2000.raw": "d3e3d02ca88d26cdd40c8edea7a01e77b741100da1d735b10c72fdc50ed8d863",
     "impulse_32767_at1983.raw": "64c32f1218973155f643675f9e7a036d271bfd3d183706523538084a970b6aac",
@@ -336,6 +347,176 @@
     "window_file": "expected_short/window_short.json",
     "window_note": "written by every one of the nine runs; all nine files were byte-identical, one copy is kept",
     "window_sha256": "7d9d1a2eec6233458b4164b0d63708918433bb510d2427b6b454ae0c61bf4853"
+  },
+  "probe_spreading": {
+    "base": "l3psy_partition_probe.c and subs_short_probe.c (probe E)",
+    "build_command": "gcc -g -DUNIX -o harness_spreading harness_spreading.c l3psy_spreading_probe.c subs_short_probe.c common.c psy.c tonal.c portableio.c ieeefloat.c -lm",
+    "captured": "2026-11-12, fresh extraction; probe B, C, D and E diffs regenerated identically",
+    "description": "after the long convolution ecb[b] += s3_l[b][k] * eb[k]; ctb[b] += s3_l[b][k] * cb[k], copies ecb (FLOAT), ctb (double) and s3_l[63][63] (double); in the tonality loop, records whether ctb[b]/ecb[b] was divided, the ratio, the value after the 0.01 lower clamp and the value passed to tbb; writes only probe globals",
+    "generator": "capture/make_probe_spreading.py",
+    "generator_sha256": "4fbc6090b3cbcabf578302d8bdfd2f6cfae2a7cb3d485e97bd667b32988186dc",
+    "harness": "capture/harness_spreading.c",
+    "harness_binary_sha256": "4c9c692df076a5bb7cf047817c995718ac5f2e52d8cc7e4b5ea92a3c042ede41",
+    "harness_source_sha256": "0ec403b12ef72f0fa18d2698be7b2a4e1f6a06596c13e109d8309a37a5548ce2",
+    "label": "probe F, spreading probe (expected_spreading/); observation-only, built on probe E",
+    "matrix_file": "expected_spreading/s3_44100.json",
+    "matrix_note": "s3_l as captured (all nine runs wrote byte-identical matrices; row = output partition, column = input), with the 44.1 kHz long bval strings of the pinned tables/psy_data",
+    "matrix_sha256": "5b3deee9cd52d46549ec445f857b61d99ff905228ce1db74dbc296b9d587c572",
+    "patch": "capture/l3psy_spreading_probe.diff",
+    "patch_sha256": "5d8324337c1930f64b1a6b00b52ca4b09fe0f430a05b7e5b1f9a4b754edb9415",
+    "patched_source_sha256": {
+      "l3psy_spreading_probe.c": "22c7aff6b36917f06a6ac857a71eb14d13511fc659e323e47513bdfb903ce8f7",
+      "subs_short_probe.c": "72b6701c61477467772218d1e1693892f756b926b9ce09a07ab28012a6c74389"
+    },
+    "repeatability": "two container runs byte-identical (all outputs, window, mapping and matrix files, the binary)",
+    "run_command": "docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e sh /w/run_spreading_in_container.sh",
+    "run_script": "capture/run_spreading_in_container.sh",
+    "run_script_sha256": "9fa423dcbc10fadb97293a6212cdddf96be349960526b1f6b5496e690ed803ed",
+    "selected_calls": [
+      [
+        "burst_1k_a8192_onset2000",
+        4
+      ],
+      [
+        "impulse_32767_at1983",
+        3
+      ],
+      [
+        "impulse_32767_at1983",
+        4
+      ],
+      [
+        "masker_1k_a8192",
+        3
+      ],
+      [
+        "silence_12granules",
+        0
+      ],
+      [
+        "silence_12granules",
+        1
+      ],
+      [
+        "silence_12granules",
+        2
+      ],
+      [
+        "target_2k_a10.24",
+        6
+      ]
+    ],
+    "stdout_filter": "only lines starting with '{' kept (drops the absthr index status line)",
+    "stored_fields": "per probe F call only: call, ecb, ctb, ratio_divided, ratio, ratio_clamped, tonality_input",
+    "stripped_outputs_note": "full probe F output with probe E and F fields removed; equals the stored probe D, C or B file of each input; the probe E fields were checked equal to expected_partition at capture time",
+    "stripped_outputs_sha256": {
+      "burst_1k_a8192_onset2000": "d5d6be9f7f719996a15de8e2725bd5d1f9c028659bf4f27f2e354da731173d5e",
+      "impulse_32767_at1983": "983b37a2636450b69c88733b5a81ba5b9c96bd463dee3718590d7d23b0b3f5c0",
+      "impulse_32767_at1984": "756fc76798436089385903985aeafc5c6949b08655fda3fde33c8f97efc5f5cb",
+      "masker_1k_a81.92": "eb547ec9f3e217b1d78b1f74c9e166cb29e2420a072b9a76bb804b69cdd52361",
+      "masker_1k_a8192": "74c33bb54b18d0675ac553afc5fc69dd9663db1a0a55cb5d2c99bfac5a08fc7e",
+      "silence_12granules": "3c9fdf2c4953116330c9eb2c43ce1b735c55f9532912bbd907f495980007ec1f",
+      "target_2k_a10.24": "eb2173b2bf63b0ab74e5fbfc1a8bda0704ff4159ab1ccd23b7138a87571f5fa9",
+      "target_2k_a1024": "77be8e17cdaf4c961e65d8ace6ebecd4cc05bdea675f5ebc797d9ce87f784d24",
+      "target_2k_a1024_trunc6536": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
+    }
+  },
+  "probe_threshold": {
+    "base": "l3psy_spreading_probe.c and subs_short_probe.c (probe F)",
+    "build_command": "gcc -g -DUNIX -o harness_threshold harness_threshold.c l3psy_threshold_probe.c subs_short_probe.c common.c psy.c tonal.c portableio.c ieeefloat.c -lm",
+    "captured": "2026-11-16, fresh extraction of the pinned archive; probe B, C, D, E and F diffs regenerated identically",
+    "description": "in the long tonality loop, copies tbb after tbb = -0.299 - 0.43 cbb (raw), after the [0, 1] clamp, and SNR_l[b] after maximum(minval, 29 tbb + 6 (1 - tbb)); after nb[b] = ecb[b] norm_l[b] exp(-SNR_l[b] LN_TO_LOG10), copies nb (FLOAT), the history nb_1[chn]/nb_2[chn] as read and the tables minval/qthr_l/norm_l; in the pre-echo loop, temp_1 and thr[b] (before band mapping); after the loop, the history as stored; writes only probe globals",
+    "generator": "capture/make_probe_threshold.py",
+    "generator_sha256": "c496e286c21b8ea948a8b128e658a22b0110d9916f4e12836e1e98975a998bab",
+    "harness": "capture/harness_threshold.c",
+    "harness_binary_sha256": "608b4648f53a8841d1c328026e0310d0c6b2e0724797014067d4c7060884130b",
+    "harness_source_sha256": "ef05a93cc8d874030046b7af6177a68b7c28beecb1ddaab9ca1f0e346614ecce",
+    "label": "probe G, threshold probe (expected_threshold/); observation-only, built on probe F",
+    "patch": "capture/l3psy_threshold_probe.diff",
+    "patch_sha256": "28bc67238bce9613c074acc0ae4de6acb9d825b6ddf0c4f0e470862d3270a6cf",
+    "patched_source_sha256": {
+      "l3psy_threshold_probe.c": "50a22ae39d0870ac26128ba13cfbe0b0f610ff9198e1cc13aa7d00c8b9c19fa1",
+      "subs_short_probe.c": "72b6701c61477467772218d1e1693892f756b926b9ce09a07ab28012a6c74389"
+    },
+    "repeatability": "two container runs byte-identical (all outputs, window, mapping, matrix and tables files, the binary)",
+    "run_command": "docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e sh /w/run_threshold_in_container.sh",
+    "run_script": "capture/run_threshold_in_container.sh",
+    "run_script_sha256": "097560af0876baaa8b736a8b81c56732f21ac003589127c7746884777f0a8809",
+    "selected_calls": [
+      [
+        "burst_1k_a8192_onset2000",
+        0
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        1
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        2
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        3
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        4
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        5
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        6
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        7
+      ],
+      [
+        "masker_1k_a8192",
+        0
+      ],
+      [
+        "masker_1k_a8192",
+        1
+      ],
+      [
+        "masker_1k_a8192",
+        2
+      ],
+      [
+        "masker_1k_a8192",
+        3
+      ],
+      [
+        "masker_1k_a8192",
+        4
+      ],
+      [
+        "masker_1k_a8192",
+        5
+      ]
+    ],
+    "stdout_filter": "only lines starting with '{' kept (drops the absthr index status line)",
+    "stored_fields": "per probe G call only: call, ecb (FLOAT), tonality_input, tonality_raw, tonality, snr, nb (FLOAT), nb_1_before, nb_2_before, pre_echo_limit, thr, nb_1_after, nb_2_after (harness names g_ecb and g_tonality_input stored as ecb and tonality_input)",
+    "stripped_outputs_note": "full probe G output with probe E, F and G fields removed; equals the stored probe D, C or B file of each input; the probe E and F fields were checked equal to expected_partition and expected_spreading, and the window_s, mapping and s3 files equal to the stored ones, at capture time",
+    "stripped_outputs_sha256": {
+      "burst_1k_a8192_onset2000": "d5d6be9f7f719996a15de8e2725bd5d1f9c028659bf4f27f2e354da731173d5e",
+      "impulse_32767_at1983": "983b37a2636450b69c88733b5a81ba5b9c96bd463dee3718590d7d23b0b3f5c0",
+      "impulse_32767_at1984": "756fc76798436089385903985aeafc5c6949b08655fda3fde33c8f97efc5f5cb",
+      "masker_1k_a81.92": "eb547ec9f3e217b1d78b1f74c9e166cb29e2420a072b9a76bb804b69cdd52361",
+      "masker_1k_a8192": "74c33bb54b18d0675ac553afc5fc69dd9663db1a0a55cb5d2c99bfac5a08fc7e",
+      "silence_12granules": "3c9fdf2c4953116330c9eb2c43ce1b735c55f9532912bbd907f495980007ec1f",
+      "target_2k_a10.24": "eb2173b2bf63b0ab74e5fbfc1a8bda0704ff4159ab1ccd23b7138a87571f5fa9",
+      "target_2k_a1024": "77be8e17cdaf4c961e65d8ace6ebecd4cc05bdea675f5ebc797d9ce87f784d24",
+      "target_2k_a1024_trunc6536": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
+    },
+    "tables_file": "expected_threshold/tables_44100.json",
+    "tables_note": "minval, qthr_l and norm_l as captured after L3para_read (all nine runs wrote byte-identical tables files), with the 44.1 kHz long minval, qthr and norm strings of the pinned tables/psy_data",
+    "tables_sha256": "105d620d1d9e7d9a8b4b8b1cda695b2820f3027dd24297fcd0a0daf0b7e6a10a"
   },
   "reference": {
     "archive_bytes": 229420,

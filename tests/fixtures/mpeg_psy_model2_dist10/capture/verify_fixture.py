@@ -57,6 +57,32 @@
      a double-only cb and every mapping with all partition boundaries moved by one bin fail to reproduce them;
    - silence: eb[b] = #lines(b) x float32(0.0005) (partition 0: 48 floored bins, Nyquist 0); the 1983 impulse at
      call 3 (flat spectrum) gives eb[0] / eb[1] = 49 within 1e-5.
+6. Probe F, spreading and tonality inputs (``expected_spreading``):
+   - downstream: for every input, the probe F output without its probe E and F fields hashed to the stored probe D,
+     C or B file (probe E fields were also checked equal to ``expected_partition`` at capture time);
+   - matrix: s3_l[b][k] (row b = output partition, column k = input partition) has the zero pattern of the dist10
+     formula on the psy_data bval (tempy <= -60), its values within 1e-15 relative (libm), and is not symmetric;
+   - convolution: ecb (float32 store after every term, k ascending) and ctb (double) reconstruct exactly from the
+     stored probe E eb/cb; a transposed matrix and a double-only ecb fail;
+   - ratio: the division ran for every partition (ecb != 0: floored energies make every eb positive and
+     s3_l[b][b] is about 1), ratio = ctb/ecb and the 0.01 lower clamp reconstruct exactly, the tonality input is
+     log(clamped ratio) within 1e-15; the clamp is exercised (silence).
+7. Probe G, tonality, SNR and partition thresholds (``expected_threshold``):
+   - downstream: for every input, the probe G output without its probe E, F and G fields hashed to the stored probe
+     D, C or B file (probe E and F fields were also checked equal to ``expected_partition``/``expected_spreading`` at
+     capture time); on probe F calls the probe G ecb and tonality input equal probe F's;
+   - tables: the captured minval, qthr_l and norm_l are exactly the double parse of the 44.1 kHz long psy_data
+     columns (1 and 3 decimals as written there);
+   - arithmetic: tbb = -0.299 - 0.43 x tonality input, its [0, 1] clamp and SNR = maximum(minval, 29 tbb + 6 (1 - tbb))
+     reconstruct exactly; nb = float32(float32(ecb) x norm x exp(-SNR x 0.2302585093)) within one float32 ulp (exp is
+     the only libm call); temp_1 = minimum(nb, minimum(2 nb_1, 16 nb_2)) and thr = maximum(qthr, temp_1) exactly, with
+     dist10's macro tie rules;
+   - history: calls are consecutive from 0; nb_1/nb_2 read are zero at call 0 and then the nb of the previous and
+     the second previous call; each call stores (nb, previous nb_1), i.e. the unbounded float32 nb, not thr;
+   - wrong variants fail on at least one call each: swapped history ages (2 nb_2, 16 nb_1), the final threshold stored
+     in history (replayed from call 0), and the quiet floor applied before the pre-echo limit;
+   - coverage: thr is set by qthr, nb, 2 nb_1 and 16 nb_2 somewhere; minval and the tonality term each decide the SNR
+     somewhere; the tonality clamp acts at 0, at 1 and not at all.
 
 Usage: python verify_fixture.py   (from any directory; exits non-zero if any check fails)
 Re-running the reference itself needs Docker and the pinned archive; see ../README.md.
@@ -105,6 +131,8 @@ def check_hashes(provenance: dict, failures: list[str]) -> None:
         ("expected_long_fft_sha256", "expected_long_fft"),
         ("expected_short_sha256", "expected_short"),
         ("expected_partition_sha256", "expected_partition"),
+        ("expected_spreading_sha256", "expected_spreading"),
+        ("expected_threshold_sha256", "expected_threshold"),
     )
     for group, folder in groups:
         recorded = provenance[group]
@@ -127,6 +155,12 @@ def check_hashes(provenance: dict, failures: list[str]) -> None:
         ("probe_partition", "patch", "patch_sha256"),
         ("probe_partition", "harness", "harness_source_sha256"),
         ("probe_partition", "mapping_file", "mapping_sha256"),
+        ("probe_spreading", "patch", "patch_sha256"),
+        ("probe_spreading", "harness", "harness_source_sha256"),
+        ("probe_spreading", "matrix_file", "matrix_sha256"),
+        ("probe_threshold", "patch", "patch_sha256"),
+        ("probe_threshold", "harness", "harness_source_sha256"),
+        ("probe_threshold", "tables_file", "tables_sha256"),
     ):
         entry = provenance[section]
         if sha256(FIXTURE / entry[key]) != entry[digest_key]:
@@ -602,6 +636,224 @@ def check_partition(provenance: dict, failures: list[str]) -> None:
         failures.append("the flat 1983 impulse spectrum does not show 49 bins in partition 0")
 
 
+# --- probe F: spreading and tonality inputs (l3psy.c ll. 573-604, L3para_read ll. 819-838) ---
+LN_TO_LOG10 = 0.2302585093  # common.h l. 199 (truncated)
+
+
+def dist10_spreading_matrix(bval: list[float]) -> np.ndarray:
+    """s3_l[i][j] from L3para_read: i = output (centre) partition, j = input partition, in double."""
+    s3 = np.zeros((len(bval), len(bval)))
+    for i in range(len(bval)):
+        for j in range(len(bval)):
+            tempx = (bval[i] - bval[j]) * (3.0 if j >= i else 1.5)
+            x = 8.0 * ((tempx - 0.5) ** 2 - 2.0 * (tempx - 0.5)) if 0.5 <= tempx <= 2.5 else 0.0
+            tempx += 0.474
+            tempy = 15.811389 + 7.5 * tempx - 17.5 * math.sqrt(1.0 + tempx * tempx)
+            s3[i, j] = 0.0 if tempy <= -60.0 else math.exp((x + tempy) * LN_TO_LOG10)
+    return s3
+
+
+def spread_partitions(eb, cb, s3: np.ndarray, ecb_float32: bool = True):
+    """ecb[b] += s3[b][k] * eb[k] (float32 store per term) and ctb[b] += s3[b][k] * cb[k] (double), k ascending."""
+    ecb = np.zeros(63, dtype=np.float32 if ecb_float32 else np.float64)
+    ctb = [0.0] * 63
+    for b in range(63):
+        for k in range(63):
+            ecb[b] = float(ecb[b]) + float(s3[b, k]) * float(eb[k])
+            ctb[b] = ctb[b] + float(s3[b, k]) * float(cb[k])
+    return ecb, ctb
+
+
+def check_spreading(provenance: dict, failures: list[str]) -> None:
+    entry = provenance["probe_spreading"]
+    for name, digest in entry["stripped_outputs_sha256"].items():
+        if sha256(_reference_stored_file(name)) != digest:
+            failures.append(f"probe F output for {name} without its fields is not the stored earlier capture")
+    record = json.loads((FIXTURE / entry["matrix_file"]).read_text())
+    s3 = np.array(record["s3_l"])
+    formula = dist10_spreading_matrix([float(v) for v in record["psy_data_44100_long_bval"]])
+    if s3.shape != (63, 63) or not np.array_equal(s3 == 0, formula == 0):
+        failures.append("s3_l does not have the dist10 formula's shape and zero pattern (tempy <= -60)")
+    nonzero = formula != 0
+    if np.max(np.abs(s3[nonzero] - formula[nonzero]) / formula[nonzero]) > 1e-15:
+        failures.append("s3_l values differ from the dist10 formula on psy_data bval beyond libm rounding")
+    if np.array_equal(s3, s3.T):
+        failures.append("s3_l is symmetric, so a transposed matrix could not be detected")
+
+    partition = {
+        (p.stem, r["call"]): r
+        for p in sorted((FIXTURE / "expected_partition").glob("*.jsonl"))
+        for r in records("expected_partition", p.stem)
+    }
+    seen, transposed_detected, double_detected, clamp_seen = {}, 0, 0, False
+    for path in sorted((FIXTURE / "expected_spreading").glob("*.jsonl")):
+        for r in records("expected_spreading", path.stem):
+            key = (path.stem, r["call"])
+            where = f"{key[0]} call {key[1]}"
+            seen[key] = r
+            e = partition.get(key)
+            if e is None:
+                failures.append(f"{where}: probe F call is not a probe E call")
+                continue
+            cb = np.array(e["cb"], dtype=np.float32)
+            ecb, ctb = spread_partitions(e["eb"], cb, s3)
+            if not np.array_equal(ecb, np.array(r["ecb"], dtype=np.float32)) or ctb != r["ctb"]:
+                failures.append(f"{where}: ecb/ctb do not reconstruct exactly from eb, cb and s3_l")
+            transposed_detected += not np.array_equal(spread_partitions(e["eb"], cb, s3.T)[0], ecb)
+            double_ecb = spread_partitions(e["eb"], cb, s3, ecb_float32=False)[0].astype(np.float32)
+            double_detected += not np.array_equal(double_ecb, ecb)
+            if r["ratio_divided"] != [1] * 63 or not all(v != 0 for v in r["ecb"]):
+                failures.append(f"{where}: the division was skipped somewhere; its branch needs its own evidence")
+            ratio = [ctb[b] / float(ecb[b]) for b in range(63)]
+            clamped = [0.01 if v < 0.01 else v for v in ratio]  # if (cbb < 0.01) cbb = 0.01;
+            if ratio != r["ratio"] or clamped != r["ratio_clamped"]:
+                failures.append(f"{where}: ratio or its 0.01 clamp does not reconstruct exactly")
+            if max(abs(math.log(c) - t) for c, t in zip(clamped, r["tonality_input"], strict=True)) > 1e-15:
+                failures.append(f"{where}: tonality input is not log of the clamped ratio")
+            clamp_seen |= any(v < 0.01 for v in ratio)
+    if {tuple(k) for k in entry["selected_calls"]} != set(seen):
+        failures.append(f"probe F selected calls {sorted(seen)} differ from provenance.json")
+    if transposed_detected != len(seen):
+        failures.append(f"a transposed s3_l reproduces ecb on {len(seen) - transposed_detected} calls")
+    if not double_detected:
+        failures.append("the capture cannot tell a float32 ecb store from double accumulation")
+    if not clamp_seen:
+        failures.append("the 0.01 lower clamp is never exercised")
+
+
+# --- probe G: tonality, SNR and partition thresholds (l3psy.c ll. 591-617) ---
+def _maximum(x: float, y: float) -> float:
+    return x if x > y else y  # l3psy.c l. 33: #define maximum(x,y) ( (x>y) ? x : y )
+
+
+def _minimum(x: float, y: float) -> float:
+    return x if x < y else y  # l3psy.c l. 34: #define minimum(x,y) ( (x<y) ? x : y )
+
+
+def threshold_terms(ecb, tonality_input, tables: dict) -> dict:
+    """Per partition, from the spread energy and the value passed to tbb: raw and clamped tonality, SNR and nb."""
+    raw, tbb, snr, nb = [], [], [], []
+    for b in range(63):
+        t = -0.299 - 0.43 * tonality_input[b]  # conv1, conv2
+        raw.append(t)
+        t = _minimum(1.0, _maximum(0.0, t))
+        tbb.append(t)
+        s = _maximum(tables["minval"][b], 29.0 * t + 6.0 * (1.0 - t))  # TMN = 29, NMT = 6 dB
+        snr.append(s)
+        nb.append(float(np.float32(float(np.float32(ecb[b])) * tables["norm_l"][b] * math.exp(-s * LN_TO_LOG10))))
+    return {"tonality_raw": raw, "tonality": tbb, "snr": snr, "nb": nb}
+
+
+def pre_echo_threshold(nb, nb_1, nb_2, qthr, swap_ages: bool = False, floor_first: bool = False):
+    """temp_1 = minimum(nb, minimum(2 nb_1, 16 nb_2)); thr = maximum(qthr, temp_1). The flags are wrong variants."""
+    limit, thr = [], []
+    for b in range(63):
+        older = (2.0 * nb_2[b], 16.0 * nb_1[b]) if swap_ages else (2.0 * nb_1[b], 16.0 * nb_2[b])
+        if floor_first:
+            temp_1 = _minimum(_maximum(qthr[b], nb[b]), _minimum(*older))
+            limit.append(temp_1)
+            thr.append(temp_1)
+        else:
+            temp_1 = _minimum(nb[b], _minimum(*older))
+            limit.append(temp_1)
+            thr.append(_maximum(qthr[b], temp_1))
+    return limit, thr
+
+
+def limiting_term(r: dict, qthr: list[float], b: int) -> str:
+    """Which term sets thr[b]: qthr, nb, 2 nb_1 or 16 nb_2 (strict winners; ties are reported as such)."""
+    nb, two, sixteen = float(np.float32(r["nb"][b])), 2.0 * r["nb_1_before"][b], 16.0 * r["nb_2_before"][b]
+    limit = r["pre_echo_limit"][b]
+    if qthr[b] > limit:
+        return "qthr"
+    if qthr[b] == limit:
+        return "tie qthr/limit"
+    hits = [name for name, v in (("nb", nb), ("2nb_1", two), ("16nb_2", sixteen)) if v == limit]
+    return hits[0] if len(hits) == 1 else "tie " + "/".join(hits)
+
+
+def check_threshold(provenance: dict, failures: list[str]) -> None:
+    entry = provenance["probe_threshold"]
+    for name, digest in entry["stripped_outputs_sha256"].items():
+        if sha256(_reference_stored_file(name)) != digest:
+            failures.append(f"probe G output for {name} without its fields is not the stored earlier capture")
+    tables = json.loads((FIXTURE / entry["tables_file"]).read_text())
+    for key, text in (("minval", "minval"), ("qthr_l", "qthr"), ("norm_l", "norm")):
+        if tables[key] != [float(s) for s in tables[f"psy_data_44100_long_{text}"]] or len(tables[key]) != 63:
+            failures.append(f"captured {key} is not the double parse of the 44.1 kHz long psy_data {text} column")
+    qthr = tables["qthr_l"]
+    spreading = {
+        (p.stem, r["call"]): r
+        for p in sorted((FIXTURE / "expected_spreading").glob("*.jsonl"))
+        for r in records("expected_spreading", p.stem)
+    }
+    seen, terms, snr_terms, clamp = set(), set(), set(), set()
+    detected = {"swapped history ages": 0, "final threshold stored in history": 0, "quiet floor before limit": 0}
+    zero_start = 0
+    for path in sorted((FIXTURE / "expected_threshold").glob("*.jsonl")):
+        calls = records("expected_threshold", path.stem)
+        if [r["call"] for r in calls] != list(range(len(calls))):
+            failures.append(f"{path.stem}: probe G calls are not consecutive from call 0")
+            continue
+        replay = {"nb": ([0.0] * 63, [0.0] * 63), "thr": ([0.0] * 63, [0.0] * 63)}  # static zero initialisation
+        for r in calls:
+            key = (path.stem, r["call"])
+            where = f"{key[0]} call {key[1]}"
+            seen.add(key)
+            f = spreading.get(key)
+            if f is not None and (r["ecb"] != f["ecb"] or r["tonality_input"] != f["tonality_input"]):
+                failures.append(f"{where}: probe G ecb / tonality input differ from probe F")
+            got = threshold_terms(r["ecb"], r["tonality_input"], tables)
+            for field in ("tonality_raw", "tonality", "snr"):
+                if got[field] != r[field]:
+                    failures.append(f"{where}: {field} does not reconstruct exactly")
+            nb = [float(np.float32(v)) for v in r["nb"]]
+            ulp = [abs(g - n) / float(np.spacing(np.float32(n))) for g, n in zip(got["nb"], nb, strict=True)]
+            if max(ulp) > 1:  # float32 store of a double product; the only libm call is exp
+                failures.append(f"{where}: nb differs from float32(ecb norm exp(-SNR LN_TO_LOG10)) by > 1 ulp")
+            n1, n2 = r["nb_1_before"], r["nb_2_before"]
+            if r["call"] == 0:
+                zero_start += n1 == [0.0] * 63 and n2 == [0.0] * 63
+            if (n1, n2) != replay["nb"]:
+                failures.append(f"{where}: history read is not (nb of call k-1, nb of call k-2), zero before call 0")
+            if r["nb_1_after"] != nb or r["nb_2_after"] != n1:
+                failures.append(f"{where}: the call does not store (nb, previous nb_1) as its history")
+            limit, thr = pre_echo_threshold(nb, n1, n2, qthr)
+            if limit != r["pre_echo_limit"] or thr != r["thr"]:
+                failures.append(f"{where}: pre-echo limit or final threshold does not reconstruct exactly")
+            # wrong variants, each replayed from call 0 with its own history where the history is what changes
+            detected["swapped history ages"] += pre_echo_threshold(nb, n1, n2, qthr, swap_ages=True)[1] != r["thr"]
+            wrong = pre_echo_threshold(nb, *replay["thr"], qthr)[1]
+            detected["final threshold stored in history"] += wrong != r["thr"]
+            detected["quiet floor before limit"] += (
+                pre_echo_threshold(nb, n1, n2, qthr, floor_first=True)[1] != r["thr"]
+            )
+            replay["nb"] = (nb, n1)
+            replay["thr"] = (wrong, replay["thr"][0])
+            for b in range(63):
+                terms.add(limiting_term(r, qthr, b))
+                tonal = 29.0 * r["tonality"][b] + 6.0 * (1.0 - r["tonality"][b])
+                snr_terms.add(
+                    "minval" if tables["minval"][b] > tonal else "tie" if tables["minval"][b] == tonal else "tonal"
+                )
+                raw = r["tonality_raw"][b]
+                clamp.add("0" if raw < 0.0 else "1" if raw > 1.0 else "interior")
+    if {tuple(k) for k in entry["selected_calls"]} != seen:
+        failures.append(f"probe G selected calls {sorted(seen)} differ from provenance.json")
+    if not zero_start:
+        failures.append("no probe G input starts from zero history")
+    for label, count in detected.items():
+        if not count:
+            failures.append(f"the capture cannot detect {label}")
+    for needed in ("qthr", "nb", "2nb_1", "16nb_2"):
+        if needed not in terms:
+            failures.append(f"no partition threshold is set by {needed}; that branch needs its own evidence")
+    if not {"minval", "tonal"} <= snr_terms:
+        failures.append("the SNR floor minval or the tonality term never decides the SNR")
+    if clamp != {"0", "1", "interior"}:
+        failures.append(f"the tonality clamp is not exercised at both ends and inside (seen {sorted(clamp)})")
+
+
 def main() -> int:
     provenance = json.loads((FIXTURE / "provenance.json").read_text(encoding="utf-8"))
     failures: list[str] = []
@@ -610,6 +862,8 @@ def main() -> int:
     check_long_fft(provenance, failures)
     check_short(provenance, failures)
     check_partition(provenance, failures)
+    check_spreading(provenance, failures)
+    check_threshold(provenance, failures)
     for failure in failures:
         print("FAIL:", failure)
     if not failures:
