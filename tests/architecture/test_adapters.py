@@ -5,7 +5,8 @@ third-party libraries, ``core.records``, ``core.ports`` and their own package; n
 the loop or a stage), G10 (the exact internal edges and third-party dependencies of the rendering
 adapter, carried over from the ADR-022 to ADR-026 infrastructure rules) and G4 for adapters (runtime
 load isolation in fresh processes). ADR-028 (Proposed) adds one narrow exception to rule (c): the listed
-rendering modules and ``dsp_analysis.file_analyzer`` may import the listed public modules of the shared ``adapters.audio_io`` component, and
+rendering modules, ``dsp_analysis.file_analyzer`` and (ADR-029, Proposed) ``dsp_analysis.wav_input`` may import the listed public
+modules of the shared ``adapters.audio_io`` component, and
 no other module may import its private names (``test_shared_audio_access.py`` holds its own edges and probes).
 """
 
@@ -43,6 +44,8 @@ SHARED_CLIENTS = {
     f"{ADAPTERS}.rendering.run_renderer": {f"{AUDIO_IO}.locations"},
     # File-backed level analyzer (file-audio-analyzer design, 2026-11-11): the edge ADR-028 reserved for it.
     f"{ADAPTERS}.dsp_analysis.file_analyzer": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
+    # dist10 WAV input boundary (ADR-029, Proposed; Task 3P, 2026-11-17): the shared verification path only.
+    f"{ADAPTERS}.dsp_analysis.wav_input": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
 }
 
 
@@ -224,6 +227,9 @@ ANALYSIS_EDGES = {
         },
         {"numpy"},
     ),
+    # dist10 WAV input boundary (ADR-029, Proposed; front-end contract §2.1, Task 3P, 2026-11-17): the shared
+    # audio_io verification path and the artifact record; NumPy otherwise. No other dsp_analysis module.
+    "wav_input": (_s("integrity", "limits", "locations") | _r("artifacts"), {"numpy"}),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -341,6 +347,7 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
         "thresholds",
         "bands",
         "front_end",
+        "wav_input",
     ],
 )
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4

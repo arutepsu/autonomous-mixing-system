@@ -16,6 +16,8 @@ Revision 7 (2026-11-16, Task 3K) adds the partition-threshold capture (§3.5): t
 
 Revision 8 (2026-11-16, Task 3M) adds the long scale-factor-band mapping evidence (§3.6): the `psy_data` band rows, the endpoint weights, the interior range and summation order, a capture of the mapping inputs on every call (probe H), and the directional margins of the package chain against probe B. It makes the §2.2 "Scale-factor bands" row precise. The band-table question of §4 item 3 (Layer III against AAC bands) is unchanged.
 
+Revision 9 (2026-11-17, Task 3P) adds the WAV input boundary (§2.3): only verified mono 44,100 Hz PCM_16 WAV is accepted and converted back to exact int16 counts, and the producer export settings are stated. The §2.1 "Input samples" row is extended; float and higher-bit-depth conversion remains deferred.
+
 Labels: **[T]** defined by Ronan's thesis; **[S]** defined by the dist10 source, our chosen backend; **[R]** observed in the reference run; **[P]** project choice proposed for review; **[U]** unresolved.
 
 ## 1. Source trace
@@ -67,7 +69,7 @@ Output for an ordered pair A → B over one clip: two float64 arrays shaped `(va
 | --- | --- | --- |
 | Sample rate | 44,100 Hz exactly; anything else is rejected, with no resampling. The `psy_data` row is selected by exact equality `sfreq == freq_tp` (l. 777). | 48 kHz (tables exist; needs its own fixture); 16–32 kHz |
 | Channels | Mono only: exactly one channel. dist10 couples stereo channels through the shared age pointers, which flip only when `chn == 0` (ll. 447–459). | Stereo, and any fold-down rule |
-| Input samples | int16 integer samples, used as the reference's `short` values with no rescaling (l. 474). Energies are unnormalised FFT energy of int16 counts. | Float-WAV conversion (scale, rounding, clipping) |
+| Input samples | int16 integer samples, used as the reference's `short` values with no rescaling (l. 474). Energies are unnormalised FFT energy of int16 counts. From files: only verified mono 44,100 Hz WAV with **PCM_16** samples, converted back to the exact signed counts (decoded value × 32768, integral and within [−32768, 32767]) by `dsp_analysis.wav_input` (§2.3, ADR-029). | Float-WAV and PCM_24/32 conversion (scale, rounding, clipping, quantization) |
 | Masker | Exactly one masker clip per pair, the same length as the target clip | Sums of several accompanying tracks (Eq. 7.11 with N > 2) |
 
 ### 2.2 Contract table
@@ -88,6 +90,40 @@ Output for an ordered pair A → B over one clip: two float64 arrays shaped `(va
 | Zero energy and target activity | The FFT floor makes `en[sb] > 0` for every input. For exact digital silence, `en` is the constant floor vector (`en[0] = 0.02553` … `en[20] = 0.05679` at 44.1 kHz), so the kernel's zero-energy mask never triggers. Exact target silence is still decidable from the input: a frame is exactly silent iff its window `[576k − 768, 576k + 256)` holds no nonzero int16 sample. In the fixture this coincides exactly with `en` equal to the floor vector, for all 92 probe B records. The front end must report this silent-window flag with `E`, rather than infer silence from `en`. How activity is gated, and any action threshold, is a separate decision. | [S] subs.c l. 130; [R] silent-masker control; [U] gate |
 | Threshold in quiet | `T` is never below `thm_quiet[sb]` (the band mapping of `qthr_l`). For a silent masker `T = thm_quiet` exactly. The front end should report `thm_quiet` and the share of `thm` from partitions where threshold in quiet decided `thr`, so a margin can be traced to the masker or to absolute threshold. | [S] l. 614; [R] |
 | Units and level | `T` and `E` are in unnormalised-FFT energy of int16 counts. The ratio is unit-free, but thresholds are not invariant to a common gain, because `qthr` and the int16 grid are absolute. Measure at the actual exported levels; declare any reproduction normalisation (Ronan: −24/−18 LUFS) separately. | [S]; [T] §7.2.3.2; [R] level case |
+
+### 2.3 WAV input boundary and producer export settings (Task 3P, 2026-11-17) [P]
+
+`adapters.dsp_analysis.wav_input.read_dist10_pcm16(location, *, limits) -> Dist10Pcm16Clip` is the only file entry to the front end (ADR-029, Proposed). The numerical entry point `dist10_clip_to_bands` still receives a one-dimensional `int16` array.
+1. **Declared profile:** the declared sample rate (44,100 Hz) and channel count (mono) are checked against profile v1 before any file access.
+2. **Shared verification:** the file is verified with the shared `check_resolved_wav_integrity`: bounded single capture, SHA-256, WAV/WAVEX/RF64 container, declared rate, channel and frame count, finite samples. Its `IntegrityError` and `LocationResolutionError` propagate unchanged.
+3. **Subtype:** only libsndfile subtype `PCM_16` is accepted.
+4. **Conversion:** libsndfile decodes PCM_16 as count / 32768, so the count is the decoded value × 32768. This product is exact. It must be integral and within [−32768, 32767] before the cast to `int16`.
+5. **Result:** the verified `AudioArtifact` itself (with `timeline_start_seconds`, `sample_rate_hz`, `frame_count` and the hash, for later pair alignment), the read-only counts, the container and subtype, and the verified SHA-256.
+
+Rejected with `Dist10InputError` and a code, never converted:
+- other sample rates (no resampling);
+- stereo or more channels (no fold-down);
+- other subtypes: PCM_24, PCM_32, PCM_U8, FLOAT, DOUBLE and others (no clipping or quantization);
+- decoded values that are not PCM_16 counts.
+
+A separately specified profile is needed for any of these conversions.
+
+**Producer export settings for profile v1:**
+
+| Setting | Value |
+| --- | --- |
+| Container | WAV (WAVE_FORMAT_EXTENSIBLE and RF64 are also accepted) |
+| Sample rate | 44,100 Hz, with no sample-rate conversion on export |
+| Channels | 1 (mono) |
+| Sample format | 16-bit signed integer PCM |
+
+Any dither, normalisation or gain change is part of the exported audio, decided in the producer before export; the boundary reads the exported counts as they are. Each stem's timeline start must be declared in its `AudioArtifact` record.
+
+Evidence (`tests/unit/test_dsp_wav_input.py`, real WAV files written with soundfile):
+- −32768, −1, 0, 1 and 32767 and all 65,536 counts round-trip exactly.
+- The converted samples give band results identical to the original `int16` array.
+- Unsupported rates and channel counts are rejected before the file is read, and unsupported subtypes after verification.
+- Hash, frame-count, rate (declared 44,100 Hz against a 48 kHz file), resource-limit and missing-file failures propagate from the shared path.
 
 ## 3. Independent reference evidence
 

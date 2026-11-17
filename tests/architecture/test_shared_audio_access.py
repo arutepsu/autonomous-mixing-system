@@ -1,7 +1,8 @@
 """Architecture tests for the shared read-only audio component (ADR-028, Proposed; ADR-027 rule c otherwise).
 
 ``adapters.audio_io`` owns location resolution, WAV integrity reading and read limits. Only the listed
-rendering modules and ``dsp_analysis.file_analyzer`` may import its listed public modules; every other cross-adapter import stays forbidden,
+rendering modules, ``dsp_analysis.file_analyzer`` and (ADR-029, Proposed) ``dsp_analysis.wav_input`` may import its listed public
+modules; every other cross-adapter import stays forbidden,
 another component may not import its private names, and the shared modules import no consumer, stage,
 loop, driver or evaluation code. Guarantees carried over from the former rendering-owned modules: exact
 internal edges and third-party dependencies (G10), one definition per moved name (G9) and fresh-process
@@ -31,6 +32,7 @@ INTEGRITY = f"{AUDIO_IO}.integrity"
 LOCATIONS = f"{AUDIO_IO}.locations"
 LIMITS = f"{AUDIO_IO}.limits"
 FILE_ANALYZER = f"{ADAPTERS}.dsp_analysis.file_analyzer"
+WAV_INPUT = f"{ADAPTERS}.dsp_analysis.wav_input"
 
 
 def test_audio_io_modules_are_exactly_the_planned_ones():
@@ -116,6 +118,10 @@ def test_the_audio_io_initializer_contains_only_a_docstring():
         (FILE_ANALYZER, "from autonomous_mixing.adapters.audio_io.integrity import check_resolved_wav_integrity"),
         (FILE_ANALYZER, "from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location"),
         (FILE_ANALYZER, "from ..audio_io.limits import AudioReadLimits"),
+        (WAV_INPUT, "from autonomous_mixing.adapters.audio_io.integrity import check_resolved_wav_integrity"),
+        (WAV_INPUT, "from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio"),
+        (WAV_INPUT, "from autonomous_mixing.adapters.audio_io.locations import ResolvedArtifactLocation"),
+        (WAV_INPUT, "from ..audio_io.limits import AudioReadLimits"),
     ],
 )  # fmt: skip
 def test_listed_public_clients_are_allowed(client, source):
@@ -145,6 +151,14 @@ def test_listed_public_clients_are_allowed(client, source):
         (FILE_ANALYZER, "from ..audio_io.integrity import _capture"),
         (FILE_ANALYZER, "import autonomous_mixing.adapters.audio_io"),  # the package itself is not a listed module
         (FILE_ANALYZER, "from autonomous_mixing.adapters.rendering.state_integrity import FileStateIntegrityInspector"),
+        # The WAV input boundary likewise: public names only, no package form, no rendering module.
+        (WAV_INPUT, "from autonomous_mixing.adapters.audio_io.integrity import _decode"),
+        (WAV_INPUT, "from ..audio_io.limits import _require_limit"),
+        (WAV_INPUT, "import autonomous_mixing.adapters.audio_io"),
+        (WAV_INPUT, "from autonomous_mixing.adapters.rendering.gain_mix import GainMixProcessor"),
+        # The numerical front end and its kernels stay off the shared component.
+        (f"{ADAPTERS}.dsp_analysis.front_end", "from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio"),
+        (f"{ADAPTERS}.dsp_analysis.framing", "from ..audio_io.locations import resolve_artifact_location"),
         # Unlisted rendering modules and unlisted shared modules stay forbidden.
         (f"{RENDERING}.wav_output", "from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location"),
         (f"{RENDERING}.revalidation", "from autonomous_mixing.adapters.audio_io.integrity import IntegrityError"),
@@ -183,6 +197,15 @@ def test_shared_integrity_loads_no_consumer_coordinator_stage_journal_driver_or_
     assert _forbidden_layers(loaded) == []
     others = (RENDERING, f"{ADAPTERS}.dsp_analysis", f"{ADAPTERS}.journal")
     assert not [n for n in loaded if any(n == o or n.startswith(o + ".") for o in others)]
+
+
+def test_wav_input_loads_only_the_shared_reader_and_no_other_adapter_or_layer():
+    loaded = _loaded_after(f"import {WAV_INPUT}")
+    assert WAV_INPUT in loaded and INTEGRITY in loaded and "soundfile" in loaded
+    assert _forbidden_layers(loaded) == []
+    analysis = {n for n in loaded if n.startswith(f"{ADAPTERS}.dsp_analysis.")}
+    assert analysis == {WAV_INPUT}  # no numerical kernel, front end or other analysis module
+    assert not [n for n in loaded if n.startswith(RENDERING) or n.startswith(f"{ADAPTERS}.journal")]
 
 
 def test_the_package_initializer_loads_no_decoding():

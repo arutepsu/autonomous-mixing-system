@@ -1,0 +1,161 @@
+"""WAV input boundary of the dist10 front end (front-end contract §2.1 profile v1; Task 3P; ADR-029, Proposed).
+
+Profile v1 accepts exactly one kind of file: verified **mono, 44,100 Hz WAV with PCM_16 samples** (WAV, WAVEX or
+RF64 container, as the shared verifier detects them). The file is read and verified only through the shared
+``adapters.audio_io`` path (``check_resolved_wav_integrity``: bounded single capture, SHA-256 against the declared
+hash, declared rate/channel/frame metadata, finite samples), and its failures (``IntegrityError``,
+``LocationResolutionError``) reach the caller unchanged.
+
+Conversion: libsndfile decodes PCM_16 to float64 by dividing each signed 16-bit count by 32768 (0x8000), so the
+original count is ``sample x 32768``. That product is exact (a power-of-two scale of a value with at most 16
+significant bits). Every scaled value must be integral and lie in ``[-32768, 32767]`` before the cast to ``int16``;
+otherwise the samples are not PCM_16 counts and are rejected. The range is checked on the decoded values first,
+so no out-of-range value is ever scaled. The result is a one-dimensional, read-only ``int16``
+array for ``dist10_clip_to_bands``, together with the verified artifact record, whose ``timeline_start_seconds``,
+``sample_rate_hz`` and ``frame_count`` later pair alignment needs.
+
+Rejected explicitly, never converted: other sample rates and channel counts (checked against the declared record
+before any file access, and again on the verified audio) and other subtypes (PCM_24, PCM_32, PCM_U8, FLOAT, DOUBLE,
+...; checked on the verified audio). Resampling, stereo fold-down, and the clipping or quantization of float or
+higher-bit-depth exports belong to a separately specified profile, not to this boundary.
+
+Producer export settings for this profile: WAV, 44,100 Hz, 1 channel (mono), 16-bit signed integer PCM (PCM_16),
+no sample-rate conversion on export. Dither and any gain change happen, if at all, in the producer before export
+and are part of the exported audio; this boundary reads the exported counts as they are.
+"""
+
+from dataclasses import dataclass
+from enum import Enum
+
+import numpy as np
+
+from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio, check_resolved_wav_integrity
+from autonomous_mixing.adapters.audio_io.limits import AudioReadLimits
+from autonomous_mixing.adapters.audio_io.locations import ResolvedArtifactLocation
+from autonomous_mixing.core.records.artifacts import AudioArtifact
+
+PROFILE_SAMPLE_RATE_HZ = 44100
+PROFILE_CHANNEL_COUNT = 1
+PROFILE_SUBTYPE = "PCM_16"  # libsndfile's name for signed 16-bit integer PCM
+PCM16_SCALE = 32768.0  # libsndfile's PCM_16 -> double normalisation divisor (0x8000)
+INT16_MIN, INT16_MAX = -32768, 32767
+DECODED_MIN, DECODED_MAX = INT16_MIN / PCM16_SCALE, INT16_MAX / PCM16_SCALE  # -1.0 and 32767/32768, exact
+
+
+class Dist10InputFailureCode(Enum):
+    UNSUPPORTED_SAMPLE_RATE = "unsupported_sample_rate"
+    UNSUPPORTED_CHANNEL_COUNT = "unsupported_channel_count"
+    UNSUPPORTED_SUBTYPE = "unsupported_subtype"
+    NON_INTEGRAL_SAMPLES = "non_integral_samples"
+    OUT_OF_RANGE_SAMPLES = "out_of_range_samples"
+
+
+class Dist10InputError(ValueError):
+    """Verified audio outside profile v1, or decoded samples that are not PCM_16 counts; ``code`` names which."""
+
+    def __init__(self, code: Dist10InputFailureCode, message: str) -> None:
+        super().__init__(f"{code.value}: {message}")
+        self.code = code
+
+
+@dataclass(frozen=True, eq=False)
+class Dist10Pcm16Clip:
+    """Profile-v1 input of one verified artifact (adapter-local, not a core record).
+
+    ``artifact`` is the verified record itself (timeline start, rate, frame count, hash); ``samples`` is a
+    read-only one-dimensional ``int16`` array of the original counts, one per frame. ``container`` and ``subtype``
+    are libsndfile's names for the detected format and ``verified_sha256`` the hash of the captured payload.
+    Equality is identity.
+    """
+
+    artifact: AudioArtifact
+    samples: np.ndarray
+    container: str
+    subtype: str
+    verified_sha256: str
+
+
+def _require_profile(artifact: AudioArtifact, where: str) -> None:
+    if artifact.sample_rate_hz != PROFILE_SAMPLE_RATE_HZ:
+        raise Dist10InputError(
+            Dist10InputFailureCode.UNSUPPORTED_SAMPLE_RATE,
+            f"{where}: sample rate {artifact.sample_rate_hz} Hz, profile v1 needs {PROFILE_SAMPLE_RATE_HZ} Hz "
+            "(no resampling)",
+        )
+    if artifact.channel_count != PROFILE_CHANNEL_COUNT:
+        raise Dist10InputError(
+            Dist10InputFailureCode.UNSUPPORTED_CHANNEL_COUNT,
+            f"{where}: {artifact.channel_count} channels, profile v1 needs mono (no fold-down)",
+        )
+
+
+def pcm16_counts(audio: CheckedAudio) -> np.ndarray:
+    """The original signed 16-bit counts of verified profile-v1 audio, as a fresh read-only ``int16`` array.
+
+    Raises ``ValueError`` for an argument that is not ``CheckedAudio`` and ``Dist10InputError`` for another
+    sample rate, channel count or subtype, for decoded values outside ``[-32768, 32767] / 32768`` (checked first,
+    before any scaling, NaN included) and for scaled values that are not integral, naming the first such frame. The
+    result does not depend on the caller's NumPy error policy. The verified samples are never modified.
+    """
+    if not isinstance(audio, CheckedAudio):
+        raise ValueError(f"audio must be CheckedAudio, got {type(audio).__name__}")
+    where = audio.artifact.location
+    _require_profile(audio.artifact, where)
+    if audio.subtype != PROFILE_SUBTYPE:
+        raise Dist10InputError(
+            Dist10InputFailureCode.UNSUPPORTED_SUBTYPE,
+            f"{where}: subtype {audio.subtype}, profile v1 needs {PROFILE_SUBTYPE} (no quantization)",
+        )
+    samples = np.asarray(audio.samples)
+    if samples.ndim != 2 or samples.shape[1] != PROFILE_CHANNEL_COUNT:
+        raise Dist10InputError(
+            Dist10InputFailureCode.UNSUPPORTED_CHANNEL_COUNT, f"{where}: decoded shape {samples.shape} is not mono"
+        )
+    decoded = samples[:, 0]
+    # Range first, on the decoded values: [-32768/32768, 32767/32768] are exact doubles, so this is the count range
+    # exactly, and no value outside it is ever scaled (a huge value would overflow x 32768). Written as "not within",
+    # so NaN is rejected too.
+    out_of_range = np.flatnonzero(~((decoded >= DECODED_MIN) & (decoded <= DECODED_MAX)))
+    if out_of_range.size:
+        frame = int(out_of_range[0])
+        raise Dist10InputError(
+            Dist10InputFailureCode.OUT_OF_RANGE_SAMPLES,
+            f"{where}: frame {frame} decodes to {decoded[frame]!r}, outside the PCM_16 range "
+            f"[{INT16_MIN}, {INT16_MAX}] / 32768",
+        )
+    scaled = decoded * PCM16_SCALE  # exact: a power-of-two scale of a value in range; cannot overflow
+    non_integral = np.flatnonzero(scaled != np.floor(scaled))
+    if non_integral.size:
+        frame = int(non_integral[0])
+        raise Dist10InputError(
+            Dist10InputFailureCode.NON_INTEGRAL_SAMPLES,
+            f"{where}: frame {frame} decodes to {scaled[frame]!r} x 1/32768, not an integer PCM_16 count",
+        )
+    counts = scaled.astype(np.int16)
+    counts.flags.writeable = False
+    return counts
+
+
+def read_dist10_pcm16(location: ResolvedArtifactLocation, *, limits: AudioReadLimits) -> Dist10Pcm16Clip:
+    """Verify one resolved artifact through the shared path and return its PCM_16 counts for the dist10 front end.
+
+    Order: argument types (``ValueError``); the declared sample rate and channel count against profile v1
+    (``Dist10InputError``, before any file access); ``check_resolved_wav_integrity`` with ``limits`` (its
+    ``IntegrityError`` and ``LocationResolutionError`` propagate unchanged); then ``pcm16_counts`` on exactly the
+    verified samples (subtype, integrality and range).
+    """
+    if not isinstance(location, ResolvedArtifactLocation):
+        raise ValueError(f"location must be a ResolvedArtifactLocation, got {type(location).__name__}")
+    if not isinstance(limits, AudioReadLimits):
+        raise ValueError(f"limits must be AudioReadLimits, got {type(limits).__name__}")
+    _require_profile(location.artifact, location.artifact.location)
+    audio = check_resolved_wav_integrity(
+        location, max_file_bytes=limits.max_file_bytes, max_decoded_bytes=limits.max_decoded_bytes
+    )
+    return Dist10Pcm16Clip(
+        artifact=audio.artifact,
+        samples=pcm16_counts(audio),
+        container=audio.container,
+        subtype=audio.subtype,
+        verified_sha256=audio.verified_sha256,
+    )

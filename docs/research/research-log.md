@@ -1204,3 +1204,78 @@
   - empty input, byte order, the input left unmodified, and invalid rate, shape and dtype, with the rate keyword-only.
 - Comparison script: the Python path uses the entry point. The lower-level kernels supply `eb`/`thr` for the partition-50 diagnostics, and the verifier's independent mapping of them must equal the entry point on every call. The output is unchanged apart from the metadata label: 840 eligible tone-pair cells, worst 5.552e−3 dB, 0 sign changes (descriptive).
 - Open: the end-to-end tolerance. Left uncommitted for Codex review.
+
+## 2026-11-17 — dist10 WAV input boundary (Task 3P, Claude Code)
+- Start: branch `feature/budget`, HEAD `9523f48`, clean working tree. Scope: the file boundary of profile v1 only. There is no pair alignment, directional measurement or analyzer integration.
+- Architecture: the boundary must reuse the shared verification path, but ADR-028 allowed no `dsp_analysis` client besides `file_analyzer`. New ADR-029 (Proposed; ADR-028 left unchanged) adds `dsp_analysis.wav_input` as one more exact client of `audio_io.integrity`/`limits`/`locations`. `front_end` and the kernels stay free of file access. The engineering conventions and the ADR index are updated.
+- Change: new `adapters.dsp_analysis.wav_input` with `read_dist10_pcm16(location: ResolvedArtifactLocation, *, limits: AudioReadLimits) -> Dist10Pcm16Clip(artifact, samples, container, subtype, verified_sha256)`, `pcm16_counts(audio: CheckedAudio)` and `Dist10InputError`/`Dist10InputFailureCode`.
+  - The declared rate and channel count are checked before any file access. The file is then verified with `check_resolved_wav_integrity`, whose errors propagate unchanged.
+  - Only PCM_16 is accepted. Counts are the decoded value × 32768 (libsndfile's PCM_16 divisor), checked integral and within [−32768, 32767] before the `int16` cast.
+  - The result keeps the verified `AudioArtifact` (timeline start for pair alignment). Other rates, stereo and other subtypes are rejected with codes, never converted.
+- Tests: `tests/unit/test_dsp_wav_input.py` was written first; red evidence is a collection error. Coverage (36 tests, real WAV files written with soundfile to `tmp_path`):
+  - exact recovery of −32768, −1, 0, 1 and 32767 and of all 65,536 counts; WAVEX accepted;
+  - identical band results from the WAV and from the original `int16` array; the artifact and timeline kept;
+  - 48/32/22.05/96 kHz and stereo rejected before reading; PCM_24/PCM_32/PCM_U8/FLOAT/DOUBLE rejected;
+  - hash, frame-count, rate (declared 44,100 against a 48 kHz file), resource-limit and missing-file failures propagated;
+  - the shared entry point called with the limits; the scaling, integrality, range and profile checks on verified audio; argument validation.
+- Architecture tests: the client edge, the module's exact edges (`audio_io.integrity`/`limits`/`locations`, `core.records.artifacts`, NumPy), allowed and forbidden import cases (private names, package form, rendering, and `front_end`/`framing` importing the component), and fresh-process isolation. Removing the client entry makes rule (c) flag all three `audio_io` imports.
+- Docs: contract §2.3 (boundary and producer export settings: WAV, 44,100 Hz, mono, 16-bit signed PCM, no SRC) and the §2.1 "Input samples" row; revision 9.
+- Left uncommitted for Codex review.
+
+## 2026-11-17 — Correction: check the decoded PCM_16 range before scaling (Codex review of Task 3P)
+- Finding: `pcm16_counts` scaled the decoded values by 32768 before checking their range. Verified files cannot produce such values (PCM_16 decodes within [−1, 32767/32768]), but the public helper also accepts other `CheckedAudio`. There a huge finite value (for example 1e308) overflowed to infinity in the scaling: `FloatingPointError` under `errstate(over="raise")`, a `RuntimeWarning` otherwise. NaN, and values just outside the range, were reported as non-integral rather than out of range.
+- Fix: the range is checked first on the decoded values, against the exact doubles −32768/32768 and 32767/32768, written as "not within" so NaN is rejected too. Only in-range values are scaled, which cannot overflow, and integrality is checked afterwards. The verified-file path, the scaling and the results for valid PCM_16 are unchanged.
+- Regression: ±1e308, the float64 maximum, ±inf and NaN give `OUT_OF_RANGE_SAMPLES` naming the frame under the `raise`, `warn` and `ignore` policies, with warnings as errors. The exact bounds −1.0 and 32767/32768 convert, and their next doubles outward are out of range. Before the fix, 10 of these cases failed.
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-17 — FL Studio gain feasibility trial, owner-authorized under ADR-009 (Claude Code)
+- Authorization: the owner explicitly assigned an FL Studio gain feasibility trial under ADR-009 (FL Studio integration deferred and optional). It is a **technical feasibility test** on a disposable project or a dedicated project copy. FL Studio's documented scripting interface makes the mixer change, and FL Studio's own save and export commands are used, by hand for this trial. External Python-to-FL messaging and virtual MIDI installation are deferred. FR-14 stays withdrawn; ADR-009 and the `.flp` exclusion in `requirements.md` are unchanged. No repository code parses or writes `.flp` files. A proposed ADR and requirement for adopting FL Studio as the thesis renderer follow after the trial establishes what works. The producer's kick/bass project and any musical evaluation come later.
+- Start: HEAD `9523f48`. Uncommitted at the start: the Task 3P work (WAV input boundary, ADR-029) and Codex's handoff (`scripts/fl_studio/device_gain_trial.py`, `scripts/fl_studio/test_gain_trial.py`, `docs/research/fl-studio-gain-trial.md`, 2026-11-17 13:40). Claude Code took ownership of the handoff and preserved its modes, guards, bounds and procedure.
+- Environment:
+  - FL Studio 2026 build `26.1.7.5654`. No producer `.flp` was found, so a disposable project is planned.
+  - MIDI input: WinMM reports 0 inputs. FL Studio's device records list MIDI outputs only, both after its 13:14 settings write and after a 14:03 start (that session left open). Windows MIDI Services runs but exposes only its diagnostic "Service Test Loopback A/B" endpoints, with no app loopback pair and no tools installed.
+  - Result: no MIDI input can host the controller script, so the live steps are pending. Owner setup step: make one MIDI input available, for example a USB MIDI controller, enable it in FL Studio's MIDI settings and assign "Thesis Gain Trial (user)". The Input list in that window remains to be confirmed by eye.
+- API check against the Image-Line FL Studio API stubs: the draft called `general.getProjectTitle()` and `mixer.getTrackCount()`, which are not in the documented API, and would have failed in FL Studio. They are replaced by `ui.getProgTitle()` (the copy's file name must appear in the window title) and `mixer.trackCount()` (inserts 1 … `trackCount() − 2`; Master and the current track are excluded). The minimum API is 29 (`safeToEdit`). The stubs leave open which `getTrackVolume` mode returns dB, and the normalized-to-dB curve.
+- Change:
+  - The script records the intended dB change (`INTENDED_DB_CHANGE`, bounded to a cut of at most 3 dB) separately from the normalized value sent and FL Studio's dB read-back. It reports `measured_db_change`, `intended_minus_measured_db` and a label: either the intended change was reached within 0.05 dB at this one point, or the result is a bounded normalized-fader change with a measured dB change.
+  - All results print as `RESULT key=value` lines.
+  - New `scripts/fl_studio/check_exports.py` checks exports without modifying them: hashes, container, subtype, rate, channels and frames; profile-v1 compliance (mono, 44,100 Hz, PCM_16) with named mismatches; common rate and frame count; and per-role alignment evidence (bit identity, cross-correlation lag, least-squares gain and residual for the changed role). The procedure document is updated in place.
+- Checks:
+  - The device script's local checks (simulated FL modules exposing only documented names, plus a source check of the called names): 8 passed. Restoring `getTrackCount` makes them fail (1 failure, 15 errors; source restored byte-identically).
+  - `tests/unit/test_fl_export_check.py`: 10 passed with warnings as errors.
+  - Pending live: insert identity, starting gain and the `DB_MODE` plausibility check, the bounded change with dB read-back, manual save/reopen persistence, baseline and candidate exports, and the export check.
+- Left uncommitted for review.
+
+## 2026-11-17 — Kick/808 manual FL Studio trial: before/after analysis (Claude Code)
+- Label: manual feasibility trial under the owner's ADR-009 authorization. There is no listening or quality conclusion. The production WAV input profile (ADR-029) is unchanged; FR-14 stays withdrawn.
+- Inputs: six owner exports in `C:/uni/Bachelor-Thesis/test/trap-baseline` (stereo PCM_16, 44,100 Hz, 302,400 frames each). Their hashes are in `docs/research/fl-studio-kick-808-trial.md`. The originals and `.flp` files were only read; SHA-256 was rechecked after each run.
+- What changed: the kick, by a least-squares −2.974 dB (residual 2e−9). The 808 audio is bit-identical; its files differ only in the INFO title chunk. The master changed. Lag 0 everywhere and equal lengths.
+- Channels: no substantial cancellation. The L/R mean loses −0.0004 dB (kick) and −6e−9 dB (808) of energy; side is 40.6 dB (kick) and 88.4 dB (808) below mid.
+- Derived mono rule: `round_half_even((L + R) / 2)` on int16 counts, for all four stems. The masters stay stereo.
+- New `scripts/fl_studio/analyze_trial.py`. It covers the channel report, derived mono WAVs with hashes, the dist10 front end, both margin directions on the 523 frames eligible in all four clips and all 21 bands, and silent target windows flagged and excluded. It also produces the largest changes in time and frequency, zero crossings, a breakdown by band energy above an int16 rounding-noise reference, and master peak and RMS. Tests: `tests/unit/test_fl_trial_analysis.py` (6), passing with warnings as errors. Two repeated runs gave byte-identical outputs.
+- Results:
+  - 808 → kick: median +2.96 dB. Cells ≥ 40 dB above rounding noise move +2.87…+3.02 dB (median +2.974).
+  - kick → 808: median 0 (the kick threshold is threshold in quiet in most cells). Cells with the kick ≥ 40 dB above noise move −3.22…0 dB (median −2.973). 27 cells at kick onsets went from T > E to T ≤ E.
+  - Master: peak −1.249 dB, RMS −0.620 dB.
+  - Outliers (±6–8 dB) sit at kick onsets in 0.9–3.8 kHz, where the kick's band energy is within about 10 dB of rounding noise and the candidate is not a scaled copy (partition energies up to +11 dB). They reflect export re-quantization through the tonality, SNR and pre-echo stages, not the gain.
+- `check_exports.py` now also accepts `role=baseline.wav:candidate.wav` for FL Studio's prefixed names; 13 tests pass. The documented command reproduces the kick −2.974 dB, the 808 identity and lag 0.
+- Open: whether a renderer integration should export float or 24-bit stems (rounding noise near empty bands) and mono or stereo stems (the production profile needs mono). A listening comparison. Left uncommitted for review.
+
+## 2026-11-17 — Correction: kick/808 trial analysis (Codex review)
+- Rounding-noise reference: it now covers every bin 0–512, Nyquist included. The reproduced dist10 partition mapping accumulates bin 512 (with bins 465–511) into partition 0, although the FFT energy floor excludes it. Partition 0's reference is 49 instead of 48 bins. The regression `test_rounding_noise_includes_nyquist_in_partition_0` fails if the loop stops at bin 511.
+- Labels: frequency ranges are **nominal** (`band_hz_nominal` in the output; key renamed from `band_hz`), counting bins below 465. dist10 assigns bins 465–512 (about 20.0–22.05 kHz) to partition 0, band 0's lower endpoint, so band 0 also holds energy outside its displayed 0–172 Hz.
+- Rerun: only band 0's noise reference changed, 1,633.792 → 1,665.792 (+0.08 dB). Unchanged, compared field by field with the previous output:
+  - inputs and derived mono hashes, master levels, eligible frames and silent windows;
+  - raw margins in all listed cells, change statistics and per-band and per-frame means;
+  - exceedance counts (125 → 98 and 543 → 550) and zero crossings;
+  - every noise-group count and summary.
+
+  The original FL Studio projects and exports still match their SHA-256.
+- Wording: the large outliers are described as *consistent with* sensitivity to quantization in low-energy bands. The trial includes two roundings (FL Studio's PCM_16 export and the derived mono conversion), and it cannot isolate their contributions.
+- Corrects the previous entry's claims, which were drawn from the top-5 lists only:
+  - **Time:** the changes larger than ±3.5 dB do not sit at kick onsets. Checked over all cells, they fall in the late calls (decay) of each kick hit (calls 6–11, 105–109, 137–142, 269–273, 498–503 and others). The 27 kick → 808 zero crossings are in early calls of hits.
+  - **Energy:** the kick's band energy in those cells is not uniformly "within about 10 dB" of the reference. It is at most 25 dB above it (median about 2 dB), with 69% (kick → 808, 36 cells) and 77% (808 → kick, 110 cells) within 10 dB.
+  - **Bands:** 6–13 for kick → 808 and 3–20 for 808 → kick, not 6–12 for both.
+
+  `docs/research/fl-studio-kick-808-trial.md` is corrected in place.
+- Checks: reported in the handoff. Left uncommitted for Codex review.
