@@ -83,6 +83,21 @@
      in history (replayed from call 0), and the quiet floor applied before the pre-echo limit;
    - coverage: thr is set by qthr, nb, 2 nb_1 and 16 nb_2 somewhere; minval and the tonality term each decide the SNR
      somewhere; the tonality clamp acts at 0, at 1 and not at all.
+8. Probe H, long scale-factor-band mapping inputs (``expected_band_inputs``):
+   - downstream: for every input, the probe H output without its probe E, F, G and H fields hashed to the stored probe
+     D, C or B file (the E, F and G fields were also checked equal to the stored captures at capture time);
+   - tables: cbw_l, bu_l, bo_l and w1_l, w2_l are exactly the 44.1 kHz long ``sb`` rows of psy_data; the 21 bands
+     cover partitions 0..61 contiguously, sharing endpoint partitions (bo[sb] = bu[sb + 1]); L3para_read's checks
+     (bo = bu + cbw and |1 - w1[sb] - w2[sb - 1]| <= 0.01, from sb 1 on) hold, and sb 0 is the one row with
+     bo != bu + cbw (unchecked by the source);
+   - inputs: every probe B call has its mapping inputs; band_eb equals probe E's eb and band_thr equals probe G's
+     final thr where those probes captured the call; band_thr >= qthr_l everywhere;
+   - mapping: en = w1 eb[bu] + w2 eb[bo] + sum of eb[bu + 1 .. bo - 1] (double, endpoints first, then ascending) and
+     thm the same with thr reconstruct probe B's en/thm exactly on every call, short-path calls included; thm_quiet
+     is the same mapping of qthr_l;
+   - wrong variants change both en and thm on every call: swapped endpoint weights and the interior range moved by
+     one partition at either end; summing the interior before the endpoint terms changes en on at least one call
+     (observed: all 92).
 
 Usage: python verify_fixture.py   (from any directory; exits non-zero if any check fails)
 Re-running the reference itself needs Docker and the pinned archive; see ../README.md.
@@ -133,6 +148,7 @@ def check_hashes(provenance: dict, failures: list[str]) -> None:
         ("expected_partition_sha256", "expected_partition"),
         ("expected_spreading_sha256", "expected_spreading"),
         ("expected_threshold_sha256", "expected_threshold"),
+        ("expected_band_inputs_sha256", "expected_band_inputs"),
     )
     for group, folder in groups:
         recorded = provenance[group]
@@ -161,6 +177,9 @@ def check_hashes(provenance: dict, failures: list[str]) -> None:
         ("probe_threshold", "patch", "patch_sha256"),
         ("probe_threshold", "harness", "harness_source_sha256"),
         ("probe_threshold", "tables_file", "tables_sha256"),
+        ("probe_band", "patch", "patch_sha256"),
+        ("probe_band", "harness", "harness_source_sha256"),
+        ("probe_band", "bands_file", "bands_sha256"),
     ):
         entry = provenance[section]
         if sha256(FIXTURE / entry[key]) != entry[digest_key]:
@@ -854,6 +873,105 @@ def check_threshold(provenance: dict, failures: list[str]) -> None:
         failures.append(f"the tonality clamp is not exercised at both ends and inside (seen {sorted(clamp)})")
 
 
+# --- probe H: long scale-factor-band mapping inputs (l3psy.c ll. 652-660, L3para_read ll. 938-968) ---
+def map_long_bands(
+    values, bands: dict, swap_weights: bool = False, interior: tuple[int, int] = (1, 0), interior_first: bool = False
+):
+    """en/thm[sb] = w1 v[bu] + w2 v[bo], then += v[b] for b = bu + 1 .. bo - 1 ascending (double). The keywords
+    are wrong variants: endpoint weights swapped, the interior range moved to bu + interior[0] .. bo - 1 +
+    interior[1], or the interior summed before the endpoint terms are added."""
+    out = []
+    for sb in range(len(bands["bu_l"])):
+        bu, bo, w1, w2 = bands["bu_l"][sb], bands["bo_l"][sb], bands["w1_l"][sb], bands["w2_l"][sb]
+        if swap_weights:
+            w1, w2 = w2, w1
+        total = 0.0 if interior_first else w1 * values[bu] + w2 * values[bo]
+        for b in range(bu + interior[0], bo + interior[1]):
+            total = total + values[b]
+        out.append(total + (w1 * values[bu] + w2 * values[bo]) if interior_first else total)
+    return out
+
+
+BAND_VARIANTS = {
+    "swapped endpoint weights": {"swap_weights": True},
+    "interior starting at bu": {"interior": (0, 0)},
+    "interior starting at bu + 2": {"interior": (2, 0)},
+    "interior ending at bo": {"interior": (1, 1)},
+    "interior ending at bo - 2": {"interior": (1, -1)},
+}
+ORDER_VARIANT = {"interior_first": True}  # summation order: detected where rounding differs, not on every call
+
+
+def check_band_mapping(provenance: dict, failures: list[str]) -> None:
+    entry = provenance["probe_band"]
+    for name, digest in entry["stripped_outputs_sha256"].items():
+        if sha256(_reference_stored_file(name)) != digest:
+            failures.append(f"probe H output for {name} without its fields is not the stored earlier capture")
+    bands = json.loads((FIXTURE / entry["bands_file"]).read_text())
+    for key in ("cbw", "bu", "bo"):
+        if bands[f"{key}_l"] != [int(s) for s in bands[f"psy_data_44100_long_sb_{key}"]]:
+            failures.append(f"captured {key}_l is not the 44.1 kHz long sb rows of psy_data")
+    for key in ("w1", "w2"):
+        if bands[f"{key}_l"] != [float(s) for s in bands[f"psy_data_44100_long_sb_{key}"]]:
+            failures.append(f"captured {key}_l is not the double parse of the psy_data sb rows")
+    bu, bo, cbw = bands["bu_l"], bands["bo_l"], bands["cbw_l"]
+    if len(bu) != 21 or bu[0] != 0 or bo[-1] != 61 or any(bo[sb] != bu[sb + 1] for sb in range(20)):
+        failures.append("long bands are not 21 contiguous ranges from partition 0 to 61 sharing their endpoints")
+    if any(bo[sb] != bu[sb] + cbw[sb] for sb in range(1, 21)) or bo[0] == bu[0] + cbw[0]:
+        failures.append("cbw relation differs from the record (L3para_read checks bo = bu + cbw from sb 1 on)")
+    if any(abs(1.0 - bands["w1_l"][sb] - bands["w2_l"][sb - 1]) > 0.01 for sb in range(1, 21)):
+        failures.append("shared endpoint weights do not sum to 1 within L3para_read's 0.01 check")
+    tables = json.loads((FIXTURE / provenance["probe_threshold"]["tables_file"]).read_text())
+    partition = {
+        (p.stem, r["call"]): r
+        for p in sorted((FIXTURE / "expected_partition").glob("*.jsonl"))
+        for r in records("expected_partition", p.stem)
+    }
+    threshold = {
+        (p.stem, r["call"]): r
+        for p in sorted((FIXTURE / "expected_threshold").glob("*.jsonl"))
+        for r in records("expected_threshold", p.stem)
+    }
+    seen, detected, short_path, order_detected = set(), dict.fromkeys(BAND_VARIANTS, 0), 0, 0
+    for path in sorted((FIXTURE / "expected_band_inputs").glob("*.jsonl")):
+        b_records = {r["call"]: r for r in records("expected_long_mapping", path.stem)}
+        h_records = records("expected_band_inputs", path.stem)
+        if [r["call"] for r in h_records] != sorted(b_records):
+            failures.append(f"{path.stem}: probe H calls are not every probe B call")
+            continue
+        for h in h_records:
+            key, b = (path.stem, h["call"]), b_records[h["call"]]
+            where = f"{key[0]} call {key[1]}"
+            seen.add(key)
+            short_path += not b["encoder_long_path"]
+            if key in partition and h["band_eb"] != partition[key]["eb"]:
+                failures.append(f"{where}: the mapping's eb is not probe E's accumulated eb")
+            if key in threshold and h["band_thr"] != threshold[key]["thr"]:
+                failures.append(f"{where}: the mapping's thr is not probe G's final threshold")
+            if not all(t >= q for t, q in zip(h["band_thr"], tables["qthr_l"], strict=True)):
+                failures.append(f"{where}: the mapping's thr lies below threshold in quiet")
+            en, thm = map_long_bands(h["band_eb"], bands), map_long_bands(h["band_thr"], bands)
+            if en != b["en"] or thm != b["thm"]:
+                failures.append(f"{where}: en/thm do not reconstruct exactly from eb/thr and the band tables")
+            if map_long_bands(tables["qthr_l"], bands) != b["thm_quiet"]:
+                failures.append(f"{where}: thm_quiet is not the band mapping of qthr_l")
+            for label, variant in BAND_VARIANTS.items():
+                detected[label] += (
+                    map_long_bands(h["band_eb"], bands, **variant) != b["en"]
+                    and map_long_bands(h["band_thr"], bands, **variant) != b["thm"]
+                )
+            order_detected += map_long_bands(h["band_eb"], bands, **ORDER_VARIANT) != b["en"]
+    if {tuple(k) for k in entry["selected_calls"]} != seen:
+        failures.append("probe H calls differ from provenance.json")
+    if not short_path:
+        failures.append("no short-path call carries the fixed long-band mapping")
+    for label, count in detected.items():
+        if count != len(seen):
+            failures.append(f"{label} reproduces en or thm on {len(seen) - count} calls")
+    if not order_detected:
+        failures.append("the capture cannot tell the endpoint-first summation order from interior-first")
+
+
 def main() -> int:
     provenance = json.loads((FIXTURE / "provenance.json").read_text(encoding="utf-8"))
     failures: list[str] = []
@@ -864,6 +982,7 @@ def main() -> int:
     check_partition(provenance, failures)
     check_spreading(provenance, failures)
     check_threshold(provenance, failures)
+    check_band_mapping(provenance, failures)
     for failure in failures:
         print("FAIL:", failure)
     if not failures:

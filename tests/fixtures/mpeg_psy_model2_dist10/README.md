@@ -4,7 +4,7 @@ Reference values from ISO dist10 `L3psycho_anal`, our chosen backend for the MPE
 
 The inputs are synthetic numerical test signals (tones, impulses, silence), not musical material or evaluation data. The fixture shows only what dist10 computes. It does not show that the model is perceptually valid or that it matches Ronan's implementation.
 
-## Seven separately labelled captures
+## Eight separately labelled captures
 
 | Folder | Probe | What it is |
 | --- | --- | --- |
@@ -15,6 +15,7 @@ The inputs are synthetic numerical test signals (tones, impulses, silence), not 
 | `expected_partition/` | **E, partition probe** (`capture/l3psy_partition_probe.diff`, `capture/harness_partition.c`; built on D) | Observation only. For selected probe D calls: `partition_energy` (513, float32) and `partition_cw` (513, double) as read by the long partition loop, and `eb` (63, double) and `cb` (63, float32) right after accumulation, before spreading. Calls: silence 0–2, the 1983 impulse 3–4, the burst 4, the 8192 masker 3 and the quiet target 6. Only these fields are stored; the full outputs, with them removed, equalled the stored D/C/B files. Also `mapping_44100.json`: `partition_l`, the `numlines` at partition time, and the 44.1 kHz long and short `#lines` of `psy_data`. |
 | `expected_spreading/` | **F, spreading probe** (`capture/l3psy_spreading_probe.diff`, `capture/harness_spreading.c`; built on E) | Observation only. For every probe E call: `ecb` (63, float32) and `ctb` (63, double) after the long convolution, and from the tonality loop `ratio_divided`, `ratio` (ctb/ecb), `ratio_clamped` (lower clamp 0.01) and `tonality_input` (the value passed to `tbb`). Also `s3_44100.json`: the spreading matrix `s3_l` (row = output partition, column = input partition) with the `psy_data` `bval` strings. Only these fields are stored; the full outputs without the E and F fields equalled the stored D/C/B files. |
 | `expected_threshold/` | **G, threshold probe** (`capture/l3psy_threshold_probe.diff`, `capture/harness_threshold.c`; built on F) | Observation only. For every call of the 1 kHz tone at 8192 (calls 0–5) and of the burst (calls 0–7), consecutive from start-up: `ecb` (float32) and `tonality_input` as in F, then `tonality_raw` (`tbb` before the clamp), `tonality` (after the [0, 1] clamp), `snr` (`SNR_l`), `nb` (float32), `nb_1_before` and `nb_2_before` (history as read), `pre_echo_limit` (`temp_1`), `thr` (final partition threshold before band mapping), `nb_1_after` and `nb_2_after` (history as stored); 63 values each. Also `tables_44100.json`: `minval`, `qthr_l` and `norm_l` as captured, with the `psy_data` strings. Only these fields are stored; the full outputs without the E, F and G fields equalled the stored D/C/B files. |
+| `expected_band_inputs/` | **H, band-mapping input probe** (`capture/l3psy_band_probe.diff`, `capture/harness_band.c`; built on G) | Observation only. For every call of every input: `band_eb` and `band_thr` (63 doubles each), the partition energy and the final threshold (after the pre-echo limit and the quiet floor) exactly as probe B's long-band mapping reads them. Also `bands_44100.json`: `cbw_l`, `bu_l`, `bo_l`, `w1_l` and `w2_l` as captured, with the `psy_data` `sb` strings. Only these fields are stored; the full outputs without the E–H fields equalled the stored D/C/B files. |
 
 Probe D line fields (selected calls; contract §3.2):
 - `short_windowed_samples`: 3 × 256 float32. Block s position j is stream sample 576k − 512 + 128s + j.
@@ -58,12 +59,13 @@ Call `k` analyses stream samples `[576k − 768, 576k + 256)`, with zeros before
 - `provenance.json`: archive URL, commit and SHA-256, and hashes of every source and table used. Also every probe patch, patched source, harness source and binary, the container digest, compiler and flags, and the input and output hashes.
 - `capture/`:
   - `make_inputs.py`: the signal generator.
-  - `make_probe.py`, `make_probe_mapping.py`, `make_probe_fft.py`, `make_probe_short.py`, `make_probe_partition.py`, `make_probe_spreading.py` and `make_probe_threshold.py`: generate the patches.
-  - The seven harnesses, plus `run_in_container.sh` (A and B), `run_fft_in_container.sh` (C), `run_short_in_container.sh` (D), `run_partition_in_container.sh` (E), `run_spreading_in_container.sh` (F) and `run_threshold_in_container.sh` (G).
+  - `make_probe.py`, `make_probe_mapping.py`, `make_probe_fft.py`, `make_probe_short.py`, `make_probe_partition.py`, `make_probe_spreading.py`, `make_probe_threshold.py` and `make_probe_band.py`: generate the patches.
+  - The eight harnesses, plus `run_in_container.sh` (A and B), `run_fft_in_container.sh` (C), `run_short_in_container.sh` (D), `run_partition_in_container.sh` (E), `run_spreading_in_container.sh` (F), `run_threshold_in_container.sh` (G) and `run_band_in_container.sh` (H).
   - `verify_fixture.py`: checks hashes, the relations between the probes, the long- and short-FFT evidence, the partition inputs and the spreading inputs.
   - `compare_partition_inputs.py`: prints the eb/cb residuals of the Python spectra and predictor against probe E (contract §3.3).
   - `compare_spreading_inputs.py`: prints the ecb/ctb/ratio residuals and the burst call 4 partition 50 substitution against probe F (contract §3.4).
   - `compare_threshold_inputs.py`: prints the per-stage threshold residuals of the Python chain against probe G with the history replayed from call 0, any change of the deciding term, the decision margins and the two named partition-50 cases (contract §3.5).
+  - `compare_band_margins.py`: prints the band-energy and band-threshold residuals of the Python chain against probe B, partition 50 traced into band 16, and the directional margins of both backends for the tone pairs at both levels, with the exact-silence controls kept separate (contract §3.6).
   - `summarize_controls.py`: prints the control-case numbers quoted in the contract.
 - `.gitattributes`: `-text`, so checkout keeps the hashed bytes exact.
 
@@ -103,6 +105,8 @@ This regenerates the inputs and checks every recorded hash. It also checks these
 - The raw tonality, its clamp and the SNR reconstruct exactly; `nb` (float32 store) within one float32 ulp (observed bit-identical); the pre-echo limit and `thr` exactly.
 - The history reads zero at call 0 and then the `nb` of the two previous calls, and each call stores its unbounded `nb`. Swapped history ages, the final threshold stored in history and the quiet floor applied before the pre-echo limit each fail on at least one call.
 - Every deciding term (`qthr`, `nb`, 2·nb₋₁, 16·nb₋₂), both SNR terms and both clamp ends occur.
+- Probe H leaves the earlier outputs unchanged. Its band tables are exactly the 44.1 kHz long `sb` rows of `psy_data` (21 contiguous bands over partitions 0–61, with shared endpoints), and its `eb` and `thr` equal probes E and G where they captured the call.
+- `en`, `thm` and `thm_quiet` reconstruct exactly on all 92 probe B calls, short-path calls included: endpoint terms first, then the interior partitions in ascending order. Swapped endpoint weights and an interior range moved by one partition at either end fail on every call; an interior-first summation order fails too.
 
 It does not rerun dist10.
 
@@ -141,7 +145,11 @@ This needs Docker and the pinned archive. Download the archive into an empty dir
    python capture/make_probe_threshold.py build/src/l3psy_spreading_probe.c build/src/l3psy_threshold_probe.c
    ```
 
-3. Copy the seven `capture/harness*.c` files into `build/src/`, and the six `capture/run*_in_container.sh` scripts into `build/`.
+   ```bash
+   python capture/make_probe_band.py build/src/l3psy_threshold_probe.c build/src/l3psy_band_probe.c
+   ```
+
+3. Copy the eight `capture/harness*.c` files into `build/src/`, and the seven `capture/run*_in_container.sh` scripts into `build/`.
 4. Generate the inputs into `build/inputs/` with `make_inputs.py`.
 5. Run the captures in the pinned container (replace `<build>` with the build directory):
 
@@ -169,7 +177,11 @@ This needs Docker and the pinned archive. Download the archive into an empty dir
    docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e sh /w/run_threshold_in_container.sh
    ```
 
-6. From `build/out/encoder_path/*.jsonl`, `build/out/long_mapping/*.jsonl`, `build/out/long_fft/*.jsonl` and `build/out/short/*.jsonl`, keep only the lines that start with `{`. Copy `build/out/long_fft/silence_12granules.window.json` as `expected_long_fft/window_long.json` and `build/out/short/silence_12granules.window_s.json` as `expected_short/window_short.json`; within each folder, all nine window files are identical. Keep in `expected_short/` only the five inputs with probe D calls. For probe E, check that each `build/out/partition/*.jsonl` without its four probe E fields equals the stored D, C or B file. Then store per probe E call only `call`, `partition_energy`, `partition_cw`, `eb` and `cb` in `expected_partition/<input>.jsonl`, and write `mapping_44100.json` with `partition_l`, the captured `numlines` and the long and short `#lines` of `tables/psy_data`. For probe F, likewise check each `build/out/spreading/*.jsonl` without its E and F fields against the stored D, C or B file, and its E fields against `expected_partition`. Then store per probe F call only `call` and the six F fields in `expected_spreading/<input>.jsonl`, and write `s3_44100.json` with `s3_l` and the long `bval` strings of `tables/psy_data`. For probe G, check each `build/out/threshold/*.jsonl` (lines starting with `{`) without its E, F and G fields against the stored D, C or B file, its E and F fields against `expected_partition` and `expected_spreading`, and its window, mapping and matrix files against the stored ones. Then store per probe G call `call` and the twelve G fields (`g_ecb` and `g_tonality_input` renamed to `ecb` and `tonality_input`) in `expected_threshold/<input>.jsonl`, and write `tables_44100.json` with the captured tables and the long `minval`, `qthr` and `norm` strings of `tables/psy_data`.
+   ```bash
+   docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e sh /w/run_band_in_container.sh
+   ```
+
+6. From `build/out/encoder_path/*.jsonl`, `build/out/long_mapping/*.jsonl`, `build/out/long_fft/*.jsonl` and `build/out/short/*.jsonl`, keep only the lines that start with `{`. Copy `build/out/long_fft/silence_12granules.window.json` as `expected_long_fft/window_long.json` and `build/out/short/silence_12granules.window_s.json` as `expected_short/window_short.json`; within each folder, all nine window files are identical. Keep in `expected_short/` only the five inputs with probe D calls. For probe E, check that each `build/out/partition/*.jsonl` without its four probe E fields equals the stored D, C or B file. Then store per probe E call only `call`, `partition_energy`, `partition_cw`, `eb` and `cb` in `expected_partition/<input>.jsonl`, and write `mapping_44100.json` with `partition_l`, the captured `numlines` and the long and short `#lines` of `tables/psy_data`. For probe F, likewise check each `build/out/spreading/*.jsonl` without its E and F fields against the stored D, C or B file, and its E fields against `expected_partition`. Then store per probe F call only `call` and the six F fields in `expected_spreading/<input>.jsonl`, and write `s3_44100.json` with `s3_l` and the long `bval` strings of `tables/psy_data`. For probe G, check each `build/out/threshold/*.jsonl` (lines starting with `{`) without its E, F and G fields against the stored D, C or B file, its E and F fields against `expected_partition` and `expected_spreading`, and its window, mapping and matrix files against the stored ones. Then store per probe G call `call` and the twelve G fields (`g_ecb` and `g_tonality_input` renamed to `ecb` and `tonality_input`) in `expected_threshold/<input>.jsonl`, and write `tables_44100.json` with the captured tables and the long `minval`, `qthr` and `norm` strings of `tables/psy_data`. For probe H, likewise check each `build/out/band/*.jsonl` without its E–H fields against the stored D, C or B file, its E, F and G fields against the stored captures, `band_eb` against probe E's `eb` and `band_thr` against probe G's `thr`, and its window, mapping, matrix and tables files against the stored ones. Then store per call `call`, `band_eb` and `band_thr` in `expected_band_inputs/<input>.jsonl`, and write `bands_44100.json` with the captured band tables and the strings of the `freq=44100.0 sb=20` block of `tables/psy_data`.
 
 Reproducibility:
 - The first capture (probe A) was byte-identical across two runs.
@@ -180,3 +192,4 @@ Reproducibility:
 - Probe E: another fresh extraction, with the B, C and D diffs regenerated identically. Two runs were byte-identical in outputs, window and mapping files and binary.
 - Probe F: a further fresh extraction, with the B–E diffs regenerated identically. Two runs were byte-identical in outputs, window, mapping and matrix files and binary.
 - Probe G: a further fresh extraction (2026-11-16), with the B–F diffs regenerated identically. Two runs were byte-identical in outputs, window, mapping, matrix and tables files and binary.
+- Probe H: a further fresh extraction (2026-11-16), with the B–G diffs regenerated identically. Two runs were byte-identical in outputs, window, mapping, matrix, tables and band files and binary.

@@ -14,6 +14,8 @@ Revision 6 (2026-11-12, Task 3I) adds the spreading and tonality-input capture (
 
 Revision 7 (2026-11-16, Task 3K) adds the partition-threshold capture (§3.5): the `minval`, `qthr` and `norm` tables, the tonality factor and its clamp, the SNR, the float32 `nb`, the two-call pre-echo history, and `thr` before band mapping. It makes the §2.2 "Threshold" and "Temporal state" rows precise: the history stores the unbounded float32 `nb`, not `thr`, and is updated on short-path calls too.
 
+Revision 8 (2026-11-16, Task 3M) adds the long scale-factor-band mapping evidence (§3.6): the `psy_data` band rows, the endpoint weights, the interior range and summation order, a capture of the mapping inputs on every call (probe H), and the directional margins of the package chain against probe B. It makes the §2.2 "Scale-factor bands" row precise. The band-table question of §4 item 3 (Layer III against AAC bands) is unchanged.
+
 Labels: **[T]** defined by Ronan's thesis; **[S]** defined by the dist10 source, our chosen backend; **[R]** observed in the reference run; **[P]** project choice proposed for review; **[U]** unresolved.
 
 ## 1. Source trace
@@ -79,7 +81,7 @@ Output for an ordered pair A → B over one clip: two float64 arrays shaped `(va
 | Current vs returned values | The function returns `ratio` before analysing the new granule (ll. 441–445), so the returned ratio of call `k` belongs to call `k − 1`. The contract uses the current call's `en`/`thm`. | [S]; [R] |
 | Partitions, spreading, tonality | As dist10: `eb[b] = Σ energy[j]` over `partition_l`. Spreading `s3_l` (ll. 821–838). Unpredictability from long-FFT lines 0–5 and short-FFT lines 6–205; 0.4 above. `tb = clamp(−0.299 − 0.43·ln(max(0.01, ctb/ecb)), 0, 1)`; `SNR = max(minval, 29·tb + 6·(1 − tb))`. | [S] ll. 483–604; [T] prose agrees |
 | Threshold | `nb = ecb·norm·10^(−SNR/10)`; `thr = max(qthr_l, min(nb, 2·nb₋₁, 16·nb₋₂))`. `qthr_l` per partition from `psy_data`. | [S] ll. 608–616; [U] thesis wording (§1.2) |
-| Scale-factor bands | `en[sb] = w1·eb[bu] + w2·eb[bo] + Σ_{bu<b<bo} eb[b]`; `thm[sb]` the same with `thr`. | [S] ll. 652–660; [U] band-table provenance |
+| Scale-factor bands | `en[sb] = w1·eb[bu] + w2·eb[bo] + Σ_{bu<b<bo} eb[b]`; `thm[sb]` the same with `thr`. The endpoint terms are summed first, then the interior partitions in ascending order (double). `thr` is the final partition threshold, after the pre-echo limit and the quiet floor. Tables and evidence are in §3.6. | [S] ll. 652–660, 938–968; [R] §3.6; [U] band-table provenance |
 | Temporal state | `r`, `phi_sav`, `nb_1` and `nb_2` start at zero. For calls 0 and 1, `min(nb, 0, 0) = 0`, so `thr = qthr`. | [S] ll. 75, 613–614; [R] |
 | **Final-frame rule** | For a clip of `N` samples, the front end runs `ceil(N / 576)` calls and fills a final partial granule with zeros, as the dist10 encoder does with a short final frame (`encode.c` ll. 160–162). Frame `k` is **valid iff `k ≥ 2` and `576k + 256 ≤ N`**: the long window lies inside the clip and the start-up state is past. Valid frames are therefore `k = 2 … ⌊(N − 256)/576⌋`, which is `⌊(N − 256)/576⌋ − 1` frames for `N ≥ 1408`. A clip with `N < 1408` has no valid frame, and its result is unavailable rather than computed from padding. The fill value cannot affect a valid frame, because its window ends inside the clip. Calls past the last valid frame are computed only to keep the state sequence identical; their values are discarded. Masker and target are cut to the same `N`, so their valid frames coincide. | [S] window extent; [R] final-frame case; [P] rule |
 | Block switching | If `pe ≥ 1800` the encoder takes the short-block path, which overwrites `eb` and `thr` with short-block values and forms no long `en`/`thm` (ll. 628–690). The state `nb_1`/`nb_2` is updated before the branch in both paths (l. 616). Options: (a) mark such frames unavailable for both directions; (b) apply the long mapping to the long `eb`/`thr` before the branch (probe B, §3), recording `pe` and the encoder branch as evidence. Probe B equals the encoder bit for bit on all 69 long-path calls. On short-path calls it gives finite values, which at a masker onset are capped by pre-echo control (§3). Decision for review; revision 1 recommended (b). | [S]; [R] probe B; [P] open |
@@ -432,6 +434,103 @@ The end-to-end tolerance stays open until the effect on band thresholds (`thm`) 
 - No value can overflow (`nb ≤ ecb`), and float32 underflow is not an error under any NumPy policy.
 
 Against Probe G, with each clip replayed from call 0 using the captured spread inputs, every output is exact on all 14 calls, `nb` included (NumPy `exp`). With the full Python chain (report only), the worst `thr` difference is 3.32e−3 relative (tone, call 5, p47) and no quiet-floor decision changes. At the named cases, `thr` is 58.4603 → 58.4631 (4.78e−5) at tone call 3, p50 and 0.18 on both sides at burst call 4, p50.
+
+### 3.6 Long scale-factor-band mapping and directional margins (probe H, Task 3M, 2026-11-16)
+
+**Tables.** After the partition tables, `L3para_read` reads one block per rate with `fscanf("freq=%lf sb=%d")` and then, per row, `fscanf("sb=%d cbw=%d bu=%d bo=%d w1=%lf w2=%lf")` into `cbw_l`, `bu_l`, `bo_l` (int) and `w1_l`, `w2_l` (static double) (ll. 938–968). At 44.1 kHz the block is `freq=44100.0 sb=20` (rows sb = 0…20; `psy_data` l. 650), with weights written to 3 decimals. From sb 1 on, the source rejects a row unless `bo = bu + cbw` and `|1 − w1[sb] − w2[sb − 1]| ≤ 0.01`. Row sb 0 is not checked, and it is the one row that breaks the first relation (`cbw` 3, `bu` 0, `bo` 4).
+
+| sb | bu | bo | w1 | w2 | sb | bu | bo | w1 | w2 | sb | bu | bo | w1 | w2 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 | 4 | 1.000 | 0.056 | 7 | 21 | 24 | 0.417 | 0.250 | 14 | 43 | 46 | 0.532 | 0.623 |
+| 1 | 4 | 7 | 0.944 | 0.611 | 8 | 24 | 27 | 0.750 | 0.805 | 15 | 46 | 49 | 0.376 | 0.450 |
+| 2 | 7 | 11 | 0.389 | 0.167 | 9 | 27 | 30 | 0.194 | 0.574 | 16 | 49 | 52 | 0.550 | 0.552 |
+| 3 | 11 | 14 | 0.833 | 0.722 | 10 | 30 | 33 | 0.426 | 0.537 | 17 | 52 | 55 | 0.448 | 0.403 |
+| 4 | 14 | 17 | 0.278 | 0.139 | 11 | 33 | 36 | 0.463 | 0.819 | 18 | 55 | 57 | 0.597 | 0.643 |
+| 5 | 17 | 18 | 0.861 | 0.917 | 12 | 36 | 40 | 0.180 | 0.100 | 19 | 57 | 59 | 0.357 | 0.722 |
+| 6 | 18 | 21 | 0.083 | 0.583 | 13 | 40 | 43 | 0.900 | 0.468 | 20 | 59 | 61 | 0.278 | 0.960 |
+
+The 21 bands cover partitions 0–61 contiguously. Each endpoint partition `bo[sb] = bu[sb + 1]` is shared: band sb takes `w2[sb]` of it and band sb + 1 takes `w1[sb + 1]`. The two weights sum to 1 within the 0.01 check (exactly 1.000 in most rows). Partition 62, the top 18 lines of the long table, is never read by the long bands. Band 5 has no interior partition. The weights are table data. Their derivation, presumably the share of the endpoint partition that lies inside the band, is not traced [U].
+
+**Operation (ll. 652–660; probe B applies it on every call).** For sb = 0…20:
+1. `en[sb] = w1_l[sb]·eb[bu_l[sb]] + w2_l[sb]·eb[bo_l[sb]]` (two double products, then their sum);
+2. `en[sb] += eb[b]` for b = bu + 1 … bo − 1, ascending;
+3. `thm[sb]` the same with `thr`.
+
+`eb` is the static double partition energy of §3.3. `thr` is the local double final threshold of §3.5 step 6, after the pre-echo limit and the quiet floor. The encoder runs the mapping only when `pe < 1800`. Probe B applies the same expressions after `pe` and before the block-switching branch, so the fixed long-band mapping is defined on every call, including the encoder's short-path calls (§2.2 option (b)). `ratio = thm/en` and the short-block bands are not part of the contract.
+
+**Probe H** is an eighth observation-only patch, built on probe G (`capture/l3psy_band_probe.diff` from `capture/make_probe_band.py`, `capture/harness_band.c`, `capture/run_band_in_container.sh`; outputs `expected_band_inputs/`). Right before probe B's mapping, it copies `eb[0..62]` and `thr[0..62]` as the mapping reads them, and the band tables (stored once, in `bands_44100.json`, with the `psy_data` strings). It runs on every call of all nine inputs: 92 calls, 13 of them short-path calls, 204 KB stored.
+- **Capture:** from a fresh extraction, with the B–G diffs regenerated identically. Two runs were byte-identical in outputs and binary.
+- **Earlier probes unchanged:** every output, with the E–H fields removed, equals its stored D, C or B file. The E, F and G fields equal the stored captures, and the window, mapping, matrix and tables files are unchanged.
+- **Inputs:** `band_eb` equals probe E's `eb` and `band_thr` equals probe G's `thr` wherever those probes captured the call.
+
+**Reconstruction from captured inputs** (`verify_fixture.py` §8):
+- The captured tables equal the `psy_data` rows exactly, and `band_thr ≥ qthr` everywhere.
+- `en`, `thm` and `thm_quiet` reconstruct probe B **exactly on all 92 calls**, short-path calls included, from `band_eb`, `band_thr` and `qthr_l`.
+- Wrong variants are rejected on every call, with both `en` and `thm` changing: swapped endpoint weights, and the interior range moved by one partition at either end (starting at `bu` or `bu + 2`, ending at `bo` or `bo − 2`).
+- Summing the interior before the endpoint terms changes `en` on all 92 calls and `thm` on 91, so the summation order is observable and fixed by the capture.
+
+**Python chain** (`capture/compare_band_margins.py`): framing, spectra, `cw`, partition sums, spreading and the threshold kernel, with each clip replayed from call 0, then the same mapping. Against probe B, on every call of the nine inputs:
+
+| Quantity | Worst absolute | Worst relative |
+| --- | --- | --- |
+| `en` | 5.23e5 (burst, call 7, band 6; value 6.13e12) | 1.28e−3 (tone 8192, call 9, band 12; 403.25 → 403.77) |
+| `thm` | 1.34e5 (burst, call 7, band 6; value 1.56e12) | 1.05e−3 (tone 8192, call 5, band 15; 167.17 → 166.99) |
+| `en`, short-path calls only | 5.21e5 (burst, call 5, band 6) | 1.16e−3 (burst, call 5, band 0) |
+| `thm`, short-path calls only | 0 | 0 (`thr = qthr` on every short-path call) |
+
+**Partition 50** is interior to band 16 only (bu 49, bo 52; weight 1):
+- **Tone call 3:**
+  - `eb[50]` 280.574 → 280.595 (7.2e−5) gives band-16 `en` 1083.10 → 1083.41 (2.9e−4); p50 is 26% of that band's energy.
+  - `thr[50]` 58.4603 → 58.4631 (4.8e−5) gives band-16 `thm` 243.728 → 243.770 (1.7e−4); p50 is 24% of it.
+  - In both, the band difference comes mostly from the other partitions.
+- **Burst call 4** (an encoder short-path call):
+  - `eb[50]` 5.18e8 (5.5e−7) gives band-16 `en` 1.6577e9 (1.6e−7).
+  - `thr[50]` = `qthr` = 0.18 on both sides, so band-16 `thm` = 0.6978 = `thm_quiet` on both sides, exactly.
+
+**Directional margins** (approved kernel `directional_masking_margin_db`; `T` = masker `thm`, `E` = target `en`; valid frames k = 2…11 of §2.2, 10 × 21 cells per direction; history replayed from call 0 for each clip):
+
+| Direction | Margin range (probe B) | Cells `T > E` (B / Python) | Largest error | Where | `T` and `E` (probe B → Python) |
+| --- | --- | --- | --- | --- | --- |
+| tone 8192 → target 1024 | −45.3 … 95.8 dB | 70 / 70 | 4.67e−3 dB | frame 5, band 15 | `T` 167.167 → 166.991; `E` 880.450 → 880.470 |
+| target 1024 → tone 8192 | −108.0 … 64.9 dB | 60 / 60 | 5.55e−3 dB | frame 9, band 12 | `T` 1.73664e7 → 1.73664e7; `E` 403.250 → 403.766 |
+| tone 81.92 → target 10.24 | −41.6 … 69.5 dB | 50 / 50 | 4.16e−4 dB | frame 11, band 12 | `T` 9.45838 → 9.45747; `E` 178.4349 → 178.4348 |
+| target 10.24 → tone 81.92 | −83.7 … 35.0 dB | 39 / 39 | 2.35e−4 dB | frame 11, band 2 | `T` 0.0985959 → 0.0985959; `E` 29.4635 → 29.4619 |
+
+- **No sign changes** in any direction. The cell nearest 0 dB lies at −1.66, +1.80, −1.13 and −1.36 dB respectively, far outside the errors. So the captures do not test a cell within the errors of 0 dB.
+- **Exact-silence controls**, reported separately:
+
+  | Control | Margin range | Cells `T > E` | Error |
+  | --- | --- | --- | --- |
+  | silence → target 1024 | −120.6 … −5.9 dB | 0 | ≤ 1.3e−3 dB |
+  | silence → target 10.24 | −80.6 … −7.2 dB | 0 | ≤ 6.4e−5 dB |
+  | tone 8192 → silence | 28.7 … 147.7 dB | all 210 | ≤ 4.6e−3 dB |
+  | silence → silence | 12.6 … 40.7 dB | all 210 | 0 |
+
+  Where the target is silent, every cell "exceeds", because `E` is the FFT energy floor. The silent-window flag (no nonzero int16 sample in `[576k − 768, 576k + 256)`) marks exactly those frames: all 10 valid frames when the target is silent, none for the active targets. The Python flag computed from the raw input equals probe B's on every valid frame. A margin on a flagged frame can therefore be identified as floor-driven and must not be read as target activity.
+
+**Coverage gaps:**
+- The signal-derived `thr` never decides on a short-path call: all 13 have zero or silent history, so short-path `thm` is tested only at `qthr`.
+- No captured margin lies within the errors of 0 dB.
+- No stereo, no other rate, and only the Layer III long band table.
+- The derivation of `w1`/`w2` is not traced.
+
+The end-to-end tolerance remains open for review. The production band-mapping kernel follows after review.
+
+**Implementation (Task 3N, 2026-11-16).** `adapters.dsp_analysis.bands.dist10_long_bands(eb, thr)` takes aligned float64 `eb` and final `thr`, each `(calls, 63)`, and returns `LongBandValues`: `en` and `thm`, fresh read-only float64 arrays `(calls, 21)`. This supersedes the last sentence above for the kernel; the tolerance stays open.
+- The `bu`, `bo`, `w1` and `w2` rows of the pinned `psy_data` are embedded, with its SHA-256 cited. `bu` and `bo` are used as recorded, so band 0 ends at partition 4. Partition 62 is never read.
+- For each band the two weighted endpoints are summed first, then the interior partitions in ascending order. The same mapping is applied to `eb` and `thr`.
+- Every call is mapped in order, start-up and short-path calls included; eligibility and exact silence are the caller's concern.
+- Malformed inputs, mismatched call counts, negative or non-finite values and a mapped sum beyond float64 are rejected; the overflow error names the quantity, call and band. The empty result has shape `(0, 21)`.
+
+With Probe H's captured `eb`/`thr` the kernel reproduces Probe B's `en`, `thm` and `thm_quiet` exactly on all 92 calls. Used for the Python chain in `capture/compare_band_margins.py`, it equals the verifier's independent mapping on every call and leaves the comparison output unchanged: on the 840 eligible tone-pair cells the largest margin difference is 5.552e−3 dB, with no sign change. This is descriptive only. Analyzer integration and the interpretation of masking margins are later tasks.
+
+**Composed front end (Task 3O, 2026-11-16).** `adapters.dsp_analysis.front_end.dist10_clip_to_bands(samples, *, sample_rate_hz) -> ClipBandAnalysis` takes one mono int16 clip at 44,100 Hz.
+- **Validation and framing:** inputs are validated by `frame_long_blocks`.
+- **Order:** it composes the reviewed kernels in the reference's order: framing, long and short spectra, unpredictability, partition sums, spreading, partition thresholds and the long-band mapping.
+- **Calls:** every call is processed, including the start-up calls whose history the predictor and the threshold stage need.
+- **Result:** `sample_count`, `sample_rate_hz`, the framer's `call`, `window_start`, `window_end`, `eligible` and `nonzero_samples`, and read-only float64 `en`/`thm` `(calls, 21)`. Ineligible and exactly silent calls (`nonzero_samples == 0`) stay in the result with their metadata. Windows and intermediate spectra are not kept. An empty clip gives zero calls.
+
+The entry point equals the direct composition of the kernels on all nine fixture clips, and its metadata equals Probe B's on all 92 calls. On the silence clip its `en` and `thm` equal Probe B exactly. The comparison script now takes its Python path from the entry point and reports the same evidence as before (840 eligible tone-pair cells, largest margin difference 5.552e−3 dB, no sign change; descriptive). WAV conversion, analyzer integration and interpreting the margins are later tasks.
 
 ## 4. Remaining implementation decisions and open questions
 

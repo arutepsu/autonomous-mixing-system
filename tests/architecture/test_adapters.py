@@ -204,6 +204,26 @@ ANALYSIS_EDGES = {
     "spreading": (set(), {"numpy"}),
     # dist10 partition thresholds (front-end contract §3.5, Task 3L, 2026-11-16): stdlib and NumPy only.
     "thresholds": (set(), {"numpy"}),
+    # dist10 long scale-factor-band mapping (front-end contract §3.6, Task 3N, 2026-11-16): stdlib and NumPy only.
+    "bands": (set(), {"numpy"}),
+    # dist10 clip-to-band front end (front-end contract §2-§3.6, Task 3O, 2026-11-16): composes exactly the reviewed
+    # kernels; stdlib and NumPy only otherwise.
+    "front_end": (
+        {
+            f"{ANALYSIS}.{m}"
+            for m in (
+                "framing",
+                "long_spectrum",
+                "short_spectrum",
+                "unpredictability",
+                "partitions",
+                "spreading",
+                "thresholds",
+                "bands",
+            )
+        },
+        {"numpy"},
+    ),
     "file_analyzer": (
         {f"{ANALYSIS}.levels", f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _s("integrity", "limits", "locations")
@@ -319,6 +339,8 @@ def test_dsp_analysis_loads_no_legacy_layer_rendering_driver_or_provider():  # G
         "partitions",
         "spreading",
         "thresholds",
+        "bands",
+        "front_end",
     ],
 )
 def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(module):  # G4
@@ -341,6 +363,7 @@ def test_level_analysis_loads_no_m0_rendering_journal_driver_stage_or_provider(m
         "partitions",
         "spreading",
         "thresholds",
+        "bands",
     ],
 )
 def test_masking_kernel_and_framing_load_no_other_project_module_soundfile_or_scipy(module):  # G4
@@ -349,6 +372,27 @@ def test_masking_kernel_and_framing_load_no_other_project_module_soundfile_or_sc
     project = {n for n in loaded if n.split(".")[0] == PKG}
     assert project == {PKG, ADAPTERS, ANALYSIS, f"{ANALYSIS}.{module}"}  # package initializers and itself only
     assert not {"soundfile", "scipy"} & {n.split(".")[0] for n in loaded}
+
+
+FRONT_END_KERNELS = (
+    "framing",
+    "long_spectrum",
+    "short_spectrum",
+    "unpredictability",
+    "partitions",
+    "spreading",
+    "thresholds",
+    "bands",
+)
+
+
+def test_front_end_loads_exactly_its_kernels_and_no_soundfile_or_scipy():  # G4
+    loaded = _loaded_after(f"import {ANALYSIS}.front_end")
+    project = {n for n in loaded if n.split(".")[0] == PKG}
+    kernels = {f"{ANALYSIS}.{m}" for m in FRONT_END_KERNELS}
+    assert project == {PKG, ADAPTERS, ANALYSIS, f"{ANALYSIS}.front_end"} | kernels  # initializers, kernels, itself
+    assert not {"soundfile", "scipy"} & {n.split(".")[0] for n in loaded}
+    assert _forbidden_layers(loaded) == []
 
 
 def test_memory_journal_loads_no_legacy_layer_other_adapter_driver_stage_provider_or_numpy():  # G4

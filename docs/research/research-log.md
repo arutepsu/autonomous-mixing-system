@@ -1121,3 +1121,86 @@
 - Fix: after masked arrays are rejected, inputs are read as plain ndarray views (`np.asarray`, no copy), so validation and computation see the same data with ndarray semantics. The formula, float32 `nb` rounding, history and Probe G results are unchanged.
 - Regression: `np.matrix` inputs give results identical to plain arrays, as plain ndarray outputs. A slice-hiding subclass carrying NaN, −inf or a negative `ecb` is rejected with the matching `ValueError`. Before the fix the test failed. The test filters only numpy's `np.matrix` PendingDeprecationWarning, which its own construction triggers.
 - Checks: fixture verifier passes. Threshold and architecture tests with warnings as errors: 272 passed. Full suite: 4916 passed, 4 skipped. Ruff check and scoped format are clean. Left uncommitted.
+
+## 2026-11-16 — dist10 long scale-factor-band mapping and directional margins (Task 3M, Claude Code)
+- Start: branch `feature/budget`, HEAD `f1b6486`, clean working tree. Scope: reference evidence and the mapping contract only. There is no production band-mapping kernel and no tolerance.
+- Trace (contract §3.6): `L3para_read` reads the `freq=44100.0 sb=20` block of `psy_data` (rows sb 0–20) with `fscanf("sb=%d cbw=%d bu=%d bo=%d w1=%lf w2=%lf")` (ll. 938–968). It checks `bo = bu + cbw` and `|1 − w1[sb] − w2[sb−1]| ≤ 0.01` only from sb 1 on; sb 0 (`cbw` 3, `bu` 0, `bo` 4) breaks the first relation unchecked. The 21 bands cover partitions 0–61 and share their endpoints; partition 62 is never read. Mapping (ll. 652–660): `w1·v[bu] + w2·v[bo]` first, then `v[bu+1 .. bo−1]` ascending, in double; `en` from `eb`, `thm` from the final `thr` (after the pre-echo limit and the quiet floor). Probe B applies it on every call, short-path calls included.
+- Existing evidence reused: probe B `en`/`thm`/`thm_quiet` on all 92 calls, probe E `eb` (8 calls) and probe G `thr` (14 calls). Missing inputs: `eb`/`thr` on the other calls and the band tables as parsed. Hence probe H (`make_probe_band.py` → `l3psy_band_probe.diff` `7ac7172f…`; `harness_band.c` `ce297d96…`; `run_band_in_container.sh` `b7550f85…`), observation only, on G. It copies `eb`/`thr` as the mapping reads them and the tables. It was built from a fresh extraction (archive SHA-256 checked; B–G diffs regenerated identically) and run twice with `docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2…cd525e sh /w/run_band_in_container.sh`. Both runs were byte-identical in outputs and binary (`cffe8ec2…`; patched source `0ee14903…`). Stored: `expected_band_inputs/` (92 calls of 9 inputs, 204 KB; `bands_44100.json` `bab20379…`), with hashes in `provenance.json` `probe_band`. With the E–H fields removed every output equals its stored D/C/B file, and the E/F/G fields equal the stored captures.
+- Reconstruction from captured inputs: `en`, `thm` and `thm_quiet` exact on all 92 probe B calls (13 short-path). Swapped endpoint weights and the interior moved by one partition at either end fail on every call. Interior-first summation fails `en` on 92 and `thm` on 91 calls, so the order is observable. Tampered records (`eb`/`thr` swapped, `thr[50]` × (1 + 1e−6)) are rejected.
+- Python chain through the same mapping, against probe B: worst `en` 1.28e−3 relative (tone 8192, call 9, band 12) and 5.23e5 absolute (burst, call 7, band 6, of 6.13e12); worst `thm` 1.05e−3 (tone 8192, call 5, band 15) and 1.34e5 (burst, call 7, band 6). On short-path calls `thm` is exact (`thr = qthr` there) and `en` is within 1.16e−3. Partition 50 enters band 16 only. At tone call 3 its `eb` and `thr` differences (7.2e−5, 4.8e−5) become 2.9e−4 and 1.7e−4 at band level, carrying 26% and 24% of the band. At burst call 4 band-16 `thm` = `thm_quiet` = 0.6978 on both sides.
+- Directional margins (approved kernel; valid frames 2–11; tone pairs at both levels, both directions): largest errors 4.67e−3, 5.55e−3, 4.16e−4 and 2.35e−4 dB. No sign change; cells `T > E` are identical (70, 60, 50, 39 of 210); the cell nearest 0 dB lies 1.1–1.8 dB away. Exact-silence controls are reported separately: every valid frame of a silent target is flagged by the int16 window (Python flag equals probe B), so its 28.7–147.7 dB "exceedances" are identifiable as FFT-floor driven.
+- Coverage gaps: no short-path call with signal-derived `thr`; no margin within the errors of 0 dB; Layer III long bands, 44.1 kHz and mono only; the `w1`/`w2` derivation is not traced.
+- Open questions: the end-to-end tolerance, for review. The production band-mapping kernel follows after review. Left uncommitted for Codex review.
+
+## 2026-11-16 — Correction: framer metadata and short-path reporting in the band/margin comparison (Codex review of Task 3M)
+- Findings:
+  - `compare_band_margins.py` re-derived silence from its own padded stream and eligibility from a local helper instead of using the production framer's metadata.
+  - Its short-path maxima masked long-path rows to zero rather than excluding them, so an all-zero `thm` summary named a long-path call (burst call 0).
+- Fix:
+  - The Python side keeps `frame_long_blocks`'s `LongBlockFrames`: `.windows` for the spectra, `.eligible` for eligible calls and `.nonzero_samples == 0` for silence. The duplicate padded-stream calculation is removed.
+  - The reference side derives eligibility independently from the raw clip length (checked equal to Probe B's `clip_samples`) with the §2.2 rule, and takes silence from Probe B's `window_nonzero_samples`.
+  - Both arrays are compared on every call, and the script stops with the input and call on the first disagreement. Directional margins use the calls eligible for both stems.
+  - Short-path maxima are taken over the short-path rows only, keeping the original call IDs; inputs without short-path calls are skipped. All-zero differences are reported as exact agreement, and an empty selection as "no calls selected".
+- Checks:
+  - The fixture verifier passes. Metadata equals the reference on all 92 calls.
+  - Short-path `thm` reports exact agreement on 13 calls (273 cells), naming no call.
+  - Tone pairs: 840 eligible cells, worst 5.552e−3 dB, 0 sign changes (unchanged).
+  - Deliberately flipped flags are each detected with input and call: reference eligibility (truncated clip, call 10), framer eligibility (tone, call 1), framer silence (silence, call 4) and reference silence (target, call 0). A selection without short-path rows reports "no calls selected".
+  - Captures, mapping arithmetic and production kernels are unchanged. Left uncommitted.
+
+## 2026-11-16 — dist10 long scale-factor-band mapping kernel (Task 3N, Claude Code)
+- Start: HEAD `f1b6486` with the Task 3M evidence and its review fix uncommitted (preserved), empty index. Scope: the band-mapping kernel only; no analyzer integration, margin interpretation or tolerance.
+- Change: new `adapters.dsp_analysis.bands` (standard library and NumPy). It embeds `DIST10_LONG_BU/BO/W1/W2_44100` (pinned `psy_data`, block `freq=44100.0 sb=20`, SHA-256 cited) and provides `dist10_long_bands(eb, thr) -> LongBandValues(en, thm)`.
+  - Endpoints are summed first, then the interior partitions ascending. `bu`/`bo` are used as recorded (band 0 ends at partition 4), and partition 62 is unused.
+  - Every call is kept in order. Processing is chunked at 1,024 calls.
+  - Validation follows the sibling kernels: plain or subclass-normalised ndarray, float64, `(n, 63)`, equal call counts, finite and non-negative. A mapped overflow is rejected with quantity, call and band under any NumPy error policy. The result is fresh, read-only and `(0, 21)` when empty.
+  - Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_bands.py` was written first; red evidence is a collection error. Coverage (35 tests):
+  - the tables against Probe H and the `psy_data` strings;
+  - exact `en`/`thm`/`thm_quiet` against Probe B on all 92 calls of 9 inputs from Probe H's `eb`/`thr` (13 short-path and 18 start-up calls);
+  - one-hot partition weights, which fix the endpoints, the interior range, band 0 and partition 62;
+  - summation order (a 2**53 case), the same mapping for both quantities, call order, chunk boundaries and bounded memory;
+  - read-only fresh outputs, empty input, subclasses, validation, and overflow naming the call and band.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 35:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Swapped endpoint weights | 15 |
+  | Interior from `bu` | 14 |
+  | Interior from `bu + 2` | 14 |
+  | Interior to `bo` | 16 |
+  | Interior to `bo − 2` | 15 |
+  | Interior first | 13 |
+  | Band 0 `bo = bu + cbw` | 12 |
+  | Partition 62 added to band 20 | 14 |
+  | One weight off by 0.001 | 12 |
+  | No overflow check | 1 |
+  | No negative check | 2 |
+- Comparison script: the Python chain now uses the kernel, checked equal to the verifier's independent mapping on every call (the verifier itself is unchanged). The output is byte-identical to before: 840 eligible tone-pair cells, largest margin difference 5.552e−3 dB, 0 sign changes (descriptive).
+- Open: the end-to-end tolerance. Analyzer integration and margin interpretation are later tasks. Left uncommitted for Codex review.
+
+## 2026-11-16 — Correction: band mapping independent of NumPy's underflow policy (Codex review of Task 3N)
+- Finding: `dist10_long_bands` suppressed only overflow during the mapping. A weighted endpoint of a tiny value (for example 0.056 × 1e−308, a subnormal) raised `FloatingPointError` under a caller's `errstate(under="raise")`, and emitted a `RuntimeWarning` under `"warn"` (an error when warnings are errors). That is ordinary IEEE double rounding, which the reference also performs.
+- Fix: the mapping now runs with overflow and underflow ignored. An infinite sum is still rejected afterwards with quantity, call and band. The table, endpoint-first order and reference checks are unchanged.
+- Regression: subnormal-producing inputs (1e−308 and 5e−324 in every partition) give the scalar endpoint-first result exactly under the `raise`, `warn` and `ignore` policies, with warnings as errors. Before the fix, `raise` and `warn` failed.
+- Checks:
+  - Fixture verifier passes. The comparison is unchanged: 840 tone-pair cells, worst 5.552e−3 dB, 0 sign changes.
+  - Band, threshold and architecture tests with warnings as errors: 313 passed. Full suite: 4957 passed, 4 skipped.
+  - Ruff check and scoped format are clean.
+- Left uncommitted.
+
+## 2026-11-16 — dist10 clip-to-band front end (Task 3O, Claude Code)
+- Start: HEAD `f1b6486` with the Task 3M/3N work uncommitted (preserved), empty index. Scope: composition only; no WAV conversion, analyzer integration or margin interpretation.
+- Change: new `adapters.dsp_analysis.front_end` with `dist10_clip_to_bands(samples, *, sample_rate_hz) -> ClipBandAnalysis`.
+  - It validates and frames with `frame_long_blocks`, then composes the long/short spectra, unpredictability, partition sums, spreading, partition thresholds and long-band mapping over every call, start-up calls included.
+  - Result fields: `sample_count`, `sample_rate_hz`, `call`, `window_start`, `window_end`, `eligible`, `nonzero_samples`, `en` and `thm` (read-only float64, `(calls, 21)`). Windows and spectra are not kept; ineligible and silent calls stay.
+  - Architecture: an exact edge entry (the eight kernels, NumPy) and an isolation test (loads exactly the package initializers, the eight kernels and itself; no soundfile or scipy; no forbidden layer); also added to the level-analysis isolation list.
+- Tests: `tests/unit/test_dsp_front_end.py` was written first; red evidence is a collection error. Coverage (42 tests):
+  - equality with the direct kernel composition on all nine fixture clips, and metadata equal to Probe B on every call;
+  - the exact result fields, and start-up history (calls 0–1 give `thm_quiet`; starting the history at call 2 changes calls 2–3);
+  - the shared tone/burst call-5 window, and the 1,407/1,408-sample eligibility boundary;
+  - the truncated clip (eligible 2–10; calls 0–10 equal the full clip, call 11 differs);
+  - exact silence (`en`/`thm` equal Probe B, the FFT floor, flagged by `nonzero_samples`) and the silence-then-burst flags;
+  - empty input, byte order, the input left unmodified, and invalid rate, shape and dtype, with the rate keyword-only.
+- Comparison script: the Python path uses the entry point. The lower-level kernels supply `eb`/`thr` for the partition-50 diagnostics, and the verifier's independent mapping of them must equal the entry point on every call. The output is unchanged apart from the metadata label: 840 eligible tone-pair cells, worst 5.552e−3 dB, 0 sign changes (descriptive).
+- Open: the end-to-end tolerance. Left uncommitted for Codex review.

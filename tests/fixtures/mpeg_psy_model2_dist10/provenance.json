@@ -9,6 +9,17 @@
     "network": "none (docker run --network none)",
     "sources": "A: harness.c l3psy_probe.c; B: harness_mapping.c l3psy_mapping_probe.c; both with common.c subs.c psy.c tonal.c portableio.c ieeefloat.c -lm"
   },
+  "expected_band_inputs_sha256": {
+    "burst_1k_a8192_onset2000.jsonl": "12a52ddff697e8b0b6954784f4bf95686d69274923d7b3c15136823017182c8e",
+    "impulse_32767_at1983.jsonl": "a7f8a324e41ec8686a175a00830717c30c902ec2574b1d73ae831428edf5f3df",
+    "impulse_32767_at1984.jsonl": "0281224dfc1ad3c3095ec3ef61d69742d1fbc527945f724a5ece76b90b119c90",
+    "masker_1k_a81.92.jsonl": "9afb212042fe94c5f9319b5cb33ccbeaf8cac2b911ae48e8a07783b87002f09b",
+    "masker_1k_a8192.jsonl": "f2a4256a6d6898e83798e27c0e537fb7e09489e95b31d0929e8c8139f1290771",
+    "silence_12granules.jsonl": "aed40bf3c93596fc28982d68e26fe4306a3950947b9c0855759c1d732c420079",
+    "target_2k_a10.24.jsonl": "32e9877f1088fddaa2754a9b28b779ff83e8e28740608b64ed158aea2c66cfe8",
+    "target_2k_a1024.jsonl": "09eb89c2a9bab2e16fe728e6b7367bc0dc207a9df54dc0807f19014f21b11c2f",
+    "target_2k_a1024_trunc6536.jsonl": "feda08de6dc8d07af8fef9f3c91a0354dda400f880e43f90240ec07d6f419099"
+  },
   "expected_long_fft_sha256": {
     "impulse_32767_at1983.jsonl": "14dcfe2dc6e3eaf0219a27e00245fc1555ec19874e69af8890c77e9c58c4a20d",
     "impulse_32767_at1984.jsonl": "756fc76798436089385903985aeafc5c6949b08655fda3fde33c8f97efc5f5cb",
@@ -81,6 +92,415 @@
     "patch": "capture/l3psy_probe.diff",
     "patch_sha256": "9cab2bef3b6b699f2bb59f31903f34b04d02c687019e6c36661aaadb31864107",
     "patched_source_sha256": "8e57718ca98b6161219bdeedfa44b6055298e71483f2652cdd625a4c7eaa6a89"
+  },
+  "probe_band": {
+    "bands_file": "expected_band_inputs/bands_44100.json",
+    "bands_note": "cbw_l, bu_l, bo_l, w1_l and w2_l as captured after L3para_read (all nine runs wrote byte-identical band files), with the 44.1 kHz long sb strings of the pinned tables/psy_data (block 'freq=44100.0 sb=20', rows sb=0..20)",
+    "bands_sha256": "bab20379023e8e1a09308313f97b0dddd46b2d344ba3c76b39fc192575c3dc4f",
+    "base": "l3psy_threshold_probe.c and subs_short_probe.c (probe G)",
+    "build_command": "gcc -g -DUNIX -o harness_band harness_band.c l3psy_band_probe.c subs_short_probe.c common.c psy.c tonal.c portableio.c ieeefloat.c -lm",
+    "captured": "2026-11-16, fresh extraction of the pinned archive; probe B, C, D, E, F and G diffs regenerated identically",
+    "description": "right before probe B's long-band mapping (encoder expressions of ll. 654-660, applied on every call after pe and before the block-switching branch), copies eb[0..62] and thr[0..62] (the final threshold after the pre-echo limit and the quiet floor) as that mapping reads them, and the long sb tables cbw_l, bu_l, bo_l, w1_l, w2_l from L3para_read; writes only probe globals",
+    "generator": "capture/make_probe_band.py",
+    "generator_sha256": "a25b2f55d2c0521e5a2a9d2bd3bddedd7f82ac764a8664b5192579d140de0203",
+    "harness": "capture/harness_band.c",
+    "harness_binary_sha256": "cffe8ec22a74d886c19143c83ba1ef7550177d10347f9180c31bad30cc2ffb24",
+    "harness_source_sha256": "ce297d96d40575286601bcbfbcb989990d2d71222ac73b4856e0d8ffb2a04306",
+    "label": "probe H, band-mapping input probe (expected_band_inputs/); observation-only, built on probe G",
+    "patch": "capture/l3psy_band_probe.diff",
+    "patch_sha256": "7ac7172f6dc80a803d249e75b3098d52bdf1f0df2ab36497d62eee0568f24fed",
+    "patched_source_sha256": {
+      "l3psy_band_probe.c": "0ee14903f4a6b1f5b31c97a260f9f774a06ba7fa37b6ec8a3c974303277d9955",
+      "subs_short_probe.c": "72b6701c61477467772218d1e1693892f756b926b9ce09a07ab28012a6c74389"
+    },
+    "repeatability": "two container runs byte-identical (all outputs, window, mapping, matrix, tables and band files, the binary)",
+    "run_command": "docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e sh /w/run_band_in_container.sh",
+    "run_script": "capture/run_band_in_container.sh",
+    "run_script_sha256": "b7550f8556d2e01408f6c4bad6a759f25e04d301acfe3946eefdf59bb6faf687",
+    "selected_calls": [
+      [
+        "burst_1k_a8192_onset2000",
+        0
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        1
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        2
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        3
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        4
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        5
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        6
+      ],
+      [
+        "burst_1k_a8192_onset2000",
+        7
+      ],
+      [
+        "impulse_32767_at1983",
+        0
+      ],
+      [
+        "impulse_32767_at1983",
+        1
+      ],
+      [
+        "impulse_32767_at1983",
+        2
+      ],
+      [
+        "impulse_32767_at1983",
+        3
+      ],
+      [
+        "impulse_32767_at1983",
+        4
+      ],
+      [
+        "impulse_32767_at1983",
+        5
+      ],
+      [
+        "impulse_32767_at1984",
+        0
+      ],
+      [
+        "impulse_32767_at1984",
+        1
+      ],
+      [
+        "impulse_32767_at1984",
+        2
+      ],
+      [
+        "impulse_32767_at1984",
+        3
+      ],
+      [
+        "impulse_32767_at1984",
+        4
+      ],
+      [
+        "impulse_32767_at1984",
+        5
+      ],
+      [
+        "masker_1k_a81.92",
+        0
+      ],
+      [
+        "masker_1k_a81.92",
+        1
+      ],
+      [
+        "masker_1k_a81.92",
+        2
+      ],
+      [
+        "masker_1k_a81.92",
+        3
+      ],
+      [
+        "masker_1k_a81.92",
+        4
+      ],
+      [
+        "masker_1k_a81.92",
+        5
+      ],
+      [
+        "masker_1k_a81.92",
+        6
+      ],
+      [
+        "masker_1k_a81.92",
+        7
+      ],
+      [
+        "masker_1k_a81.92",
+        8
+      ],
+      [
+        "masker_1k_a81.92",
+        9
+      ],
+      [
+        "masker_1k_a81.92",
+        10
+      ],
+      [
+        "masker_1k_a81.92",
+        11
+      ],
+      [
+        "masker_1k_a8192",
+        0
+      ],
+      [
+        "masker_1k_a8192",
+        1
+      ],
+      [
+        "masker_1k_a8192",
+        2
+      ],
+      [
+        "masker_1k_a8192",
+        3
+      ],
+      [
+        "masker_1k_a8192",
+        4
+      ],
+      [
+        "masker_1k_a8192",
+        5
+      ],
+      [
+        "masker_1k_a8192",
+        6
+      ],
+      [
+        "masker_1k_a8192",
+        7
+      ],
+      [
+        "masker_1k_a8192",
+        8
+      ],
+      [
+        "masker_1k_a8192",
+        9
+      ],
+      [
+        "masker_1k_a8192",
+        10
+      ],
+      [
+        "masker_1k_a8192",
+        11
+      ],
+      [
+        "silence_12granules",
+        0
+      ],
+      [
+        "silence_12granules",
+        1
+      ],
+      [
+        "silence_12granules",
+        2
+      ],
+      [
+        "silence_12granules",
+        3
+      ],
+      [
+        "silence_12granules",
+        4
+      ],
+      [
+        "silence_12granules",
+        5
+      ],
+      [
+        "silence_12granules",
+        6
+      ],
+      [
+        "silence_12granules",
+        7
+      ],
+      [
+        "silence_12granules",
+        8
+      ],
+      [
+        "silence_12granules",
+        9
+      ],
+      [
+        "silence_12granules",
+        10
+      ],
+      [
+        "silence_12granules",
+        11
+      ],
+      [
+        "target_2k_a10.24",
+        0
+      ],
+      [
+        "target_2k_a10.24",
+        1
+      ],
+      [
+        "target_2k_a10.24",
+        2
+      ],
+      [
+        "target_2k_a10.24",
+        3
+      ],
+      [
+        "target_2k_a10.24",
+        4
+      ],
+      [
+        "target_2k_a10.24",
+        5
+      ],
+      [
+        "target_2k_a10.24",
+        6
+      ],
+      [
+        "target_2k_a10.24",
+        7
+      ],
+      [
+        "target_2k_a10.24",
+        8
+      ],
+      [
+        "target_2k_a10.24",
+        9
+      ],
+      [
+        "target_2k_a10.24",
+        10
+      ],
+      [
+        "target_2k_a10.24",
+        11
+      ],
+      [
+        "target_2k_a1024",
+        0
+      ],
+      [
+        "target_2k_a1024",
+        1
+      ],
+      [
+        "target_2k_a1024",
+        2
+      ],
+      [
+        "target_2k_a1024",
+        3
+      ],
+      [
+        "target_2k_a1024",
+        4
+      ],
+      [
+        "target_2k_a1024",
+        5
+      ],
+      [
+        "target_2k_a1024",
+        6
+      ],
+      [
+        "target_2k_a1024",
+        7
+      ],
+      [
+        "target_2k_a1024",
+        8
+      ],
+      [
+        "target_2k_a1024",
+        9
+      ],
+      [
+        "target_2k_a1024",
+        10
+      ],
+      [
+        "target_2k_a1024",
+        11
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        0
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        1
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        2
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        3
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        4
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        5
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        6
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        7
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        8
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        9
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        10
+      ],
+      [
+        "target_2k_a1024_trunc6536",
+        11
+      ]
+    ],
+    "stdout_filter": "only lines starting with '{' kept (drops the absthr index status line)",
+    "stored_fields": "per call (every call of every input): call, band_eb (double), band_thr (double)",
+    "stripped_outputs_note": "full probe H output with probe E, F, G and H fields removed; equals the stored probe D, C or B file of each input; the E, F and G fields were checked equal to expected_partition, expected_spreading and expected_threshold, band_eb equal to probe E's eb and band_thr equal to probe G's thr where captured, and the window, mapping, matrix and tables files equal to the stored ones, at capture time",
+    "stripped_outputs_sha256": {
+      "burst_1k_a8192_onset2000": "d5d6be9f7f719996a15de8e2725bd5d1f9c028659bf4f27f2e354da731173d5e",
+      "impulse_32767_at1983": "983b37a2636450b69c88733b5a81ba5b9c96bd463dee3718590d7d23b0b3f5c0",
+      "impulse_32767_at1984": "756fc76798436089385903985aeafc5c6949b08655fda3fde33c8f97efc5f5cb",
+      "masker_1k_a81.92": "eb547ec9f3e217b1d78b1f74c9e166cb29e2420a072b9a76bb804b69cdd52361",
+      "masker_1k_a8192": "74c33bb54b18d0675ac553afc5fc69dd9663db1a0a55cb5d2c99bfac5a08fc7e",
+      "silence_12granules": "3c9fdf2c4953116330c9eb2c43ce1b735c55f9532912bbd907f495980007ec1f",
+      "target_2k_a10.24": "eb2173b2bf63b0ab74e5fbfc1a8bda0704ff4159ab1ccd23b7138a87571f5fa9",
+      "target_2k_a1024": "77be8e17cdaf4c961e65d8ace6ebecd4cc05bdea675f5ebc797d9ce87f784d24",
+      "target_2k_a1024_trunc6536": "642e6aad96728c8c44ec6ba00fda7062b5592ba92a1bcb6ede9d6db73c48e66b"
+    }
   },
   "probe_long_fft": {
     "base": "l3psy_mapping_probe.c (probe B) and the original subs.c",
