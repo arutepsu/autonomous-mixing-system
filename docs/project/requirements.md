@@ -128,5 +128,6 @@ Status 2026-10-15: not met under the v1.0 wording. Criterion 1 requires project 
 | D10 | Whether a listening assessment is conducted, and at what scale | SR-07 |
 | D11 | Representation of detection uncertainty (after the M1 literature review) | FR-05 |
 | D13 | Disposition of `scripts/generate_test_audio.py` and local synthetic files | Housekeeping |
+| D15 | Whether to adopt operator-attended live parameter control of one calibrated FL Studio insert (scripting API, fader-only outcomes) as an optional capability with a new functional requirement. Proposal in [ADR-030](../decisions/0030-daw-parameter-control-boundary.md); `.flp` manipulation stays excluded and FR-14 withdrawn. Proposed 2026-11-18; no requirement, scope or status changed. | Scope, exclusions, ADR-030 |
 
 Resolved on 2026-10-15: D1 thesis title ("…Using an AI Agent"); D12 defect-injection policy (ADR-008); D14 approval recording (status line above plus a research-log entry). D2 and D4 are partly resolved: P1 is the end-to-end contingency minimum, and both individual stems and the combined mix must be assessable.

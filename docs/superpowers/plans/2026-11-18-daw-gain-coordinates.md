@@ -63,11 +63,11 @@ DawGainResolution(action: Action, state: DawTrackState,
 
 Allowed records edges: `identifiers`, `invariants`, `actions`. No re-exports, aliases or extra public names.
 
-- [ ] Write constructor and resolution tests first. Cover invalid types, all fields, range endpoints, bool, nonfinite values, mismatched action references and inconsistent derived fields; read-only/frozen behavior follows repository conventions.
-- [ ] Run `uv run --locked pytest tests/unit/test_daw_gain_coordinates.py -q`; record collection failure for missing module before implementing.
-- [ ] Implement the four records, using private helpers for repeated non-bool finite checks and mapping validation.
-- [ ] Add the exact architecture inventory and run the new tests plus `tests/architecture/test_core_records.py`.
-- [ ] Leave the independently reviewable change uncommitted.
+- [x] Write constructor and resolution tests first. Cover invalid types, all fields, range endpoints, bool, nonfinite values, mismatched action references and inconsistent derived fields; read-only/frozen behavior follows repository conventions.
+- [x] Run `uv run --locked pytest tests/unit/test_daw_gain_coordinates.py -q`; record collection failure for missing module before implementing.
+- [x] Implement the four records, using private helpers for repeated non-bool finite checks and mapping validation.
+- [x] Add the exact architecture inventory and run the new tests plus `tests/architecture/test_core_records.py`.
+- [x] Leave the independently reviewable change uncommitted.
 
 ## Task 2: Pure resolver with explicit stale-reading tolerances
 
@@ -96,20 +96,20 @@ Pin arithmetic with these cases (ProjectId/TrackId/Revision/VersionRef fixtures 
 
 Use exactly representable values for equality/boundary tests; use pytest.approx only for the explicit decimal −1.001 example. Positive/zero deltas are legitimate mappings, not supported bridge writes. The later profile gate owns that refusal.
 
-- [ ] Write failing tests for the table, each reference mismatch, stale normalized-only and dB-only observations, exact tolerance edges, zero/invalid tolerances, overflow, preserved inputs, and unchanged baseline across sequential states.
-- [ ] Run the tests and record the missing-function failure.
-- [ ] Implement `resolve_daw_gain`; add `admission.daw` with only `resolve_daw_gain` to the layer inventory.
-- [ ] Run the focused tests and architecture/public-contract suites.
-- [ ] Mutation probes, reverting each byte-identically: replace baseline target with current reading + absolute action; silently accept stale reading; omit revision comparison. Each must fail a permanent test.
-- [ ] Leave uncommitted for review.
+- [x] Write failing tests for the table, each reference mismatch, stale normalized-only and dB-only observations, exact tolerance edges, zero/invalid tolerances, overflow, preserved inputs, and unchanged baseline across sequential states.
+- [x] Run the tests and record the missing-function failure.
+- [x] Implement `resolve_daw_gain`; add `admission.daw` with only `resolve_daw_gain` to the layer inventory.
+- [x] Run the focused tests and architecture/public-contract suites.
+- [x] Mutation probes, reverting each byte-identically: replace baseline target with current reading + absolute action; silently accept stale reading; omit revision comparison. Each must fail a permanent test.
+- [x] Leave uncommitted for review.
 
 ## Task 3: Documentation and final verification
 
-- [ ] Add a concise overview note: coordinates implemented; no admission enforcement, FL transport adapter, candidate artifacts, runtime recovery or coordinator use supplied by this slice.
-- [ ] Append a research-log entry with baseline HEAD, actual red/green and mutation evidence, decisions and remaining gaps. Do not rewrite earlier entries or change requirement statuses.
-- [ ] Run `uv run --locked pytest tests/unit/test_daw_gain_coordinates.py tests/architecture tests/unit/test_public_contracts.py -q -W error`.
-- [ ] Run `uv run --locked pytest -q -rs`, `uv run --locked ruff check .`, `uv run --locked ruff format --check src tests`, `uv run --locked autonomous-mixing --help`, and `uv lock --check`; record actual outcomes and pre-existing unrelated failures separately.
-- [ ] Inspect diff: no existing behavior assertions removed or weakened, no dependency/initializer/bridge-script changes. Report exact public signatures and git status; leave uncommitted.
+- [x] Add a concise overview note: coordinates implemented; no admission enforcement, FL transport adapter, candidate artifacts, runtime recovery or coordinator use supplied by this slice.
+- [x] Append a research-log entry with baseline HEAD, actual red/green and mutation evidence, decisions and remaining gaps. Do not rewrite earlier entries or change requirement statuses.
+- [x] Run `uv run --locked pytest tests/unit/test_daw_gain_coordinates.py tests/architecture tests/unit/test_public_contracts.py -q -W error`.
+- [x] Run `uv run --locked pytest -q -rs`, `uv run --locked ruff check .`, `uv run --locked ruff format --check src tests`, `uv run --locked autonomous-mixing --help`, and `uv lock --check`; record actual outcomes and pre-existing unrelated failures separately.
+- [x] Inspect diff: no existing behavior assertions removed or weakened, no dependency/initializer/bridge-script changes. Report exact public signatures and git status; leave uncommitted.
 
 ## Subsequent plans (not executable tasks in this slice)
 

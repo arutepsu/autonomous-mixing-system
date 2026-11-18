@@ -33,6 +33,9 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [027](0027-hexagonal-control-loop-architecture.md) | Hexagonal architecture around a MAPE-K control loop, with immutable records | 2026-11-03 | Accepted; supersedes ADR-017 and ADR-022 |
 | [028](0028-shared-read-only-audio-access.md) | Shared read-only audio access component with exact client edges | 2026-11-10 | Proposed; one client edge added by ADR-029 |
 | [029](0029-dist10-wav-input-boundary.md) | dist10 WAV input boundary as a client of the shared audio reader | 2026-11-17 | Proposed |
+| [030](0030-daw-parameter-control-boundary.md) | DAW parameter-control boundary beside the offline renderer | 2026-11-18 | Proposed |
+| [031](0031-fl-studio-control-journal.md) | FL Studio runtime dispatch journal and local replay | 2026-11-18 | Proposed; extended by ADR-032 |
+| [032](0032-daw-exact-recovery-and-reconciliation.md) | DAW exact-target recovery, explicit reconciliation and the shared command ledger | 2026-11-18 | Proposed |
 
 ## Template
 

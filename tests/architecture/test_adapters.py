@@ -268,7 +268,7 @@ def test_rendering_and_analysis_modules_are_exactly_the_planned_ones():
     assert {n for n in MODULES if n.startswith(JOURNAL + ".")} == {f"{JOURNAL}.{m}" for m in JOURNAL_EDGES}
     assert {n for n in MODULES if n.startswith(AUDIO_IO + ".")} == {f"{AUDIO_IO}.{m}" for m in AUDIO_IO_EDGES}
     adapter_packages = {n for n in MODULES if n.count(".") == 2 and n.startswith(ADAPTERS + ".")}
-    assert adapter_packages == {RENDERING, ANALYSIS, JOURNAL, AUDIO_IO}
+    assert adapter_packages == {RENDERING, ANALYSIS, JOURNAL, AUDIO_IO, f"{ADAPTERS}.fl_studio"}
 
 
 @pytest.mark.parametrize("module", sorted(RENDERING_EDGES))

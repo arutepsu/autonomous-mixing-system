@@ -34,6 +34,7 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
+    "admission.daw": ("resolve_daw_gain", "daw_gain_bounds", "gate_daw_apply", "gate_daw_restore"),  # 2026-11-18
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
     "loop.completion": ("finalize",),
     "loop.correction": ("render", "verify_candidate"),
@@ -63,6 +64,14 @@ BEHAVIOR_INVENTORY = {
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
     "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
     "ports.rendering": ("Renderer", "validate_rendered_candidate"),
+    "ports.daw": ("DawParameterController", "validate_daw_inspection", "validate_daw_apply_outcome"),  # 2026-11-18
+    "ports.daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
+        "DawRecoveryController",
+        "validate_daw_restore_outcome",
+        "validate_daw_reconciliation",
+        "validate_daw_resolution",
+        "validate_daw_control_state",
+    ),
     "ports.acceptance": (
         "AcceptanceJournal",
         "validate_acceptance_commit_response",

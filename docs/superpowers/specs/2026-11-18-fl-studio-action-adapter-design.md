@@ -1,6 +1,6 @@
 # FL Studio action adapter and manual export handoff
 
-Date: 2026-11-18. Status: proposed design for owner review; no implementation authorized by this document alone.
+Date: 2026-11-18. Status: proposed design for owner review; no implementation authorized by this document alone. *Implementation status (2026-11-18): the coordinate slice and the DAW inspect/apply contract with its calibrated gate are implemented in core and not integrated; see [plan](../plans/2026-11-18-daw-control-contract.md) and [ADR-030](../../decisions/0030-daw-parameter-control-boundary.md) (Proposed).*
 
 ## Purpose and evidence
 

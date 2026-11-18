@@ -28,6 +28,9 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
+    "daw": {"identifiers", "invariants", "actions"},
+    "daw_control": {"identifiers", "invariants", "daw", "admission"},  # DAW control contract, 2026-11-18
+    "daw_recovery": {"identifiers", "invariants", "daw", "daw_control", "budgets"},  # recovery plan, 2026-11-18
     "coordinator_progress": {
         "verification_evidence",
         "identifiers",
@@ -158,6 +161,61 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
+    "daw": ("DawFaderReading", "DawTrackBinding", "DawTrackState", "DawGainResolution"),
+    "daw_control": (  # DAW control contract, 2026-11-18
+        "DawBuild",
+        "DawRange",
+        "DawControlProfile",
+        "DawInspectRequest",
+        "DawInspection",
+        "DawGateCode",
+        "DawApplyRejected",
+        "daw_state_rejection",
+        "daw_cut_rejection",
+        "daw_change_rejection",  # review fix 2026-11-18: one rule for the gate and advertised endpoints
+        "DawApplyRequest",
+        "DawApplyPermitted",
+        "DawNoWrite",
+        "DawGateResult",
+        "DawRefusalCode",
+        "DawUncertainReason",
+        "DawWriteRefused",
+        "DawWriteConfirmed",
+        "DawWriteOffTarget",
+        "DawWriteUncertain",
+        "DawApplyOutcome",
+    ),
+    "daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
+        "DawCommandKind",
+        "DawTargetBasis",
+        "DawRestoreTarget",
+        "DawRecoveryAuthorization",
+        "DawRestoreRequest",
+        "DawRestoreGateCode",
+        "DawRestorePermitted",
+        "DawRestoreNoWrite",
+        "DawRestoreRejected",
+        "DawRestoreGateResult",
+        "DawRestoreConfirmed",
+        "DawRestoreMismatch",
+        "DawRestoreRefused",
+        "DawRestoreUncertain",
+        "DawRestoreOutcome",
+        "DawUnresolvedCommand",
+        "DawRecoveryCharge",
+        "DawControlState",
+        "DawReconcileFinding",
+        "classify_reconciliation",
+        "DawReconcileRequest",
+        "DawReconciliation",
+        "DawResolutionKind",
+        "DawResolutionRefusalCode",
+        "DawResolutionAuthorization",
+        "DawResolutionRequest",
+        "DawResolutionRecorded",
+        "DawResolutionRefused",
+        "DawResolutionOutcome",
+    ),
     "coordinator_progress": ("RuntimeProgress", "PreparedCorrection", "AssessedCorrection", "Stop"),
     "identifiers": (
         "ProjectId",

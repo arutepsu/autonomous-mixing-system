@@ -27,6 +27,10 @@ autonomous_mixing/
                     (ADR-028, Proposed; used only by the listed rendering modules, dsp_analysis.file_analyzer
                     and, by ADR-029 (Proposed), dsp_analysis.wav_input)
     rendering/      implements Renderer (gain/mix, WAV output, workspaces, state inspection)
+    fl_studio/      unintegrated DawParameterController and DawRecoveryController: calibrated MIDI parameter
+                    control, exact-target recovery, explicit reconciliation and a local command journal with one
+                    append-only ledger (ADR-030/031/032 Proposed; no driver or export continuation); its FL device
+                    script v2 lives outside the package in device/fl_studio/ and is never imported
     journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance)
     decision_agent/ implements DecisionMaker with Claude (ADR-005 name)
     baselines/      other DecisionMaker implementations for comparison conditions

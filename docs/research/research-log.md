@@ -1585,3 +1585,130 @@
 ## 2026-11-18 — Codex live set_gain_db trial
 
 Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdrawn. Codex ran the pre-registered sequence and inspected the saved log: −1 dB measured −0.9995951652526855 dB, −2 dB measured −1.9992120265960693 dB; replay, conflict refusal and local range refusal passed. Restore and final inspect exactly matched the initial gain. Detailed evidence and procedural differences (log location and ID prefix) are recorded in [the conversion design](fl-studio-db-conversion-design.md#live-db-trial-result-2026-11-18-125613-utc). Log SHA-256: `14f4a7958ca8b5a8560209778905f8b45edbfd1e7818921eee82310e6057d3b7`. Updated the bridge status to verified live in its calibrated scope. Documentation-only update; no code/tests changed or test suite rerun. No save/export was issued; no requirement status changed. Coordinator integration and exported-audio verification remain pending.
+
+
+## 2026-11-18 — Codex DAW gain coordinates
+
+- Baseline: HEAD `033b76dcbf1855f6e65bac646b4f6d8422e3d762`, clean working tree. Scope: approved `2026-11-18-daw-gain-coordinates.md` plan, the first preparatory slice of the approved FL action-adapter design. No live calls or installed-script changes.
+- Implemented four frozen records in `core.records.daw` and the pure `resolve_daw_gain` in `core.admission.daw`. Existing actions, fixed-input processing state and rendering contracts are unchanged. Architecture inventories add the exact module edges and five public names; existing behavior assertions are unchanged.
+- Red/green: new constructor tests failed collection with `ModuleNotFoundError` for `core.records.daw`, then 66 passed. Added resolver tests failed collection for `core.admission.daw`, then 103 passed. Five additional large-integer regressions failed with `OverflowError`, then passed after local containment; final focused total 108.
+- Ruling: reuse existing `require_finite` and `require_finite_result`, rather than adding duplicate private numeric validators, because `require_finite` already rejects bool. A derived integer outside float representability leaks `OverflowError` from the shared result helper's finiteness check; catch it locally in the two new modules without changing existing helpers. This preserves exact integer arithmetic and the promised `ValueError` boundary. Risk if wrong: an uncontained numeric error would violate the contract; five regressions and a mutation probe cover it.
+- Ruling: preserve the approved in-place, uncommitted review workflow. No new worktree, branch, stage, commit or push. The starting tree was clean. The plan's coordinate slice adds no runtime architectural boundary, so the proposed adoption ADR remains a prerequisite of later FL runtime integration.
+- Mutation probes on formatted source, each restored byte-identically: relative target instead of baseline absolute target (8 failures), accept stale reading (3), omit revision checks (2), remove local integer-overflow containment (5). All caught.
+- Final verification through `uv run --locked`: focused plus architecture/public contracts 359 passed with warnings as errors; full suite 5514 passed, 4 platform skips. Ruff check, format check of src/tests, CLI help and `uv lock --check` passed. Baseline architecture/public-contract set was 251 passed. An earlier full run before the five extra regressions was 5509 passed, 4 skipped; the final run is the evidence for the final source tree.
+- Independent read-only review: no actionable findings. Reviewer read all new code/tests and approved plan/spec; did not rerun tests, and could not independently inspect git diff because of filesystem permissions. Primary session verified the inventory diffs are additions only.
+- Overview updated with truthful limits. No policy permission is granted by resolution; zero/increase deltas are mappings only. No FL transport adapter, calibrated capability gate, dispatch, recovery, export continuation, candidate-ready evidence or coordinator integration is implemented. No requirement status changed.
+
+
+## 2026-11-18 — DAW inspect/apply contract and calibrated capability gate (Claude Code)
+- **Baseline.** HEAD `033b76d`, with the uncommitted DAW-coordinate slice preserved (its final verification was 5,514 passed, 4 skipped). The plan `docs/superpowers/plans/2026-11-18-daw-control-contract.md` was approved by the owner with five amendments:
+  1. reference checks in `daw_gain_bounds`;
+  2. self-validating `DawApplyRequest`;
+  3. full-precision calibration endpoints;
+  4. `commanded_normalized` documented as an adapter claim;
+  5. simulated-controller evidence labelled as intended contract only.
+- **Implemented, in core only, without I/O:**
+  - `core.records.daw_control`: calibrated `DawControlProfile`, inspect request and inspection, self-validating `DawApplyRequest`, gate results, and four fader-only apply outcomes;
+  - `core.ports.daw`: `DawParameterController`, with structural response validators;
+  - `core.admission.daw`: `daw_gain_bounds` and `gate_daw_apply`, beside `resolve_daw_gain`.
+
+  The offline rendering contracts are unchanged. `ExecutionStatus` is unchanged, and DAW outcomes carry no candidate fields.
+- **Evidence:**
+  - 136 new tests, written first; the red run failed at collection on the missing module;
+  - full-precision range endpoints taken from the reviewed conversion function (test-only fixture), with `math.nextafter` cases beyond each;
+  - five mutation probes, each caught by a permanent test;
+  - locked full suite: 5,651 passed, 4 skipped. Ruff check and format are clean, and the lock is consistent.
+- **Decision recorded.** `PROFILE_SCOPE` is checked before inspection wiring, because an out-of-scope `DawInspectRequest` cannot be constructed.
+- **Proposed, not adopted:** ADR-030 (DAW parameter-control boundary) and requirement and scope decision D14. FR-14 stays withdrawn; the `.flp` exclusion, ADR-009 and requirement statuses are unchanged.
+- **Remaining gaps:**
+  - the FL transport adapter, which must derive the profile's dB range at full precision, recompute the commanded position before dispatch, and repeat the pending, replay, conflict, timeout and reload checks against the real bridge;
+  - exact-target recovery;
+  - pending-export continuation;
+  - coordinator integration, including where unresolved-operation and conversion-block state lives.
+
+  Identity still rests on the metadata title and operator confirmation. Left uncommitted for Codex review.
+
+## 2026-11-18 — DAW control contract: review fixes (Claude Code)
+- **Source.** Codex review of the DAW inspect/apply contract (three findings). Codex independently verified 496 focused and architecture tests, additive changes to existing tests, and unchanged offline contracts.
+- **P2, advertised bounds the gate refused.** With fader baseline −4 dB and application baseline 0, `daw_gain_bounds` advertised an upper gain of −0.1 dB. That resolves to a 0.09999999999999964 dB cut, which the gate refused.
+  - **Fix:** one records-level rule, `daw_change_rejection`, serves both the gate and the bounds, and the baseline mapping is written once. Endpoints are checked with the gate's arithmetic and moved inward by float steps only (at most 64), so the cut range is never widened.
+  - **Tests:** end-to-end regressions over seven baselines, including the reviewed one, the live start, nonzero application baselines and both calibrated range edges. Both endpoints are gate-permitted; they lie within the naive bounds; any moved endpoint is tight, with the next float outward refused.
+  - The earlier near-floor expectation, which pinned the naive −3.6, now pins the inward endpoint −3.6000000000000005.
+- **P2, decision ID.** D14 was already the resolved approval-recording decision of 2026-10-15, which is kept. The DAW adoption decision is now **D15** in the requirements, ADR-030, the overview and the plan. *Correction to the entry above, which says D14 and stays as written.*
+- **P3, replay wording.** The port's obligations previously required `replayed=True` for every identical retry, but refused and uncertain outcomes have no such field. Clarified in the port, the records, ADR-030 and the plan: written outcomes are replayed with the flag, and refused and uncertain outcomes are returned unchanged, never with another write. New simulated-controller tests replay an uncertain outcome (with and without a preceding write) and a refusal.
+- **Checks.**
+  - 154 tests in `test_daw_control_contract.py`.
+  - Mutation probes for naive endpoints and outward shift, each caught and reverted byte-identically.
+  - Locked: focused suites (`-W error`) 514 passed; full suite 5,669 passed, 4 skipped; ruff check and format clean; CLI help runs; lock consistent.
+  - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-18 — DAW control contract: endpoint search across zero (Claude Code)
+- **Finding (P2, second Codex review).** With baseline application gain +0.1 dB at fader −4 dB and policy [−10, +10] dB, `daw_gain_bounds` returned `None`, yet an absolute action of −0.9 dB passes the gate as a −1 dB cut. The naive upper endpoint is 0.0, and the 64-step float walk stayed in the subnormal range near zero; raising the limit would not have helped. Codex also verified the D15 and replay corrections (514 focused tests passed).
+- **Fix** (`core.admission.daw`): the walk is replaced by a bisection on the floats' ordered bit patterns, at most 64 halvings, from a permitted anchor: the window's midpoint, else a permitted endpoint.
+  - **Why it is valid:** every float operation of the mapping is monotone, so the gate's predicate is monotone along the gain axis and its permitted values form one contiguous run. The search finds that run's exact edge, including across zero.
+  - **Kept:** endpoints still only move inward and are tight.
+  - **Conservative case:** `None` only if neither endpoint nor the midpoint is permitted, which is possible only when the window is within float rounding of being empty.
+- **Regressions** (red before the fix, three failing):
+  - the reviewed case, with −0.9 dB advertised and the new upper endpoint just below zero, plus two further zero-crossing baselines in the end-to-end, inward-only and tightness checks;
+  - single-value policy windows, kept when permitted and `None` when refused.
+
+  Two mutation probes (reinstating the step walk; returning the refused side) were each caught and reverted byte-identically.
+- **Checks:** 164 tests in `test_daw_control_contract.py`. Locked: focused suites (`-W error`) 524 passed; full suite 5,679 passed, 4 skipped; ruff check and format clean; CLI help runs; lock consistent. No live calls and no installs. Left uncommitted for review.
+
+
+## 2026-11-18 — Codex FL Studio runtime adapter (unintegrated)
+
+- Owner approved `2026-11-18-fl-studio-transport-adapter.md`; implementation stayed within its non-live scope. Baseline HEAD `033b76dcbf1855f6e65bac646b4f6d8422e3d762` included earlier uncommitted DAW coordinate/control work, preserved. The initial DAW/coordinate/frozen-bridge baseline set passed 575 tests.
+- Added runtime protocol/profile, controlled request/reply exchange, lazy WinMM transport, strict canonical request/outcome serialization, SQLite dispatch journal and `FlStudioParameterController`. No runtime research-script imports, cross-adapter imports or core contract edits. Shared architecture change adds only the new package to completeness; a new architecture file pins all exact edges/import isolation.
+- Tests first: protocol/profile, exchange/transport, journal/serialization and controller test files each failed collection for their missing implementation module, then passed. The new package first failed the existing completeness check; its exact package addition fixed it. A mistaken focused test selector ran no tests and was corrected. A shell-quoted inventory-edit attempt wrote nothing and was replaced by a file-based edit.
+- Additional native flag regression failed before fixing receive requeue to preserve MHDR_PREPARED. A test for invalid inspect responses was made genuinely malformed instead of substituting an open failure. These changes are in owned new tests, not relaxed existing behavior assertions.
+- Ruling: keep frozen research scripts byte-identical and copy the codec into runtime ownership. The historical duplication is explicit, with parity/hash tests; no compatibility alias or import from scripts. Their existing live trial claims remain historical and do not validate this runtime extraction.
+- Ruling: a SQLite DELETE/EXTRA committed transaction is the pending-intent boundary, with an exclusive authoritative journal per configured session. This is not an acceptance journal. Power-loss/hardware durability remains an assumption about the SQLite VFS/storage stack; subprocess exits test process-crash persistence only. No new dependency was added.
+- Ruling: inspect does not clear unresolved writes or conversion blocks. Local replay is journal-backed across reopen. Ambiguous outcome commits poison the active controller; a subsequent reopen can replay intact committed evidence without resending. Unpersisted storage-failure fallbacks have memory-only replay, explicitly qualified in ADR-031.
+- Independent review found partial-constructor cleanup could leave native handles without poisoning the controller; it also raised inspect-ID reuse. Five new tests failed first. Added TransportCleanupError carrying retained resources, poisoning on factory cleanup failure, and persistent inspection-ID reservation. Follow-up P3 retryability review produced two failing tests; permanent journal/cleanup/ID failures now report nonretryable. Reviewer rechecked and confirmed all original findings resolved (read-only, no suite rerun).
+- Ruling: preserve known native resource ownership rather than release buffers after a cooperative timeout. Retain failed cleanup objects until successfully released/process exit; no new dispatch on that controller. This error-only retention can retain memory/resources and is documented, not silently treated as a healthy close.
+- Six mutation probes on final formatted source, each restored byte-identically: send before pending commit (33 failures), accept foreign ID (1), resend pending intent (1), clear conversion block on inspect (1), skip core validator (1), confirm despite failed outcome commit (2). All caught; outcome-commit and constructor-cleanup fault tests are permanent.
+- Final locked verification: 630 focused adapter/DAW/architecture/public-contract tests passed with warnings as errors; full suite 5785 passed, 4 platform skips. Ruff check/format, CLI help and lock check passed. An earlier pre-review full run was 5778 passed, 4 skipped; it is not the final-tree evidence. Final adapter-specific additions: 106 tests including ten architecture cases.
+- Proposed ADR-031/index, overview and layout updated; implementation-plan checkboxes completed with this outcome. ADR-030 remains Proposed and D15 open; no requirement status changed. No installed scripts, FL Studio state, audio files, dependency files, initializers outside the new package or existing offline contracts changed. No staging, commit or push.
+- Remaining: owner scope/adoption decision, separately authorized runtime live testing, exact-target recovery/reconciliation, pending-export continuation and coordinator integration. Confirmed fader control alone is not candidate-ready audio or a mixing research result.
+
+
+## 2026-11-18 — DAW exact-target recovery and explicit reconciliation (Claude Code)
+- **Baseline.** HEAD `033b76d`, with the coordinate, control and transport slices uncommitted (5,785 passed, 4 skipped). The plan was approved by the owner as revision 2, after review of revision 1 (six points), with Amendment R: resolution evidence is subject-specific and the latest relevant.
+- **Implemented, unintegrated, tests first.**
+  - **Core:** `core.records.daw_recovery`; port `DawRecoveryController` with its validators; `gate_daw_restore`.
+  - **Adapter:**
+    - runtime protocol v2 with the additive `restore_gain` (sha256 `68fb70dd…`; research protocol still `03637001…`);
+    - restore serialization;
+    - journal schema v2 with one append-only ledger: reservations, charges, reconciliations, resolutions; v1 migration with unchanged field contents;
+    - controller methods `control_state`, `restore_target`, `reconcile`, `restore` and `resolve`.
+  - **Device:** script v2 in `device/fl_studio/thesis_bridge_v2/`, outside the package, derived from the frozen v1 script by explicit substitutions, with a byte-identical protocol copy.
+- **Rules realized:**
+  - exact confirmation on both readings;
+  - targets recomputed from the journal under the basis rule;
+  - lineage and agreement checked by the gate and, authoritatively, the journal;
+  - the recovery charge committed with the reservation before sending, once per ID, never refunded;
+  - reconciliation classified from the reading's two matches and never clearing;
+  - resolution only with subject-specific, latest evidence and no later reservation;
+  - conversion blocks never cleared.
+
+  The installed v1 device script refuses `restore_gain` before any FL call, which is recorded as `UNSUPPORTED`, charged and still blocking.
+- **Deliberate test change:** the runtime protocol's byte-identity assertion was replaced by a research-hash pin, a v2 snapshot pin and a parity corpus.
+- **Mutation evidence:** eleven probes, all caught. "Re-reserve on an identical retry" first survived (the cache masked it); a restart-replay regression was added.
+- **Checks:** focused 739 passed; full 5,894 passed, 4 skipped; ruff and format clean; CLI help runs; lock consistent; `git diff --check` clean; research hashes unchanged.
+- **Evidence status.** All behaviour is shown through device v2 on a fake host. That is not live FL evidence. Installation of v2 and live recovery trials need separate authorization.
+- **Remaining gaps:** coordinator integration (recovery budgeting from journal charges, authorization authority, gate inputs); a validated recalibration clearance; export continuation; D15 and adoption decisions.
+
+  Restoring a fader proves only its readings. Left uncommitted for Codex review.
+
+## 2026-11-18 — DAW recovery journal: review fixes (Claude Code)
+- **Source.** The second Codex review found three defects, reproduced with disposable databases and fake hosts. Codex independently verified 739 focused tests and accepted the protocol snapshot change.
+- **Findings and fixes (`adapters.fl_studio.journal`), each with regressions written first and failing before the fix:**
+  1. **Freshness ignored the rest of the lineage.** An older root finding could resolve the lineage despite a newer `NEITHER` about its restoration. Freshness is now judged across the root and all its restorations.
+  2. **Consumed resolution authorization IDs escaped the shared namespace.** A new apply could reuse one. Each consumed authorization is now registered as a `RESOLUTION_AUTHORIZED` ledger entry, and its ID is refused for every other operation.
+  3. **A command without a reservation silently counted as a local refusal**, so deleting a pending reservation unblocked writes. Now:
+     - every command needs exactly one marker: `RESERVED`, or an explicit `LOCAL_REFUSAL` for a refused apply recorded locally;
+     - every reserved restoration needs exactly one recovery charge;
+     - inconsistency fails closed on open.
+- **ADR-032** (Proposed) is revised in place to state the lineage-wide freshness rule and the marker and namespace invariants.
+- **Checks.** Five new mutation probes, all caught. Locked: focused 746 passed; full 5,901 passed, 4 skipped; ruff, format, CLI, lock and `git diff --check` clean; protocol hashes unchanged. No live calls and no installs. Left uncommitted for review.
