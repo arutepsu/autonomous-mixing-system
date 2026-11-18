@@ -1,0 +1,35 @@
+--- l3psy.c
++++ l3psy_mapping_probe.c
+@@ -30,2 +30,6 @@
+ #include "l3side.h"
++/* --- long-band mapping probe B (fixture capture only; reads values, writes no encoder variable) --- */
++double probe_b_en[SBMAX_l], probe_b_thm[SBMAX_l], probe_b_thm_quiet[SBMAX_l];
++double probe_b_thm_from_quiet[SBMAX_l], probe_b_thm_signal[SBMAX_l];
++static double probe_b_temp1[CBANDS];
+ #include <assert.h>
+@@ -614,2 +618,3 @@
+ 	    thr[b] = maximum( qthr_l[b], temp_1 );/* rpelev=2.0, rpelev2=16.0 */
++	    probe_b_temp1[b] = temp_1; /* probe B */
+ 	    nb_2[chn][b] = nb_1[chn][b];
+@@ -627,2 +632,21 @@
+ 	
++	/* probe B: encoder long-band mapping (ll. 654-660 expressions and order) on this call's eb/thr */
++	for ( sb = 0; sb < SBMAX_l; sb++ )
++	{
++	    probe_b_en[sb] = w1_l[sb] * eb[bu_l[sb]] + w2_l[sb] * eb[bo_l[sb]];
++	    probe_b_thm[sb] = w1_l[sb] *thr[bu_l[sb]] + w2_l[sb] * thr[bo_l[sb]];
++	    probe_b_thm_quiet[sb] = w1_l[sb] * qthr_l[bu_l[sb]] + w2_l[sb] * qthr_l[bo_l[sb]];
++	    probe_b_thm_signal[sb] = w1_l[sb] * probe_b_temp1[bu_l[sb]] + w2_l[sb] * probe_b_temp1[bo_l[sb]];
++	    probe_b_thm_from_quiet[sb] =
++		w1_l[sb] * (qthr_l[bu_l[sb]] >= probe_b_temp1[bu_l[sb]] ? thr[bu_l[sb]] : 0.0)
++		+ w2_l[sb] * (qthr_l[bo_l[sb]] >= probe_b_temp1[bo_l[sb]] ? thr[bo_l[sb]] : 0.0);
++	    for ( b = bu_l[sb]+1; b < bo_l[sb]; b++ )
++	    {
++		probe_b_en[sb]  += eb[b];
++		probe_b_thm[sb] += thr[b];
++		probe_b_thm_quiet[sb] += qthr_l[b];
++		probe_b_thm_signal[sb] += probe_b_temp1[b];
++		if ( qthr_l[b] >= probe_b_temp1[b] ) probe_b_thm_from_quiet[sb] += thr[b];
++	    }
++	}
+ #define switch_pe  1800

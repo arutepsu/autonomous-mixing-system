@@ -14,13 +14,13 @@ it has no wall-clock bound: limits are per file. Nothing is written, renamed, de
 from collections.abc import Mapping
 from typing import assert_never
 
-from autonomous_mixing.adapters.rendering.integrity import (
+from autonomous_mixing.adapters.audio_io.integrity import (
     IntegrityError,
     IntegrityFailureCode,
-    _require_limit,
     check_resolved_wav_integrity,
 )
-from autonomous_mixing.adapters.rendering.locations import (
+from autonomous_mixing.adapters.audio_io.limits import AudioReadLimits
+from autonomous_mixing.adapters.audio_io.locations import (
     LocationResolutionError,
     LocationResolutionFailureCode,
     resolve_artifact_location,
@@ -51,8 +51,9 @@ class FileStateIntegrityInspector:
             require_text(key, "root key")
             require_text(path, f"root path for {key!r}")
         self._roots: dict[str, str] = snapshot
-        self._max_file_bytes = _require_limit(max_file_bytes, "max_file_bytes")
-        self._max_decoded_bytes = _require_limit(max_decoded_bytes, "max_decoded_bytes")
+        limits = AudioReadLimits(max_file_bytes, max_decoded_bytes)  # same checks, labels and order as before
+        self._max_file_bytes = limits.max_file_bytes
+        self._max_decoded_bytes = limits.max_decoded_bytes
 
     def inspect(self, request: StateIntegrityRequest) -> StateIntegrityReport:
         """Inspect every required artifact once, in ``required_artifacts`` order, and report each."""

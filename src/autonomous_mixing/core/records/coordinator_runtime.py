@@ -2,9 +2,11 @@
 
 ``RunRequest`` fixes everything one controlled run needs before any effect: the initial state, the existing
 run configuration, admission policy, renderer descriptor, processing and mix definitions, stem and mix
-selections, condition measurement bindings, alignment declaration, logical artifact roots and the decision
-retry policy. Construction checks structure only: it cannot prove that a renderer matches its descriptor,
-that source bytes are intact or aligned, or that a journal belongs to this run.
+selections, condition measurement bindings, the explicit analysis jobs, alignment declaration, logical artifact
+roots and the decision retry policy. ``analysis_definitions`` lists every analysis job (each criterion's exact
+definition once, plus any diagnostic-only job); it is never derived from the criteria. Construction checks
+structure only: it cannot prove that a renderer matches its descriptor, that source bytes are intact or aligned,
+or that a journal belongs to this run.
 
 ``DiagnosisRequest``, ``RunRenderRequest`` and ``ClockReading`` are the data the diagnosis source, outer
 renderer and clock ports exchange. Records hold no callables, handles, credentials or hidden references.
@@ -15,6 +17,7 @@ from datetime import datetime
 
 from autonomous_mixing.core.records.actions import ExecutionIssue
 from autonomous_mixing.core.records.admission import ActionAdmissionPolicy, StemBinding
+from autonomous_mixing.core.records.analysis import AnalysisRequest
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.capabilities import RendererCapabilities
 from autonomous_mixing.core.records.identifiers import ArtifactId, RunId, VersionRef
@@ -48,6 +51,7 @@ from autonomous_mixing.core.records.verification_assessment import (
     ConditionMeasurement,
     validate_condition_measurements,
 )
+from autonomous_mixing.core.records.verification_evidence import MeasurementDefinition
 
 
 @dataclass(frozen=True)
@@ -246,6 +250,7 @@ class RunRequest:
     stem_bindings: tuple[StemBinding, ...]
     mix_artifact_id: ArtifactId
     measurements: tuple[ConditionMeasurement, ...]
+    analysis_definitions: tuple[MeasurementDefinition, ...]
     alignment: VersionRef
     root_bindings: tuple[ArtifactRootBinding, ...]
     output_root_key: str
@@ -271,6 +276,10 @@ class RunRequest:
             distinct=False,
         )
         require_instance(self.mix_artifact_id, ArtifactId, "RunRequest.mix_artifact_id")
+        require_tuple_of(
+            self.analysis_definitions, MeasurementDefinition, "RunRequest.analysis_definitions", nonempty=True,
+            distinct=False,
+        )  # fmt: skip
         require_instance(self.alignment, VersionRef, "RunRequest.alignment")
         require_tuple_of(
             self.root_bindings,
@@ -291,6 +300,30 @@ class RunRequest:
         self._validate_recipe_bindings()
         StateIntegrityRequest(state, self.root_bindings)  # current audio and fixed inputs, exactly once each
         validate_condition_measurements(self.configuration.criteria, self.measurements)
+        self._validate_analysis_jobs()
+
+    def _validate_analysis_jobs(self) -> None:
+        """The initial analysis request must be constructible, and every criterion's definition must be a job.
+
+        The initial request binds the current-audio subset of ``root_bindings``; extra (diagnostic-only) jobs
+        are allowed, and malformed, conflicting or incomplete jobs fail here, before any run effect.
+        """
+        state, configuration = self.initial_state, self.configuration
+        current = state.audio.artifact_ids
+        AnalysisRequest(
+            state,
+            configuration.scope,
+            configuration.analysis_spec,
+            self.analysis_definitions,
+            tuple(binding for binding in self.root_bindings if binding.artifact_id in current),
+        )
+        jobs = {(d.selector.metric, d.selector.scope): d for d in self.analysis_definitions}
+        for measurement in self.measurements:
+            selector = measurement.definition.selector
+            if jobs.get((selector.metric, selector.scope)) != measurement.definition:
+                raise ValueError(
+                    f"definition for condition {measurement.condition_id} is not exactly one of the analysis definitions"
+                )
 
     def _validate_recipe_bindings(self) -> None:
         state, recipe = self.initial_state, self.recipe

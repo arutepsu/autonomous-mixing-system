@@ -1,0 +1,37 @@
+--- l3psy_spreading_probe.c
++++ l3psy_threshold_probe.c
+@@ -51,2 +51,7 @@
+ double probe_f_log_ratio[CBANDS]; FLOAT probe_f_ecb[CBANDS]; int probe_f_divided[CBANDS];
++/* --- threshold probe G (fixture capture only; copies values, writes no encoder variable) --- */
++double probe_g_tbb_raw[CBANDS], probe_g_tbb[CBANDS], probe_g_snr[CBANDS], probe_g_nb_1[CBANDS];
++double probe_g_nb_2[CBANDS], probe_g_temp1[CBANDS], probe_g_thr[CBANDS], probe_g_nb_1_after[CBANDS];
++double probe_g_nb_2_after[CBANDS], probe_g_minval[CBANDS], probe_g_qthr[CBANDS], probe_g_norm[CBANDS];
++FLOAT probe_g_nb[CBANDS];
+ #include <assert.h>
+@@ -662,4 +667,7 @@
+ 	    tbb = -0.299 - 0.43*cbb;  /* conv1=-0.299, conv2=-0.43 */
++	    probe_g_tbb_raw[b] = tbb; /* probe G */
+ 	    tbb = minimum( 1.0, maximum( 0.0, tbb) ) ;  /* 0<tbb<1 */
++	    probe_g_tbb[b] = tbb; /* probe G */
+ 	    SNR_l[b] = maximum( minval[b], 29.0*tbb+6.0*(1.0-tbb) );
++	    probe_g_snr[b] = SNR_l[b]; /* probe G */
+ 	}	/* TMN=29.0,NMT=6.0 for all calculation partitions */
+@@ -668,2 +676,8 @@
+ 	    nb[b] = ecb[b] * norm_l[b] * exp( -SNR_l[b] * LN_TO_LOG10 );
++	{ int probe_g_n; /* probe G: unbounded threshold, history as read, tables */
++	  for ( probe_g_n = 0; probe_g_n < CBANDS; probe_g_n++ ) {
++	    probe_g_nb[probe_g_n] = nb[probe_g_n];
++	    probe_g_nb_1[probe_g_n] = nb_1[chn][probe_g_n]; probe_g_nb_2[probe_g_n] = nb_2[chn][probe_g_n];
++	    probe_g_minval[probe_g_n] = minval[probe_g_n]; probe_g_qthr[probe_g_n] = qthr_l[probe_g_n];
++	    probe_g_norm[probe_g_n] = norm_l[probe_g_n]; } }
+ 
+@@ -674,2 +688,3 @@
+ 	    thr[b] = maximum( qthr_l[b], temp_1 );/* rpelev=2.0, rpelev2=16.0 */
++	    probe_g_temp1[b] = temp_1; probe_g_thr[b] = thr[b]; /* probe G */
+ 	    probe_b_temp1[b] = temp_1; /* probe B */
+@@ -678,2 +693,5 @@
+ 	}
++	{ int probe_g_n; /* probe G: history as stored by this call */
++	  for ( probe_g_n = 0; probe_g_n < CBANDS; probe_g_n++ ) {
++	    probe_g_nb_1_after[probe_g_n] = nb_1[chn][probe_g_n]; probe_g_nb_2_after[probe_g_n] = nb_2[chn][probe_g_n]; } }
+ 

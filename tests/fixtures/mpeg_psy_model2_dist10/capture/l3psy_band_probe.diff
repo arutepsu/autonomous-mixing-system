@@ -1,0 +1,18 @@
+--- l3psy_threshold_probe.c
++++ l3psy_band_probe.c
+@@ -56,2 +56,5 @@
+ FLOAT probe_g_nb[CBANDS];
++/* --- band-mapping input probe H (fixture capture only; copies values, writes no encoder variable) --- */
++double probe_h_eb[CBANDS], probe_h_thr[CBANDS], probe_h_w1[SBMAX_l], probe_h_w2[SBMAX_l];
++int probe_h_cbw[SBMAX_l], probe_h_bu[SBMAX_l], probe_h_bo[SBMAX_l];
+ #include <assert.h>
+@@ -706,2 +709,9 @@
+ 	
++	{ int probe_h_n; /* probe H: the long-band mapping inputs and tables, as probe B's mapping reads them */
++	  for ( probe_h_n = 0; probe_h_n < CBANDS; probe_h_n++ ) {
++	    probe_h_eb[probe_h_n] = eb[probe_h_n]; probe_h_thr[probe_h_n] = thr[probe_h_n]; }
++	  for ( probe_h_n = 0; probe_h_n < SBMAX_l; probe_h_n++ ) {
++	    probe_h_w1[probe_h_n] = w1_l[probe_h_n]; probe_h_w2[probe_h_n] = w2_l[probe_h_n];
++	    probe_h_cbw[probe_h_n] = cbw_l[probe_h_n]; probe_h_bu[probe_h_n] = bu_l[probe_h_n];
++	    probe_h_bo[probe_h_n] = bo_l[probe_h_n]; } }
+ 	/* probe B: encoder long-band mapping (ll. 654-660 expressions and order) on this call's eb/thr */

@@ -56,6 +56,7 @@ from autonomous_mixing.core.records.identifiers import (
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.integrity import ArtifactRootBinding
 from autonomous_mixing.core.records.observation import (
     AnalysisScope,
     AnalysisSpec,
@@ -82,6 +83,7 @@ from autonomous_mixing.core.records.verification import (
     MetricSelector,
     TargetCondition,
 )
+from autonomous_mixing.core.records.verification_evidence import MeasurementDefinition, SourceRequirement
 
 UTC_NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 METRIC_A, METRIC_B, METRIC_C = VersionRef("metric-a", "1"), VersionRef("metric-b", "1"), VersionRef("metric-c", "1")
@@ -164,9 +166,32 @@ def _complete_observations() -> tuple[Observation, ...]:
     )
 
 
+def _job(metric, scope) -> MeasurementDefinition:
+    """A labelled job for ``metric`` over ``scope`` (structural fixture; no measurement method implied)."""
+    source = SourceRequirement(ArtifactKind.MIX, scope.track_ids, VersionRef("render", "1"), 48000, 2, 0.0, 48000 * 60)
+    return MeasurementDefinition(
+        MetricSelector(metric, scope), "unit-a", SPEC.ref, VersionRef("analyzer", "0.1"), VersionRef("alignment", "1"),
+        (source,),
+    )  # fmt: skip
+
+
+def _jobs(a_scope=None, b_scope=None, *extra) -> tuple[MeasurementDefinition, ...]:
+    """Jobs matching ``_complete_observations`` by default; explicit scopes where a test narrows the request."""
+    return (
+        _job(METRIC_A, a_scope if a_scope is not None else _scope(("t1", "t2"))),
+        _job(METRIC_B, b_scope if b_scope is not None else _scope(("t1",), 0.0, 30.0)),
+        *extra,
+    )
+
+
 def _analysis_request(**overrides) -> AnalysisRequest:
-    fields = dict(state=_state(), scope=_scope(), specification=SPEC)
+    fields = dict(state=_state(), scope=_scope(), specification=SPEC, definitions=_jobs())
     fields.update(overrides)
+    if "root_bindings" not in fields:
+        # Labelled logical roots for exactly the fixture state's current members (no fixed inputs).
+        state = fields["state"]
+        members = state.audio.artifacts if isinstance(state, ProjectState) else ()
+        fields["root_bindings"] = tuple(ArtifactRootBinding(a.artifact_id, "exports") for a in members)
     return AnalysisRequest(**fields)
 
 
@@ -402,8 +427,11 @@ def test_requests_have_one_state_field_instead_of_snapshot_and_checkpoint():
         {"state": _snapshot()},
         {"scope": (TrackId("t1"),)},
         {"specification": SPEC.ref},
+        {"definitions": list(_jobs())},
+        {"definitions": (*_jobs(), METRIC_A)},
+        {"root_bindings": [ArtifactRootBinding(ArtifactId("c-mix"), "exports")]},
     ],
-    ids=["state", "audio-only", "snapshot-only", "scope", "specification"],
+    ids=["state", "audio-only", "snapshot-only", "scope", "specification", "definitions", "definition", "roots"],
 )
 def test_analysis_request_rejects_wrong_types(overrides):
     with pytest.raises(ValueError):
@@ -463,7 +491,12 @@ def test_analysis_response_rejects_incomplete_or_mismatched_metrics(observations
 
 def test_same_metric_over_different_scopes_is_not_a_duplicate():
     extra = _observation("o-a2", METRIC_A, ("c-mix",), _scope(("t3",)))
-    validate_analysis_response(_analysis_request(), AnalysisResponse((*_complete_observations(), extra)))
+    request = _analysis_request(definitions=_jobs(None, None, _job(METRIC_A, _scope(("t3",)))))  # both requested
+    validate_analysis_response(request, AnalysisResponse((*_complete_observations(), extra)))
+
+
+BAND = FrequencyRange(20.0, 2000.0)
+BAND_JOBS = _jobs(_scope(("t1", "t2"), freq=BAND), _scope(("t1",), 0.0, 30.0, BAND))
 
 
 @pytest.mark.parametrize(
@@ -476,16 +509,27 @@ def test_same_metric_over_different_scopes_is_not_a_duplicate():
             {"scope": _scope(end=120.0)},
             "timeline",
         ),
-        (_observation("o-a", scope=_scope(("t1", "t2"))), {"scope": _scope(("t1",))}, "outside"),
-        (_observation("o-a", scope=_scope(("t1", "t2"), 0.0, 45.0)), {"scope": _scope(start=10.0)}, "outside"),
         (
             _observation("o-a", scope=_scope(("t1", "t2"))),
-            {"scope": _scope(freq=FrequencyRange(20.0, 2000.0))},
+            {"scope": _scope(("t1",)), "definitions": _jobs(_scope(("t1",)))},
+            "outside",
+        ),
+        (
+            _observation("o-a", scope=_scope(("t1", "t2"), 0.0, 45.0)),
+            {
+                "scope": _scope(start=10.0),
+                "definitions": _jobs(_scope(("t1", "t2"), 10.0), _scope(("t1",), 10.0, 30.0)),
+            },
+            "outside",
+        ),
+        (
+            _observation("o-a", scope=_scope(("t1", "t2"))),
+            {"scope": _scope(freq=FrequencyRange(20.0, 2000.0)), "definitions": BAND_JOBS},
             "frequency",
         ),
         (
             _observation("o-a", scope=_scope(("t1", "t2"), freq=FrequencyRange(10.0, 500.0))),
-            {"scope": _scope(freq=FrequencyRange(20.0, 2000.0))},
+            {"scope": _scope(freq=FrequencyRange(20.0, 2000.0)), "definitions": BAND_JOBS},
             "frequency",
         ),
     ],
@@ -511,7 +555,10 @@ def test_contained_bands_are_accepted_for_frequency_restricted_requests():
         _observation("o-a", scope=_scope(("t1", "t2"), freq=FrequencyRange(40.0, 2000.0))),
         _observation("o-b", METRIC_B, ("a-t1",), _scope(("t1",), freq=band)),
     )
-    validate_analysis_response(_analysis_request(scope=_scope(freq=band)), AnalysisResponse(observations))
+    jobs = _jobs(_scope(("t1", "t2"), freq=FrequencyRange(40.0, 2000.0)), _scope(("t1",), freq=band))
+    validate_analysis_response(
+        _analysis_request(scope=_scope(freq=band), definitions=jobs), AnalysisResponse(observations)
+    )
 
 
 # --- decision request ----------------------------------------------------------------

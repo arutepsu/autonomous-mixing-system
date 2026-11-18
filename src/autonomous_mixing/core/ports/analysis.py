@@ -2,7 +2,11 @@
 
 from typing import Protocol
 
-from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
+from autonomous_mixing.core.records.analysis import (
+    AnalysisRequest,
+    AnalysisResponse,
+    require_analysis_scope_within,
+)
 from autonomous_mixing.core.records.identifiers import VersionRef
 from autonomous_mixing.core.records.invariants import require_instance
 from autonomous_mixing.core.records.observation import AnalysisScope, validate_observation_sources
@@ -19,29 +23,22 @@ class AudioAnalyzer(Protocol):
     def analyze(self, request: AnalysisRequest) -> PortResult[AnalysisResponse]: ...
 
 
-def _require_scope_within(inner: AnalysisScope, outer: AnalysisScope, label: str) -> None:
-    outside = sorted(str(t) for t in set(inner.track_ids) - set(outer.track_ids))
-    if outside:
-        raise ValueError(f"{label} uses tracks outside the requested scope: {', '.join(outside)}")
-    if (
-        inner.time_range.start_seconds < outer.time_range.start_seconds
-        or inner.time_range.end_seconds > outer.time_range.end_seconds
-    ):
-        raise ValueError(f"{label} time range lies outside the requested scope")
-    if outer.frequency_range is not None:
-        band = inner.frequency_range
-        if band is None:
-            raise ValueError(f"{label} needs an explicit frequency range within the requested scope")
-        if band.low_hz < outer.frequency_range.low_hz or band.high_hz > outer.frequency_range.high_hz:
-            raise ValueError(f"{label} frequency range lies outside the requested scope")
+def _job(key: tuple[VersionRef, AnalysisScope]) -> str:
+    metric, scope = key
+    return f"{metric.name}@{metric.version} over {scope}"
 
 
 def validate_analysis_response(request: AnalysisRequest, response: AnalysisResponse) -> None:
-    """Check provenance, specification, scope containment and metric completeness of a response."""
+    """Check provenance, specification, scope containment and exact completeness of a response.
+
+    Completeness is structural: exactly one observation per requested metric-and-scope job, no others.
+    An ``Unavailable`` result satisfies it, but is not a usable number; whether a measurement matches a
+    criterion (unit, analyzer, sources) and any verdict are decided by verification, not here.
+    """
     require_instance(request, AnalysisRequest, "request")
     require_instance(response, AnalysisResponse, "response")
     requested = request.specification.metric_ids
-    produced: set[VersionRef] = set()
+    jobs = [(d.selector.metric, d.selector.scope) for d in request.definitions]
     seen: set[tuple[VersionRef, AnalysisScope]] = set()
     for observation in response.observations:
         label = f"observation {observation.observation_id}"
@@ -53,12 +50,13 @@ def validate_analysis_response(request: AnalysisRequest, response: AnalysisRespo
             raise ValueError(
                 f"{label} reports unrequested metric {observation.metric.name}@{observation.metric.version}"
             )
-        _require_scope_within(observation.scope, request.scope, label)
+        require_analysis_scope_within(observation.scope, request.scope, label)
         key = (observation.metric, observation.scope)
+        if key not in jobs:
+            raise ValueError(f"{label} reports {_job(key)}, which was not requested")
         if key in seen:
             raise ValueError(f"{label} duplicates another observation of the same metric and scope")
         seen.add(key)
-        produced.add(observation.metric)
-    missing = [f"{m.name}@{m.version}" for m in requested if m not in produced]
+    missing = [_job(key) for key in jobs if key not in seen]
     if missing:
-        raise ValueError(f"no observation for requested metrics: {', '.join(missing)}")
+        raise ValueError(f"no observation for requested metric and scope: {'; '.join(missing)}")

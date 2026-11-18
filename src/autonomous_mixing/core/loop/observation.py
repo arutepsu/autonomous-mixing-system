@@ -1,6 +1,9 @@
 """Observation responsibilities of the controlled serial coordinator: state-integrity inspections, analysis
 and diagnosis calls through their gates, the root bindings for a state, recorded state evidence and the
 comparison-baseline readiness check. Port responses are validated before they reach progress.
+
+Analysis uses the run's explicit ``analysis_definitions`` and the roots the caller supplies for exactly the
+state's current members (``analysis_bindings``); no job is derived from criteria and no root is guessed.
 """
 
 from collections.abc import Callable
@@ -21,14 +24,14 @@ from autonomous_mixing.core.records.budgets import BudgetOperation
 from autonomous_mixing.core.records.coordinator_progress import RuntimeProgress, Stop
 from autonomous_mixing.core.records.coordinator_runtime import DiagnosisRequest
 from autonomous_mixing.core.records.diagnosis import DiagnosisReport
-from autonomous_mixing.core.records.identifiers import ConditionId
+from autonomous_mixing.core.records.identifiers import ArtifactId, ConditionId
 from autonomous_mixing.core.records.integrity import (
     ArtifactRootBinding,
     IntegrityStatus,
     StateIntegrityReport,
     StateIntegrityRequest,
 )
-from autonomous_mixing.core.records.invariants import require_instance
+from autonomous_mixing.core.records.invariants import require_instance, require_tuple_of
 from autonomous_mixing.core.records.observation import Observation
 from autonomous_mixing.core.records.project import ProjectState
 from autonomous_mixing.core.records.results import PortFailure, Success
@@ -44,6 +47,32 @@ def bindings_for(progress: RuntimeProgress, state: ProjectState) -> tuple[Artifa
         (a.artifact_id for a in (*state.audio.artifacts, *(g.input_artifact for g in state.processing.track_gains)))
     )
     return tuple((ArtifactRootBinding(i, _root_key(progress, i, progress.request.output_root_key)) for i in ids))
+
+
+def analysis_bindings(
+    state: ProjectState,
+    known: tuple[ArtifactRootBinding, ...],
+    produced: tuple[ArtifactRootBinding, ...] = (),
+) -> tuple[ArtifactRootBinding, ...]:
+    """The supplied bindings of exactly ``state``'s current members, in checkpoint order.
+
+    ``known`` and ``produced`` are joined; an artifact ID supplied more than once (equal or conflicting root)
+    is rejected, and a current member without a supplied binding raises ``ValueError``. Bindings of other
+    artifacts (retained or fixed inputs) are permitted and omitted. Empty ``produced`` suits a state without
+    new outputs; it is not a default root. No root is inferred from a key, path or file name.
+    """
+    require_instance(state, ProjectState, "state")
+    supplied: dict[ArtifactId, ArtifactRootBinding] = {}
+    for field, bindings in (("known", known), ("produced", produced)):
+        for binding in require_tuple_of(bindings, ArtifactRootBinding, f"{field} root bindings", nonempty=False,
+                                        distinct=False):  # fmt: skip
+            if binding.artifact_id in supplied:
+                raise ValueError(f"root binding for {binding.artifact_id} is supplied more than once")
+            supplied[binding.artifact_id] = binding
+    missing = [str(a.artifact_id) for a in state.audio.artifacts if a.artifact_id not in supplied]
+    if missing:
+        raise ValueError(f"no root binding for current artifacts: {', '.join(missing)}")
+    return tuple(supplied[a.artifact_id] for a in state.audio.artifacts)
 
 
 def inspect(
@@ -107,15 +136,17 @@ def analyze(
     state: ProjectState,
     failure: TerminationReason,
     *,
+    bindings: tuple[ArtifactRootBinding, ...],
     analyzer: AudioAnalyzer,
     clock: RunClock,
     identities: IdentitySource,
     journal: RunJournal,
     on_progress: Callable[[RuntimeProgress], None],
 ) -> tuple[RuntimeProgress, tuple[tuple[Observation, ...] | None, Stop | None]]:
-    """Returns (observations | None, stop)."""
+    """Returns (observations | None, stop). ``bindings`` are the roots of exactly ``state``'s current members."""
+    configuration = progress.request.configuration
     analysis_request = AnalysisRequest(
-        state, progress.request.configuration.scope, progress.request.configuration.analysis_spec
+        state, configuration.scope, configuration.analysis_spec, progress.request.analysis_definitions, bindings
     )
     progress, (intent_id, _, stop, _) = gate(
         progress,

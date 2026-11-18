@@ -26,6 +26,7 @@ from autonomous_mixing.core.records.admission import (
     StemBinding,
     TrackGainPermission,
 )
+from autonomous_mixing.core.records.analysis import deduplicate_analysis_definitions
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.budgets import BudgetLimits
 from autonomous_mixing.core.records.capabilities import GainBounds, RendererCapabilities
@@ -247,6 +248,10 @@ def _measurement(condition_id, selector=SELECTOR, unit=UNIT) -> ConditionMeasure
 
 
 MEASUREMENTS = (_measurement("tg"), _measurement("im"), _measurement("dl"))
+# Explicit fixture jobs (analysis-jobs plan, 2026-11-10): this fixture has no diagnostic-only job, so its jobs are
+# its one shared criterion definition, deduplicated by the caller. Overrides that change the criterion
+# definitions pass analysis_definitions explicitly; RunRequest itself has no default.
+ANALYSIS_DEFINITIONS = deduplicate_analysis_definitions(tuple(m.definition for m in MEASUREMENTS))
 RECIPE = MixRecipe(VersionRef("recipe", "1"), (T1, T2), SummingPolicy.SAMPLE_SUM)
 PROCESSING = ProcessingSpec(
     VersionRef("processing", "1"), NumericalPrecision.FLOAT64, GainRule.DB_AMPLITUDE, SummationOrder.RECIPE_SEQUENTIAL,
@@ -273,6 +278,7 @@ def _run_request(**overrides) -> RunRequest:
         stem_bindings=STEM_BINDINGS,
         mix_artifact_id=ArtifactId("mix"),
         measurements=MEASUREMENTS,
+        analysis_definitions=ANALYSIS_DEFINITIONS,
         alignment=ALIGNMENT,
         root_bindings=_roots(),
         output_root_key="renders",
@@ -297,8 +303,8 @@ RUN_REQUEST = _run_request()
         (RunRenderRequest, ["plan", "before", "protected_artifacts", "protected_root_bindings"]),
         (RenderPreparationFailure, ["issue", "created_workspace"]),
         (RunRequest, ["run_id", "initial_state", "configuration", "policy", "renderer_capabilities", "processing_spec",
-                      "recipe", "stem_bindings", "mix_artifact_id", "measurements", "alignment", "root_bindings",
-                      "output_root_key", "retry_policy"]),
+                      "recipe", "stem_bindings", "mix_artifact_id", "measurements", "analysis_definitions",
+                      "alignment", "root_bindings", "output_root_key", "retry_policy"]),
     ],
 )  # fmt: skip
 def test_record_fields_are_exact_required_and_frozen(record, fields):

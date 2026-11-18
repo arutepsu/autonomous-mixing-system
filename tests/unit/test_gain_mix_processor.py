@@ -16,10 +16,10 @@ import pytest
 import soundfile as sf
 
 import autonomous_mixing.adapters.rendering.gain_mix as gain_mix  # moved in ADR-027 step M3; patched below
+from autonomous_mixing.adapters.audio_io.integrity import check_resolved_wav_integrity
+from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location
 from autonomous_mixing.adapters.rendering.dsp import apply_absolute_gain, sum_stems
 from autonomous_mixing.adapters.rendering.gain_mix import GAIN_MIX_PROCESSOR, GainMixProcessor, ProcessingLimits
-from autonomous_mixing.adapters.rendering.integrity import check_resolved_wav_integrity
-from autonomous_mixing.adapters.rendering.locations import resolve_artifact_location
 from autonomous_mixing.adapters.rendering.workspaces import (
     AllocatedWorkspace,
     WorkspaceAllocationRequest,

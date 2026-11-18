@@ -67,6 +67,7 @@ from autonomous_mixing.core.records.feedback import (
 )
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
+    ArtifactId,
     DecisionId,
     DiagnosisCoverageId,
     ObservationId,
@@ -977,7 +978,8 @@ def test_unavailable_comparison_baseline_ends_before_any_decision():
         return Success(AnalysisResponse(observations))
 
     harness = Harness(analysis=(both_metrics,), decisions=(no_change,),
-                      request=_run_request(configuration=configuration, measurements=measurements))  # fmt: skip
+                      request=_run_request(configuration=configuration, measurements=measurements,
+                                           analysis_definitions=tuple(m.definition for m in measurements)))  # fmt: skip
     report = harness.run()
     assert outcome(report) == (RunOutcome.FAILED, R.REQUIRED_BASELINE_UNAVAILABLE)
     assert "im-b" in report.final_run.termination_explanation
@@ -1307,3 +1309,115 @@ def test_cancellation_after_a_retryable_failure_stops_before_another_call():
     assert outcome(report) == (RunOutcome.CANCELLED, R.USER_CANCELLED)
     assert len(harness.decider.situations) == 1 and usage_counts(report) == (1, 0, 0, 0)
     assert isinstance(payloads(report, DecisionFeedback)[-1].outcome, PortFailureFeedback)
+
+
+# --- explicit analysis jobs and current-artifact roots (analysis-jobs plan, 2026-11-10) ----------------
+
+
+def _bound(request):
+    return [(str(b.artifact_id), b.root_key) for b in request.root_bindings]
+
+
+def test_initial_and_candidate_analysis_receive_explicit_jobs_and_current_roots():
+    harness = Harness(analysis=(INITIAL_VALUE, SATISFYING), decisions=(propose(-3.0),))
+    report = harness.run()
+    assert outcome(report) == (RunOutcome.SUCCEEDED, R.CANDIDATE_CRITERIA_MET)
+    initial, candidate = harness.analyzer.requests
+    jobs = harness.request.analysis_definitions
+    assert initial.definitions is jobs and candidate.definitions is jobs
+    assert len(jobs) == 1 and jobs[0] is harness.request.measurements[0].definition  # shared criterion job once
+    # Initial: current members only, in checkpoint order; superseded fixed inputs are not analysis roots.
+    assert _bound(initial) == [("s1", "exports"), ("s2", "exports"), ("mix", "exports")]
+    assert IN_T1.artifact_id in {b.artifact_id for b in harness.request.root_bindings}
+    # Candidate: retained members keep their known root; outputs use the assigned workspace root before acceptance.
+    plan = harness.renderer.requests[0].plan
+    outputs = {str(plan.candidate.target_artifact_id), str(plan.candidate.mix_artifact_id)}
+    assert plan.workspace.root_key == harness.request.output_root_key == "renders" != "exports"
+    assert [str(a.artifact_id) for a in candidate.state.audio.artifacts] == [a for a, _ in _bound(candidate)]
+    assert {a: k for a, k in _bound(candidate) if a in outputs} == dict.fromkeys(outputs, "renders")
+    assert [(a, k) for a, k in _bound(candidate) if a not in outputs] == [("s2", "exports")]
+    retained = candidate.state.audio.artifact_for(ArtifactId("s2"))
+    assert retained.revision != candidate.state.revision  # a retained member from an older production revision
+    fixed = {g.input_artifact.artifact_id for g in candidate.state.processing.track_gains}
+    assert IN_T1.artifact_id in fixed and not fixed & {b.artifact_id for b in candidate.root_bindings}
+    # Metadata assembly adds no clock, identity, port or budget use (HEAD eb13065 recorded 22 reads, 37 IDs).
+    assert (harness.clock.reads, harness.identities.count, usage_counts(report)) == (22, 37, (1, 1, 1, 0))
+    assert operations(report) == CANDIDATE_LOOP
+
+
+def test_initial_roots_include_a_retained_older_member_on_its_own_root():
+    from test_run_recording_contracts import IN_T2, MIX, S1, _artifact, _roots, _state
+
+    from autonomous_mixing.core.records.admission import StemBinding
+
+    older = _artifact("s2-old", "r0", ("t2",))
+    state = _state(members=(S1, older, MIX))
+    roots = (*_roots((S1, MIX), "exports"), *_roots((older,), "archive"), *_roots((IN_T1, IN_T2), "inputs"))
+    request = _run_request(initial_state=state, root_bindings=roots,
+                           stem_bindings=(StemBinding(T1, S1.artifact_id), StemBinding(T2, older.artifact_id)))  # fmt: skip
+    harness = Harness(analysis=(-0.5,), request=request)
+    assert outcome(harness.run()) == (RunOutcome.SUCCEEDED, R.INITIAL_CRITERIA_MET)
+    (initial,) = harness.analyzer.requests
+    assert _bound(initial) == [("s1", "exports"), ("s2-old", "archive"), ("mix", "exports")]
+
+
+METRIC_D = VersionRef("metric-d", "1")  # labelled diagnostic-only metric: no criterion names it
+
+
+def test_diagnostic_only_and_separate_scope_jobs_reach_diagnosis_and_the_situation():
+    from test_run_recording_contracts import ALIGNMENT, MEASUREMENTS, RATE, RENDER_REF, SECONDS
+
+    from autonomous_mixing.core.records.analysis import AnalysisResponse
+    from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, TimeRange
+    from autonomous_mixing.core.records.verification import MetricSelector
+    from autonomous_mixing.core.records.verification_evidence import MeasurementDefinition, SourceRequirement
+
+    criterion = MEASUREMENTS[0].definition
+    half = AnalysisScope((T1, T2), TimeRange(0.0, 30.0))
+    source = SourceRequirement(ArtifactKind.MIX, (T1, T2), RENDER_REF, RATE, 2, 0.0, RATE * SECONDS)
+
+    def job(metric, scope):
+        return MeasurementDefinition(MetricSelector(metric, scope), UNIT, SPEC, ANALYZER, ALIGNMENT, (source,))
+
+    jobs = (criterion, job(METRIC_D, SCOPE), job(METRIC, half))  # one diagnostic-only, one more METRIC scope
+    configuration = _configuration(budget_limits=limits(), analysis_spec=AnalysisSpec(SPEC, (METRIC, METRIC_D)))
+    request = _run_request(configuration=configuration, analysis_definitions=jobs)
+
+    def every_job(analysis_request):
+        mix = _mix_of(analysis_request.state).artifact_id
+        values = {criterion: MeasuredScalar(INITIAL_VALUE, UNIT)}
+        return Success(AnalysisResponse(tuple(
+            Observation(ObservationId(f"obs-{i}"), d.selector.metric, (mix,), d.selector.scope,
+                        values.get(d, Unavailable("labelled: no value")), SPEC, ANALYZER, UTC_NOW)
+            for i, d in enumerate(reversed(analysis_request.definitions))
+        )))  # fmt: skip
+
+    harness = Harness(analysis=(every_job,), decisions=(no_change,), request=request)
+    report = harness.run()
+    assert outcome(report) == (RunOutcome.ABSTAINED, R.NO_CHANGE_PROPOSED)
+    (analysis_request,) = harness.analyzer.requests
+    assert analysis_request.definitions is jobs
+    keys = {(o.metric, o.scope) for o in harness.diagnosis.requests[0].observations}
+    assert keys == {(METRIC, SCOPE), (METRIC_D, SCOPE), (METRIC, half)}
+    (situation,) = harness.decider.situations
+    assert {(o.metric, o.scope) for o in situation.observations} == keys
+    assert (harness.clock.reads, harness.identities.count, usage_counts(report)) == (14, 16, (1, 0, 0, 0))
+
+
+def test_an_omitted_requested_scope_is_an_invalid_analysis_response():
+    from test_run_recording_contracts import ALIGNMENT, MEASUREMENTS
+
+    from autonomous_mixing.core.records.observation import AnalysisScope, TimeRange
+    from autonomous_mixing.core.records.verification import MetricSelector
+
+    criterion = MEASUREMENTS[0].definition
+    half = dataclasses.replace(
+        criterion, selector=MetricSelector(METRIC, AnalysisScope((T1, T2), TimeRange(0.0, 30.0)))
+    )
+    assert criterion.alignment == ALIGNMENT
+    harness = Harness(request=_run_request(configuration=_configuration(budget_limits=limits()),
+                                           analysis_definitions=(criterion, half)))  # fmt: skip
+    report = harness.run()  # the scripted analyzer returns only the full-scope observation
+    assert outcome(report) == (RunOutcome.FAILED, R.RUNTIME_CONTRACT_FAILED)
+    assert "no observation" in report.final_run.termination_explanation
+    assert harness.diagnosis.requests == [] and harness.decider.situations == []

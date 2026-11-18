@@ -1,0 +1,38 @@
+--- l3psy_mapping_probe.c
++++ l3psy_fft_probe.c
+@@ -34,2 +34,5 @@
+ static double probe_b_temp1[CBANDS];
++/* --- long-FFT probe C (fixture capture only; copies values, writes no encoder variable) --- */
++FLOAT probe_c_window[BLKSIZE], probe_c_wsamp[BLKSIZE], probe_c_energy[BLKSIZE], probe_c_phi[BLKSIZE];
++int probe_c_fft_armed;
+ #include <assert.h>
+@@ -486,3 +489,9 @@
+ 
++	{ int probe_c_n; for ( probe_c_n = 0; probe_c_n < BLKSIZE; probe_c_n++ ) { /* probe C */
++	    probe_c_window[probe_c_n] = window[probe_c_n]; probe_c_wsamp[probe_c_n] = wsamp_r[probe_c_n]; } }
++	probe_c_fft_armed = 1; /* probe C */
+ 	fft( wsamp_r, wsamp_i, energy, phi, 1024 );		/**long FFT**/
++	probe_c_fft_armed = 0; /* probe C */
++	{ int probe_c_n; for ( probe_c_n = 0; probe_c_n < BLKSIZE; probe_c_n++ ) { /* probe C */
++	    probe_c_energy[probe_c_n] = energy[probe_c_n]; probe_c_phi[probe_c_n] = phi[probe_c_n]; } }
+ 	for ( j = 0; j < 6; j++ )
+--- subs.c
++++ subs_fft_probe.c
+@@ -24,2 +24,5 @@
+ #include "encoder.h"
++/* --- long-FFT probe C (fixture capture only; copies values, writes no encoder variable) --- */
++extern int probe_c_fft_armed;
++FLOAT probe_c_energy_prefloor[BLKSIZE];
+ 
+@@ -129,2 +132,3 @@
+     energy[i] = x_real[i]*x_real[i] + x_imag[i]*x_imag[i];
++    if (probe_c_fft_armed) probe_c_energy_prefloor[i] = energy[i]; /* probe C, before floor */
+     if(energy[i] <= 0.0005){phi[i] = 0;energy[i] = 0.0005;}
+@@ -132,2 +136,3 @@
+     energy[ip] = x_real[ip]*x_real[ip] + x_imag[ip]*x_imag[ip];
++    if (probe_c_fft_armed) probe_c_energy_prefloor[ip] = energy[ip]; /* probe C */
+     if(energy[ip] == 0)phi[ip] = 0;
+@@ -154,2 +159,3 @@
+        phi[i] = t_real;
++       if (probe_c_fft_armed) { FLOAT probe_c_t = probe_c_energy_prefloor[j]; /* probe C: same reorder */ probe_c_energy_prefloor[j] = probe_c_energy_prefloor[i]; probe_c_energy_prefloor[i] = probe_c_t; }
+     }

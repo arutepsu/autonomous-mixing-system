@@ -17,8 +17,8 @@ are mapped; every other exception propagates unchanged and may follow real file 
 
 from collections.abc import Mapping
 
+from autonomous_mixing.adapters.audio_io.locations import LocationResolutionError, resolve_artifact_location
 from autonomous_mixing.adapters.rendering.gain_mix import GainMixProcessor, ProcessingLimits
-from autonomous_mixing.adapters.rendering.locations import LocationResolutionError, resolve_artifact_location
 from autonomous_mixing.adapters.rendering.workspaces import (
     WorkspaceAllocationError,
     WorkspaceAllocationRequest,

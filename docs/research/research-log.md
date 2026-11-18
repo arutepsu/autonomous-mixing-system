@@ -621,3 +621,774 @@
 - Claude Code completion (2026-11-10, Windows 11, `uv run --locked`): `promote` now takes `AssessedCorrection` (an AST scan found no other `PreparedCorrection` parameter reading assessed-only fields); concrete `ArtifactId`, `TrackId`, `Revision`, tuple and `Observation` annotations for the five private runtime helpers; one unreachable `return` removed from `fresh`; a throwaway variable and an index-based selection tuple in `promote` replaced by direct values; `RuntimeProgress` built with keyword arguments; module docstrings stating each component's responsibility, the observer and the shared-selection ownership. No operation, trace event or control path changed. The migration scripts were not rerun.
 - Differential comparison repeated after these edits with the trusted baseline coordinator (`1982c92`, SHA-256 `2536220b…` verified) and Codex's capture plugin: 111 baseline and 111 current captures (107 complete `RunReport`s, 4 exception type/message outcomes), exactly equal with `==`; both capture runs passed 88 coordinator tests.
 - Final checks: see the handoff. Limits unchanged: controlled scientific and provider collaborators, NON_DURABLE recording, cooperative deadlines and the source-safety limits stated for the renderer and inspector.
+
+## 2026-11-10 — Shared read-only audio access component (ADR-028, Proposed)
+- Scope: the owner-approved shared-audio-read plan, implementing only the shared-read extraction of the file-audio-analyzer design. Starting HEAD `518dc53`, clean tree; baseline full suite 4,111 passed, 4 skipped (three POSIX-only cases and the Windows symbolic-link test); `ruff check`, `ruff format --check src tests` and `uv lock --check` passed. ADR number 028 was free.
+- Change: `adapters.rendering.locations` and `adapters.rendering.integrity` moved to the new `adapters.audio_io` component (docstring-only initializer) with unchanged implementations; new frozen `audio_io.limits.AudioReadLimits`; the reader's private `_require_limit` moved unchanged into `limits`; consumers `rendering.workspaces`, `gain_mix` and `run_renderer` changed imports only, and `state_integrity` validates its limits through `AudioReadLimits` at the same point. Old paths removed without aliases. Nine behavior-test files changed import lines only (22 lines replaced, no assertion touched); their module-level patch aliases now point at the implementation modules. New ADR-028 (Proposed) and index row; engineering conventions and overview updated in place.
+- Red evidence: the new limit tests failed at collection (`ModuleNotFoundError: adapters.audio_io`); 18 architecture cases failed against the old layout (module sets, exact edges, initializers, single ownership, removed paths, a package-form client import and fresh-process isolation).
+- Source comparison against the saved baseline (AST of every top-level node except imports): `audio_io/locations.py` byte-identical to the former module; `integrity` differs only by the removed `_require_limit`, which is AST-identical in `limits`, and by imports (new owner paths; unused `typing.Any` dropped); `workspaces`, `gain_mix` and `run_renderer` differ in imports only; `state_integrity` differs only in `__init__` (identical signature), where two `_require_limit` lines became an `AudioReadLimits` construction storing the same attributes.
+- Architecture: `adapter_violations` now allows exactly the four client modules' listed shared modules and rejects private-name imports from the component; AUDIO_IO_EDGES replace the former rendering `locations`/`integrity` edges; the rendering edges for the four clients name their genuine new imports; unrelated edges and third-party restrictions are unchanged. Guarantees retained or replaced: rule (c) real-tree scan (retained, with the exact exception); module-inventory completeness (extended to `audio_io` and to the set of adapter packages); exact edges for the moved modules (replaced by AUDIO_IO_EDGES with identical content apart from integrity's new `limits` edge); docstring-only initializers (extended to `audio_io`); NumPy-free filesystem loading (the former `rendering.locations` case moved to `audio_io.locations`, with workspaces and revalidation kept in both files); rendering, analysis, journal, inspector and renderer isolation probes (retained). New: single ownership of every moved name, removed old paths, exact client counterexamples (consumer, other-adapter, loop, stage, driver, evaluation, unlisted rendering module, unlisted shared module, private names, package forms, unknown children and look-alike names) and integrity/initializer isolation.
+- Mutation probes on the final code, restored byte-identically (SHA-256 checked): shared integrity importing rendering (3 architecture failures), an unrelated adapter importing `audio_io` (2), `locations` importing NumPy (6), a client importing the private limit helper (1, caught by the private-name check).
+- Final checks (Windows 11, `uv run --locked`): focused resolver, verifier, allocator, writer, processor, inspector, renderer and limit tests 1,260 passed, 4 skipped (the same platform cases); architecture and public-contract tests 189 passed; full suite reported in the handoff; no dependency changes.
+- Limits: no behavior or policy change and no analyzer yet; `AnalysisRequest` completion, level kernels, the file-backed analyzer and real-measurement coordinator tests are later increments. No requirement status changes. Left uncommitted for Codex review.
+
+## 2026-11-10 — Explicit analysis jobs and current-artifact roots (analysis-jobs contract plan)
+- Scope: the owner-approved analysis-jobs contract plan, the request-completion increment of the file-audio-analyzer design. The owner approved its design clarification: a required `RunRequest.analysis_definitions` carries all analysis jobs, so diagnostic-only jobs beyond the verification criteria are allowed; this supersedes the design sentence deriving all jobs from `RunRequest.measurements`. Starting HEAD `eb13065` (the shared-reader work already committed), clean tree; baseline full suite 4,185 passed, 4 skipped (three POSIX-only cases and the Windows symbolic-link test); `ruff check`, `ruff format --check src tests` and `uv lock --check` passed.
+- Contract changes: `AnalysisRequest` gained required `definitions` and `root_bindings`; new record-local `deduplicate_analysis_definitions` and `require_analysis_scope_within` (the former private port helper, moved unchanged and removed from the port); `validate_analysis_response` requires the exact requested metric-and-scope set; `RunRequest` gained required `analysis_definitions` after `measurements` and validates the initial request and exact criterion-job equality; `core.loop.observation.analysis_bindings` is new and `analyze` takes a required `bindings` keyword; initial and candidate analyses pass explicit roots, candidate outputs on the plan's assigned workspace root. `AnalysisResponse` and `AudioAnalyzer.analyze` are unchanged. New record edges: `analysis` to `integrity` and `verification_evidence`; `coordinator_runtime` to `analysis` and `verification_evidence` (the plan listed only `analysis`; `verification_evidence` is needed for the field type). The records graph stays acyclic.
+- Test migration: the `RunRequest` factories in the run-recording and runtime-contract tests pass an explicit `ANALYSIS_DEFINITIONS` (the fixture's one shared criterion definition, deduplicated); callers that change the criteria (the two-metric baseline test and the real-renderer coordinator test) pass their jobs explicitly. Application-contract analysis tests now request their scopes explicitly: the observation-outside-request cases state jobs within the narrowed request scope, the second-scope case requests both scopes. Exact field and signature baselines updated (`AnalysisRequest`, `RunRequest`, records and loop inventories). No assertion was removed or weakened.
+- Red evidence: before implementation, seven test modules failed at import (`deduplicate_analysis_definitions`, `analysis_bindings` missing) and 31 architecture, public-contract and application-contract cases failed.
+- Green evidence: new `tests/unit/test_analysis_jobs.py` (deduplication identity, order and conflicts in unit, settings, analyzer, alignment and sources; request jobs and roots, including two scopes for one metric, diagnostic-only jobs, retained older-production members, fixed inputs rejected, no filesystem access; scope-helper ownership; RunRequest jobs; exact completeness with `Unavailable`; the binding helper). Coordinator regressions assert the actual initial and candidate requests: shared criterion job once, checkpoint-order current roots, fixed inputs absent, outputs on `renders` while inputs use `exports`, a retained older member on its own root, a diagnostic-only and a second-scope observation reaching diagnosis and the Situation, an omitted requested scope ending as a runtime-contract failure, and clock reads, identities and usage equal to the HEAD counts (22/37/(1,1,1,0) and 14/16/(1,0,0,0)). The real-renderer coordinator test checks that every analysis root locates the real file and that the candidate outputs were bound to `renders`.
+- Mutation probes, restored byte-identically (SHA-256 checked): completeness reverted to metric-only (3 failures); diagnostic-only jobs dropped during assembly (3); an arbitrary default root for a missing member (3); candidate output bindings omitted (39); a conflicting duplicate definition ignored (6).
+- Final checks: reported in the handoff (Windows 11, `uv run --locked`).
+- Limits: the real analyzer is still unimplemented; no level kernels, `FileAudioAnalyzer`, provider, driver or musical example. Structural completeness says nothing about measurement validity; an `Unavailable` observation is not evidence of a value. Integrity-inspection root bindings are unchanged and still default unknown IDs to `output_root_key`. No requirement status changes. Left uncommitted for Codex review.
+
+## 2026-11-11 — File-backed level analyzer and real-measurement coordinator run (Claude Code)
+- Scope: the kernel, analyzer and connected-run increments of the owner-approved file-audio-analyzer design (Codex project folder), using the explicit analysis jobs and root bindings already in the repository. Starting HEAD `b1fe8b4`, clean tree, branch `feature/budget`.
+- Change: new `adapters.dsp_analysis.levels` (full-band sample peak and pooled-channel RMS in dBFS, RMS through peak scaling; exact silence and empty selections `Unavailable`) and `adapters.dsp_analysis.file_analyzer.FileAudioAnalyzer` (identity `autonomous_mixing.file_level_analyzer@1`; metrics `audio.sample_peak_dbfs@1`, `audio.sample_rms_dbfs@1`; unit `dBFS`). Whole-batch validation before file access (`UNSUPPORTED`, then `INVALID_INPUT`), one clock reading per call, one verified capture per distinct source through `adapters.audio_io`, start-inclusive/end-exclusive frame selection by lower-bound search over the declared timestamp expression, typed reader errors as non-retryable `UNAVAILABLE`, fresh per-instance observation IDs and port validation of the response. Architecture: exact edges for both modules, the analyzer added as ADR-028's reserved shared-reader client (public names only), allowed and forbidden import cases and fresh-process isolation probes. Docs: overview section, engineering-conventions exception and a dated update note in ADR-028 (still Proposed). No core record, port, loop or M0 change; no dependency change.
+- Tests: `tests/unit/test_dsp_levels.py` (analytical constant, square, pooled, antiphase, silence, empty, subnormal, `1e300` and float64-max, above-full-scale values; input contract and immutability) and `tests/unit/test_file_audio_analyzer.py` (construction; real WAV/DOUBLE fixtures in two roots; time windows, two scopes of one metric, subset scope on a stem; once-per-source capture; silence and empty selection citing their source; metadata-only frame-bound cases with non-grid and offset times; unsupported analyzer, metric version, unit, band, pair and contributor-subset jobs; missing, ambiguous, non-current, uncovered and unconfigured-root subjects; hash, missing-file, metadata, invalid-WAV and read-limit failures; unexpected errors propagating; clock and identity contracts; source hashes unchanged). The tests were written after the implementation, so there is no red-first evidence; mutation probes stand in for it.
+- Connected run: coordinator with the real analyzer, `FileRunRenderer`, `FileStateIntegrityInspector` and `InMemoryRunJournal`, controlled diagnosis and decision (-6 dB on T1) and labelled test criteria (T1 stem peak target <= 0 dBFS, improvement >= 1 dB; mix RMS delta guard 10 dB). The run succeeds with `CANDIDATE_CRITERIA_MET`; the initial stem peak equals `20 log10 1.5`, the candidate peak is 6 dB lower (to 1e-9 dB), the mix RMS equals the closed-form value of the real files in both states, and all verification checks cite observation IDs produced by the real analyzer. Source and retained-file hashes are unchanged.
+- Mutation probes on the final code, restored byte-identically (SHA-256 checked), focused files 90 cases: RMS by direct squaring (2 failures); RMS of a mono fold-down (8); an epsilon floor instead of `silent_signal` (4); rounded instead of lower-bound frame bounds (3); first match taken on ambiguity (1); frequency scopes accepted (1); one capture per job instead of per source (1); time selection ignored (2).
+- Final checks (Windows 11): focused analyzer, kernel, analysis-jobs, renderer, inspector, coordinator and audio-io tests 359 passed, 1 skipped; architecture 202 passed; full suite 4,356 passed, 4 skipped (three POSIX-only cases and the Windows symbolic-link test); `ruff check` clean; `ruff format --check` clean for all changed files (five pre-existing files outside this change, four plan documents and `scripts/generate_test_audio.py`, are still reported); `autonomous-mixing --help` works; `uv lock --check` passed.
+- Limits: two full-band descriptors only; analytical numerical fixtures, not musical material or evaluation data; tolerances are float64 rounding, not scientific thresholds, and no cross-platform bitwise identity is claimed. The run shows that measured levels respond to real gain changes and feed verification, not that a level change is musically correct. Diagnosis, provider decisions, justified thresholds, a run driver and evaluation remain open. No requirement status or roadmap change. Left uncommitted for Codex review.
+
+## 2026-11-11 — Correction: RMS kernel underflow under a raising NumPy policy (Codex review)
+- Finding (Codex review of the file-backed level analyzer entry above): `sample_rms_dbfs` raised `FloatingPointError` for valid finite samples such as `[1.0, 1e-200]` when the caller set NumPy's underflow policy to `"raise"`; the expected RMS is about -3.0103 dBFS.
+- Fix: the peak scaling and squaring in `adapters.dsp_analysis.levels` now run inside a local `np.errstate(under="ignore")`. Rounding negligible terms to zero is harmless because the largest scaled magnitude is exactly 1, so the mean square stays at least `1 / n`. The caller's error policy is restored afterwards, and overflow and invalid-operation policies are unaffected. The numerical definition and the analyzer are unchanged.
+- Regression: two cases under `np.errstate(under="raise")`, one where squaring underflows (`[1.0, 1e-200]`, -3.0103 dBFS) and one where scaling underflows (`[1e300, 1e-300]`); both also check that the caller's policy is restored. With the guard removed, both fail with `FloatingPointError`; the source was restored byte-identically (SHA-256 checked).
+- Checks (Windows 11): kernel and analyzer tests 92 passed; full suite 4,358 passed, 4 skipped; `ruff check` and `ruff format --check src tests` clean; CLI help works; `uv lock --check` passed. Codex's independent run reported 4,342 passed with 18 platform or permission skips; the different split comes from that environment's skips. Left uncommitted.
+
+## 2026-11-11 — MPEG psychoacoustic front end: source trace and dist10 reference fixture (Task 2, draft for review)
+- Scope: source tracing and reference evidence for the inputs of the directional margin kernel. No production front end, analyzer integration or report change. Draft contract: `docs/superpowers/specs/2026-11-11-mpeg-psychoacoustic-front-end-contract.md`.
+- Sources: Ronan's thesis could not be read. The QMRO URL returns 404, and the CORE copy is behind a bot check, which was not bypassed. The author's SoundSoftware repository refused connections. The withdrawn arXiv preprint 1803.09960v1 (§3.4, Eqs. 13–18) was used as secondary evidence. ISO/IEC 11172-3 Annex D was not consulted (paywalled). The thesis equation numbering, the paper's "maximum of three values" wording and the exact implementation Ronan used remain open questions.
+- Identification: the stated TMN 29 dB / NMT 6 dB, `minval`, unpredictability tonality, two-previous-frame pre-echo control and scale-factor-band energy and threshold match MPEG-1 psychoacoustic model 2 in its Layer III form as implemented by ISO dist10 `L3psycho_anal` (original archive `dist10.tar.xz`, SHA-256 `79f8321b…f369`). The preprint also cites the MPEG-2 AAC paper for band energy and threshold; that alternative is recorded as unresolved.
+- Reference evidence (owner approved the downloads and the container run): an observation-only three-line patch exposes `en[sb]`/`thm[sb]`. A harness calls the unmodified function per 576-sample granule. It was built with `-g -DUNIX` in `gcc@sha256:d47e63a2…` (GCC 13.5.0, x86_64) without network access; two runs were byte-identical. Fixture `tests/fixtures/mpeg_psy_model2_dist10/` (44.1 kHz, mono int16, seven signals) has full provenance and a verification script.
+- Findings: call `k` analyses samples `[576k − 768, 576k + 256)`; an impulse at 1983 reaches call 3 and one at 1984 does not. The returned ratio lags one call. The first two calls use threshold in quiet because the pre-echo state starts at zero, and loud signals take the short-block path there. FFT energies have a 0.0005 floor on half of the bins, so band energy is never zero, even for silence. Energies are in unnormalised-FFT int16 units, so a [−1, 1] input scale is off by 2³⁰. Cross-adaptive margins change with a common −40 dB gain (for example 95.0 to 69.2 dB in one band) because threshold in quiet is absolute. The FFT runs in float32 (`FLOAT` is `float` under UNIX).
+- Checks: fixture verification passed; `ruff check` and format clean; full suite 4,422 passed, 4 skipped. Limits: one rate, mono, synthetic signals, short-block path not instrumented, no reimplementation tolerance yet. This verifies reproduction of dist10, not model validity or agreement with Ronan's implementation. Left uncommitted for Codex review.
+
+## 2026-11-11 — MPEG front end revision 2: thesis source trace, reference profile, long-band mapping probe and silent-masker control (Task 2, draft for review)
+- Scope: revision of the Task 2 draft contract and extension of the dist10 fixture. Production code is unchanged. Contract: `docs/superpowers/specs/2026-11-11-mpeg-psychoacoustic-front-end-contract.md` (revision 2).
+- Supersedes the previous entry's "Ronan's thesis could not be read". The institutional copy was found through the C4DM theses page at QMRO handle `123456789/55527` (the old `xmlui` path returns an empty page). File `RONAN_David_PhD_Final_110119.pdf`, SHA-256 `216f5571…77b9f2`; it is not stored in the repository. Ch. 7, §§7.2.4.1–7.2.4.2 (pp. 105–109) define the cross-adaptive calculation: Eqs. 7.10–7.13, `T_max = 20 dB`. They cite Brandenburg & Stoll for the model and the AAC paper (Bosi et al.) for `B(dz)`, `E_sf` and `T`. They state the "maximum of three values" threshold wording, and no sample rate, FFT, block switching, channel handling or code. dist10 is now labelled as our chosen backend. The threshold-wording discrepancy with dist10's `max(qthr, min(nb, 2·nb₋₁, 16·nb₋₂))` and the band-table provenance (Layer III vs AAC) remain open.
+- Contract changes: reference profile v1 is pinned to 44.1 kHz, mono, int16 and one masker; float-WAV conversion, stereo, 48 kHz and multi-masker sums are deferred. Final-frame rule: zero-fill the last partial granule, as dist10's `encode.c` does; frame `k` is valid iff `k ≥ 2` and `576k + 256 ≤ N`. This holds because the short FFTs read inside the long window, so call `k` depends only on samples below `576k + 256`. Activity and action thresholds are left to a separate decision; the front end is to report an exact silent-window flag, threshold in quiet and the share of the threshold that threshold in quiet decided.
+- Fixture: the original encoder-path capture (probe A, `expected/`) is kept. A separately labelled long-band mapping probe B (`expected_long_mapping/`, observation-only patch and its own harness) applies the encoder's long-band expressions to the long partition values before the block-switching branch on every call. New inputs: digital silence (12 granules) and the 2 kHz target cut to 6536 samples. Recapture used a fresh extraction of the pinned archive in the same offline container: probe A's seven earlier outputs and its binary were byte-identical to the first capture. Two runs of both probes were byte-identical.
+- Findings:
+  - Probe B equals probe A bit for bit on all 69 long-path calls and gives finite values on the 11 short-path calls.
+  - At the burst onset (call 4, `pe` 9219), band 6 has `en = 3.07e12` but `thm` equals threshold in quiet (0.048), because pre-echo control caps the threshold from the silent history.
+  - The truncated clip equals the full clip exactly on calls 0–10 and differs on call 11, whose window passes the end.
+  - A silent masker gives threshold in quiet exactly; its signal-derived part is at least 31 dB below. Against the active targets it gives 0 of 210 cells with `T > E` (margins −120.6 to −5.9 dB).
+  - A silent target is "masked" in 210 of 210 cells, even by a silent masker (12.6 to 40.7 dB), because threshold in quiet lies above the FFT floor. The window's nonzero-sample count separates such frames exactly; across all 92 probe B records it coincides with floor energy.
+- Checks: fixture verification passed (hashes and probe relations); `ruff check` and format clean for the changed Python; full suite reported in the handoff. Limits: one rate, mono, synthetic signals; probe B's short-path values have no encoder counterpart; no reimplementation tolerance yet. Left uncommitted for Codex review.
+
+## 2026-11-11 — dist10 long-block sample framing (Task 3A, Claude Code)
+- Scope: the framing step of the fixed long-band dist10 front end (contract revision 2, §2). There is no FFT, threshold, WAV conversion, diagnosis or report change, and the Task 2 evidence is untouched.
+- Change: new `adapters.dsp_analysis.framing` with `frame_long_blocks(samples, *, sample_rate_hz) -> LongBlockFrames`.
+  - Profile v1 only: 44,100 Hz and one-dimensional int16 samples; either byte order is accepted.
+  - Call `k` has the window `[576k − 768, 576k + 256)`, and a clip has `ceil(N / 576)` calls.
+  - Positions before sample 0 and in the final partial granule are zero-filled.
+  - Every call is kept, including the start-up calls whose history the threshold stage needs.
+  - `eligible` is true iff `k ≥ 2` and `576k + 256 ≤ N`.
+  - `nonzero_samples` is the exact count of nonzero int16 values per window.
+  - All arrays are fresh and read-only, and the input is never modified.
+- Architecture: `framing` was added to the dsp_analysis edge inventory (standard library and NumPy only) and to both fresh-process isolation probes.
+- Tests: `tests/unit/test_dsp_framing.py` was written before the implementation; red evidence is a `ModuleNotFoundError` at collection, plus four architecture failures. The tests cover:
+  - call indices, window bounds, eligibility and nonzero counts against all nine recorded probe B captures, and call indices against the eight probe A captures;
+  - the 1983/1984 impulse boundary;
+  - the 6,536-sample truncation, where windows 0–10 equal the full clip's and the last window holds 56 fill zeros;
+  - the silent fixture, and the 1,407- and 1,408-sample lengths;
+  - window content against a sample-by-sample reference, and invalid inputs (dtype, shape, masked array, rate);
+  - unchanged and unshared input, read-only output, and non-contiguous, read-only and byte-swapped input.
+
+  Three expectations written in the red step were wrong: two hand-derived window memberships and the fixture input count. They were corrected against the contract bounds; the implementation was unchanged.
+- Mutation probes, restored byte-identically (SHA-256 checked); each line gives the number of the 80 focused tests that failed:
+  - strict end bound: 2;
+  - first eligible call 1: 20;
+  - lookback 767: 33;
+  - floor instead of ceiling call count: 31;
+  - nonzero fill: 6;
+  - 2-D input accepted: 1.
+- Checks (Windows 11): focused framing and architecture tests 288 passed; fixture verifier passed; full suite 4,505 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; `ruff check .` clean.
+- Limits: framing only. Samples at or after `576(calls − 1) + 256` fall in no call's window, as in dist10. Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: framing memory use (Codex review of Task 3A)
+- Finding: `frame_long_blocks` built an int64 index for every window sample, four times the size of the int16 windows it returns.
+- Fix: windows are now a copy of a strided view (`sliding_window_view` with a step of 576). An empty clip still yields a `(0, 1024)` array.
+- Further fix: measurement also showed that `count_nonzero(windows, axis=1)` built a temporary about half the size of the windows. Nonzero counts are now taken one row at a time.
+- Unchanged: call indices, bounds, padding, eligibility and counts.
+- Regression test: the peak traced allocation for a 400-granule clip must stay below the returned windows, plus the zero-led int16 buffer, plus 64 KiB. Before the fix the peak was 1.77 MB, against 1.28 MB for windows and buffer.
+- Mutation probes: each failed only the new test; the source was restored byte-identically (SHA-256 checked).
+  - per-sample index restored;
+  - whole-array count restored;
+  - view returned without a copy, which fails the owns-data check.
+- Checks (Windows 11): focused framing and architecture tests 289 passed; fixture verifier passed; full suite 4,506 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; `ruff check .` clean. Left uncommitted.
+
+## 2026-11-12 — dist10 long-window FFT reference capture (Task 3B, Claude Code)
+- Scope: reference evidence for the long-window FFT stage. There is no Python FFT kernel; short FFT, tonality, spreading and threshold come later. Probes A and B, their outputs and the framing code are unchanged. Contract revision 3 (§3.1) documents the stage.
+- Probe C is observation-only and built on probe B (`capture/make_probe_fft.py`, `l3psy_subs_fft_probe.diff`, `harness_fft.c`, `run_fft_in_container.sh`).
+  - It copies `window[]` and `wsamp_r[]` before the Layer III long `fft()` call, and `energy[]`/`phi[]` after it.
+  - Inside `fft()`, only while armed by that call, it copies each energy right after computation and before the floor test, and applies the same bit-reversal swap to that copy.
+  - It writes only probe globals.
+  - Selected calls: silence 2; impulses at 1983 and 1984, calls 3 and 4; the four level-case tones, call 6.
+- Build: a fresh extraction of the pinned archive (SHA-256 `79f8321b…f369`) in `gcc@sha256:d47e63a2…`, GCC 13.5.0, `-g -DUNIX`, `--network none`. Two runs were byte-identical in outputs, window files and binary (`05309b3a…`).
+- Downstream unchanged: every probe C line carries probe B's fields equal to `expected_long_mapping`. The two inputs without selected calls produced output byte-identical to probe B's.
+- Source conventions confirmed by the capture:
+  - window = float32(0.5(1 − cos(2·PI·(i − 0.5)/1024))) with `PI = 3.14159265358979`, exactly; it is neither the periodic nor the symmetric Hann window;
+  - windowed samples = float32 product of window and frame, exactly;
+  - forward transform, unnormalised, natural bin order after bit reversal. Against a float64 FFT: error ≤ 1e−7 of the peak energy, Parseval within 4e−8, phase within 2.4e−5 rad on strong bins, impulse energy v² in every bin;
+  - the bins `L3psycho_anal` consumes: energy 0–512, phase 0–5.
+- Correction to revision 2: the floor applies to even *pre-reorder* positions, which are natural bins 0–511. Nyquist and bins 513–1023 are never floored. The quiet 2 kHz target floors bins 169–170 inside an active window, and the stored floor value is float32(0.0005).
+- Verifier: `verify_fixture.py` now checks the probe C hashes, downstream identity, window formula, windowed samples rebuilt from the raw inputs, scaling, Parseval, phase, impulse energy and the exact floor set. A new framing unit test checks that window × `framing.windows` equals the captured FFT input for all selected calls.
+- Error injection into a temporary copy of the evidence; all were detected except the last:
+  - periodic Hann window: 9 failures;
+  - frame offset by one sample: 16;
+  - 1/N² energy: 30;
+  - conjugate phase: 7;
+  - floor on even natural bins: 8;
+  - floor on all bins: 5;
+  - double 0.0005 floor value: undetectable after float32 storage (documented).
+- Checks: reported in the handoff. Left uncommitted for Codex review. The Task 2/3A files were already staged by someone else; the index was left as found.
+
+## 2026-11-12 — dist10 long-window spectral kernel (Task 3C, Claude Code)
+- Scope: the long-window spectrum only. There is no short FFT, tonality, spreading, temporal threshold, WAV conversion or diagnosis. Framing, the probes and the fixtures are unchanged, and the staged index was left as found.
+- Change: new `adapters.dsp_analysis.long_spectrum` with:
+  - `dist10_long_window()` (float32, read-only);
+  - `apply_long_window(windows)`;
+  - `apply_long_energy_floor(energy_prefloor)`;
+  - `long_window_spectrum(windows) -> LongSpectrum`, with float32 `energy_prefloor`, `energy` and bool `floored`, each `(calls, 513)`, and float32 `phase` `(calls, 6)`.
+- Computation, per the owner's specification:
+  - window from dist10's formula and `PI`, stored as float32;
+  - float32 product with the int16 samples;
+  - unnormalised float64 real-input FFT, natural bins 0–512;
+  - |X|² rounded to float32;
+  - floor where the widened float32 energy is `<= 0.0005`, on bins 0–511 only, with replacement float32(0.0005);
+  - phase of bins 0–5 as float32, zeroed where floored.
+
+  Work is done in chunks of 256 calls to bound the temporaries. Architecture: inventory entry (stdlib and NumPy) and both isolation probes.
+- Tests: `tests/unit/test_dsp_long_spectrum.py` was written first; red evidence is a `ModuleNotFoundError` at collection and 4 architecture failures. Against all nine Probe C calls:
+  - window coefficients and windowed samples match exactly;
+  - pre-floor energy is within the verifier's 1e−6 of peak (worst 3.1e−7);
+  - floor masks are identical, with no differences;
+  - floored energies are bit-identical to dist10;
+  - phase on strong bins 0–5 is within 1e−4 rad (worst 9.8e−7). Strong bins exist only for the impulses (6 of 6) and the quiet target (2 of 6); the tones' low bins are below 1e−6 of peak.
+
+  Separate cases: silence, the 1983/1984 boundary, the quiet tone's bins 169–170, start-up calls, energies just above (5.0162e−4) and just below (4.9830e−4) the cutoff, Nyquist kept below the floor, zero- and tiny-energy phase, float32 neighbours of 0.0005, chunk boundaries, and input validation.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 73:
+  - floor on Nyquist: 9;
+  - periodic Hann: 16;
+  - 1/N FFT: 26;
+  - phase not zeroed: 2;
+  - double floor value: 12;
+  - float64 windowed product: 10. This first survived because the spectrum loop duplicated the windowing; both paths now share one helper.
+  - sign-flipped phase: 5;
+  - strict `<`: survives. It is equivalent on float32 input, since no float32 equals 0.0005; this is documented.
+- Limits: the nearest captured nonzero energy is 1.29e−4 from the cutoff, so a near-cutoff disagreement with dist10's float32 FFT is not exercised by the capture. A reimplementation tolerance for later stages is open. Left uncommitted for review.
+
+## 2026-11-12 — Correction: long-window kernel window ownership and chunked floor (Codex review of Task 3C)
+- Findings:
+  - `dist10_long_window()` returned the module's shared window, so a caller could re-enable writes and change what the kernel used.
+  - The floor ran on the whole result, which added float64 widening, mask and replacement temporaries that grew with the number of calls.
+- Fix:
+  - The function now returns a fresh read-only copy; the private window is unchanged.
+  - The floor runs per 256-call chunk into preallocated outputs, in both `long_window_spectrum` and `apply_long_energy_floor`, and the retained phase is zeroed per chunk.
+  - The FFT convention, floor predicate and tolerances are unchanged.
+- Regressions:
+  - Modifying a returned window leaves later spectra and windows unchanged.
+  - Peak memory beyond the outputs does not grow from 1,000 to 4,000 calls (limit 1 MiB). It now measures a constant 7.36 MB per chunk; before, the peak at 4,000 calls exceeded the outputs by 10.2 MB.
+- Mutation probes, restored byte-identically (SHA-256 checked):
+  - returning the shared window: the protection test fails;
+  - a whole-array floor in either function: the memory test fails.
+- Checks (Windows 11): fixture verifier passed; spectrum, framing and architecture tests 374 passed; full suite 4,591 passed, 4 skipped; scoped `ruff check` and `ruff format --check` clean; index tree unchanged. Left uncommitted.
+
+## 2026-11-12 — dist10 short-window FFTs and unpredictability reference capture (Task 3D, Claude Code)
+- Scope: reference evidence and contract revision 4 (§3.2). There is no Python short FFT or unpredictability code. Probes A–C, their outputs, framing and the long-window kernel are unchanged, and the staged index was left as found.
+- Probe D is observation-only and built on probe C (`make_probe_short.py`, `l3psy_subs_short_probe.diff`, `harness_short.c`, `run_short_in_container.sh`; outputs `expected_short/`, 557 KB). It records:
+  - the three short-FFT inputs;
+  - the short energy before and after the floor, and the phase, for bins 0–128;
+  - the long-predictor ages and `r`/`phi_sav` history for bins 0–5;
+  - `cw[0..512]` before partitioning, and the short window.
+
+  Selected calls are consecutive: silence 0–2, the 1983 impulse 2–5, the burst 3–5, and the 8192 masker 0–4.
+- Build: a fresh extraction of the pinned archive, with the probe B and C diffs regenerated identically; the same offline container. Two runs were byte-identical in outputs, window files and binary (`7ba06592…`). With the D fields removed, every line equals the stored probe C/B line, and the five inputs without D calls produced output byte-identical to the stored files.
+- Traced and confirmed:
+  - short blocks are `window_s[j]·savebuf[128(2+s)+j]`, i.e. stream [576k − 512 + 128s, +256);
+  - the short window is float32 of the half-sample-offset Hann formula;
+  - the short floor applies to bins 0–127 only;
+  - the long predictor has two float32 age slots, alternating 1/0/1 and 0/1/0, with `oldest` aliasing `new` (two calls back) and zero start;
+  - silence gives cw[0..5] = 1, 1/3, 0 at calls 0–2, and the tone gives 1 at call 0;
+  - lines 6–205 use short bin (j + 2)/4, predicting block 1 from 2·r(block 0) − r(block 2) within the call, in groups of four;
+  - lines 206–512 are 0.4;
+  - `cw` reconstructs in double from the captured float32 inputs within 2.2e−16.
+
+  The zero-denominator `cw = 0` branch is unreachable: the denominator is at least √float32(0.0005) because of the floor.
+- Verifier: new checks on the hashes, downstream identity, short window, exact block offsets, short FFT and floor, history identities, `r_new` against the long energy where probe C overlaps, the `cw` reconstruction and expected evidence. Wrong rules swapped into the verifier were all detected:
+  - offsets: 20–23 failures;
+  - bin mapping: 7;
+  - predictor block order: 7;
+  - history order: 23–38.
+- Uncovered: the unreachable branch; a partially floored active short block (every captured block is either silent or above the floor); stereo. Left uncommitted for Codex review.
+
+## 2026-11-12 — Task 3D extension: partially floored short-window case (Claude Code)
+- Scope: fixture and verifier only. No new input was needed, and there are no code changes.
+- Case: the existing quiet 2 kHz target `target_2k_a10.24`, call 6, short block 2 floors exactly short bins 42 and 86 of 0–127. The floored pre-floor energies are at most 1.267e−4 (≤ 0.25 × 0.0005), every other bin 0–127 has at least 2.055e−2 (≥ 41 × 0.0005), and Nyquist has 42.41. Float32 rounding near the cutoff therefore cannot decide the mask. Bin 42 also lies in the predictor range (k = 2–51). A full scan of the two quiet tones found further single-bin partial floors in `masker_1k_a81.92` (calls 1, 4 and 7); these were not added.
+- Capture: the only change is the probe D selection (`target_2k_a10.24` call 6) in `run_short_in_container.sh`. From a fresh extraction, the probe B, C and D diffs were regenerated identically, and two runs were byte-identical with the same harness binary (`7ba06592…`). All previously stored `expected_short` files, the remaining unselected-output hashes and `window_short.json` were reproduced byte for byte. The new file's lines, with the D fields removed, equal `expected_long_fft/target_2k_a10.24.jsonl`.
+- Verifier: the generic short checks now also cover the new call. A new explicit check, driven by provenance `partial_floor_case`, checks:
+  - the floored set is exactly {42, 86} in an active block;
+  - floored bins are float32(0.0005) with phase 0;
+  - all other bins, Nyquist included, keep their pre-floor energy;
+  - the energies lie clearly on both sides of the cutoff (≤ 0.5× and ≥ 2×).
+
+  Injected errors were each detected: a non-float32 floor value, a kept phase, an extra floored bin, a floored Nyquist and an altered unfloored energy. The unchanged record passes.
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — dist10 short-window spectral kernel (Task 3E, Claude Code)
+- Scope: the short-window spectra only. There is no `cw` prediction or history, partitioning, tonality, threshold, WAV conversion or diagnosis. Framing, the long kernel and the fixtures are unchanged; the index was left as found (clean at `90b0293`).
+- Change: new `adapters.dsp_analysis.short_spectrum`. It is self-contained (standard library and NumPy; it does not import `long_spectrum`) and provides:
+  - `dist10_short_window()`, which returns a fresh read-only float32 copy;
+  - `apply_short_window(windows)`, giving `(calls, 3, 256)`;
+  - `short_window_spectrum(windows) -> ShortSpectrum`, with float32 `energy_prefloor`, `energy` and `phase`, and bool `floored`, each `(calls, 3, 129)`.
+- Computation:
+  - blocks at long-window positions 256, 384 and 512, in block order;
+  - window from dist10's formula and `PI`, stored as float32, and float32 products;
+  - unnormalised float64 real FFT, natural bins 0–128;
+  - |X|² rounded to float32;
+  - floor where the widened float32 energy is `<= 0.0005`, on bins 0–127 only, with replacement float32(0.0005) and phase zeroed;
+  - processing in chunks of 256 calls.
+
+  Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_short_spectrum.py` was written first; red evidence is a collection error and 4 architecture failures. Against all 16 Probe D calls (48 blocks):
+  - window and windowed blocks match exactly;
+  - energy is within 1e−6 of the block peak (worst 1.93e−7);
+  - floor masks are identical, with no differences;
+  - floored energies match dist10 bit for bit;
+  - phase is within 1e−4 rad on 1,021 strong unfloored bins (worst 3.74e−5).
+
+  Separate cases: silence; the 1983 boundary (call 3 silent in every block; call 4 at positions 191/63 of blocks 0/1; block 2 silent); the quiet target, call 6 block 2, floored exactly at bins 42 and 86; start-up calls; energies 2% above (5.10e−4) and below (4.89e−4) the cutoff; Nyquist kept below the floor; zero-energy phase; overlapping blocks; chunk boundaries; memory growth; window protection; validation.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 107:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Offsets 0/128/256 | 36 |
+  | Offsets +1 | 32 |
+  | Reversed block order | 35 |
+  | Periodic Hann | 28 |
+  | 1/N FFT | 27 |
+  | Floor on Nyquist | 23 |
+  | Phase not zeroed | 3 |
+  | Double floor value | 12 |
+  | Float64 windowed product | 17 |
+  | Sign-flipped phase | 8 |
+  | Whole-array floor | 1 (memory test) |
+- Limits: the nearest captured nonzero energy is 3.7e−4 from the cutoff, so near-cutoff disagreement with dist10's float32 FFT is exercised only by the synthetic cases. Left uncommitted for review.
+
+## 2026-11-12 — dist10 spectral unpredictability cw (Task 3F, Claude Code)
+- Start: clean tree at `52a3e7b`, index tree `c1bfd4eb…`. Scope: `cw` only. There is no partitioning, spreading, tonality, threshold or diagnosis, and the spectra, framing and fixtures are unchanged.
+- Change: new `adapters.dsp_analysis.unpredictability` (standard library and NumPy) with:
+  - `dist10_unpredictability(long_energy, long_phase, short_energy, short_phase)`, giving float64 `(calls, 513)`, read-only;
+  - `long_predictor_cw` (the single step from slot values);
+  - `short_predictor_cw` (lines 6–205);
+  - `short_bin_for_line`.
+
+  It uses two float32 age slots (initial 0/1/0, flipping each call), reads `old`/`oldest` before overwriting them with `float32(sqrt(energy))` and the phase, and does the arithmetic in double in the reference's order. Lines 6–205 come from short bin `(j + 2) // 4` with 2·block 0 − block 2 predicting block 1; lines 206–512 are 0.4. The zero-denominator branch returns 0; floored spectra cannot reach it, since `r_new, r2 ≥ √float32(0.0005)`. Inputs are validated: plain float32 arrays, shapes, equal call counts, finite values, non-negative energies. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_unpredictability.py` was written first; red evidence is a collection error and 4 architecture failures. One test was then corrected: at call 0 the long `cw` is 1 regardless of energy (r' = 0), so the boundary perturbation was moved to call 1. Coverage:
+  - Captured spectra (the long bins are rebuilt from the recorded float32 `r_new`, with an exact square-root round trip asserted): consecutive calls from 0 reproduce `cw` within 1e−12 (observed ≤ 2.2e−16), and all 16 single calls match from recorded history.
+  - Silence gives 1, 1/3, 0; also covered: line boundaries (k = 2 → lines 6–9, k = 51 → 202–205, k = 1 and 52 unused, long bin 6 unused), the interpolation block order, clip independence and zero start, float32 history storage, the zero branch under `errstate(all="raise")`, and validation.
+- Python spectra end to end (report only; no tolerance set). Deviations scale with bin weakness:
+  - strong bins: at most 5.2e−6 (short) and 6.9e−6 (long);
+  - 1e−9–1e−6 of peak: at most 2.1e−4;
+  - below 1e−9: at most 6.9e−3, at the burst, call 5, line 170, short bin 43, 1.2e−11 of peak.
+
+  The long worst case is the masker, call 4, bin 5. With the captured spectra, the same calls agree to 2e−16, so the differences come from FFT precision within the reviewed spectrum bounds, not from the predictor. No discrepancy is unexplained.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 46:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | old/oldest swapped | 7 |
+  | Overwrite before read | 6 |
+  | Ages not flipped | 8 |
+  | Bin `j // 4` | 11 |
+  | Block order swapped | 10 |
+  | Target block 2 | 11 |
+  | Denominator without abs | 8 |
+  | Constant 0.5 | 6 |
+  | Zero branch returns 1 | 1 |
+  | `r_new` kept in float64 | 0 (equivalent: the float32 slots cast it, and the single-step API requires float32) |
+- Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: cw predictor processes calls in chunks (Codex review of Task 3F)
+- Finding: `dist10_unpredictability` built its history copies and float64 temporaries for all calls at once. Peak memory beyond the output was 7.0 MB at 1,000 calls and 28.0 MB at 4,000 calls.
+- Fix: calls are processed in chunks of 256. The two-slot history is a small state object, created once per clip and advanced across chunks. The arithmetic, operation order and precision boundaries are unchanged. Memory beyond the output is now a constant 1.79 MB at both sizes.
+- Regressions:
+  - memory beyond the output must grow by less than 1 MiB from 1,000 to 4,000 calls;
+  - over 600 random calls, the long `cw` equals the closed-form two-slot recurrence exactly, across the 256 and 512 chunk boundaries, and the short lines equal the single-call values.
+- Mutation probes, restored byte-identically (SHA-256 checked): a single chunk fails only the memory test, and resetting the history per chunk fails only the continuity test.
+- The numerical findings stand and are kept separate. With captured spectra, `cw` agrees within 2.2e−16. With Python FFT outputs, the largest differences are 2.1e−4 (long) and 6.9e−3 (short), in weak bins. Their effect on the energy-weighted partition values is to be measured in the next stage before any end-to-end tolerance is set.
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — dist10 partition inputs eb/cb: trace, reference capture and comparisons (Task 3G, Claude Code)
+- Start: clean tree at `aebc530`. Scope: reference evidence and contract revision 5 (§3.3). There is no production partitioning, spreading, tonality or threshold, and no change to the kernels or earlier fixtures.
+- Trace (l3psy.c):
+  - `partition_l` is built from the `psy_data` 44.1 kHz long block: 63 partitions whose `#lines` sum to **465**. Bins 465–512 (≈ 20.03–22.05 kHz, Nyquist included) keep the static zero initialisation and so accumulate into **partition 0** with DC (49 bins). The `tp >= 0` guard never rejects a bin, and no table entry is unused.
+  - `numlines[0..38]` is overwritten by the later short-table read. `eb`/`cb` are unaffected, but `pe` uses the overwritten values; this belongs to the later block-switching stage.
+  - `eb` is double; `cb` is a `FLOAT` array, so every `cb[tp] += cw[j]*energy[j]` is rounded to float32 on store.
+- Probe E: observation-only, built on probe D (`make_probe_partition.py`, `l3psy_partition_probe.diff`, `harness_partition.c`, `run_partition_in_container.sh`). Calls: silence 0–2, the 1983 impulse 3–4, the burst 4, the 8192 masker 3 and the quiet target 6.
+  - Build: a fresh extraction, with the B, C and D diffs regenerated identically; two runs byte-identical (binary `95538546…`).
+  - Downstream: every input's output, with the E fields removed, was byte-identical to its stored D, C or B file. Only the E fields are stored (93 KB) plus `mapping_44100.json`.
+- Verifier: new checks on the hashes, stripped-output hashes, mapping and table, the `numlines` overwrite, the input cross-links to probes C and D, exact `eb`/`cb` reconstruction, detectability of a double-only `cb` and of ±1-bin boundary shifts, silence `eb`, and 49 bins in partition 0 for the flat impulse. Injected errors were each detected:
+
+  | Injected error | Failures |
+  | --- | --- |
+  | Shifted mapping | 11 |
+  | Nyquist mapped to partition 62 | 7 |
+  | `eb` changed by 1e−12 relative | 1 |
+  | `cw` changed | 2 |
+  | Energy changed | 6 |
+
+  The unchanged copy passes.
+- Comparisons (`capture/compare_partition_inputs.py`):
+  - A, captured energy + captured `cw`: exact on 8 of 8 calls.
+  - B, Python spectra + Python `cw`: `eb` relative error is at most 1.8e−5 in strong partitions (≥ 1e−6 of the call's maximum `eb`; quiet target, call 6, p16), 2.6e−4 in weak and 4.9e−3 in very weak ones. `cb` reaches **2.5e−3 even in a strong partition** (burst, call 4, p50).
+  - C, captured energy + Python `cw`: `eb` exact; the strong-partition `cb` error is the same 2.5e−3. So `cw` causes it.
+
+  Mechanism: partition 50's `cw` comes from short bins 40–42, where short block 2 is 1e−11–1e−12 of its own peak.
+- Open: the end-to-end tolerance, until the effect on the tonality ratio `ctb/ecb` and the threshold is measured. Left uncommitted for Codex review.
+
+## 2026-11-12 — dist10 long partition accumulator (Task 3H, Claude Code)
+- Start: clean tree at `88b0c0c`, index tree `e7b36819…`. Scope: `eb`/`cb` only. There is no spreading, tonality or threshold, and the fixtures and the other kernels are unchanged.
+- Change: new `adapters.dsp_analysis.partitions` (standard library and NumPy) with:
+  - `DIST10_LONG_PARTITION_LINES_44100`: the 63 `#lines` of the pinned `psy_data` 44.1 kHz long block, embedded with its SHA-256;
+  - `dist10_long_partition_map()`: a fresh read-only `partition_l`, with bins 465–512 in partition 0;
+  - `dist10_partition_sums(energy, cw) -> PartitionSums(eb float64, cb float32)`, each `(calls, 63)`.
+
+  Bins are visited in ascending order. `eb` accumulates in float64; `cb` is formed in float64 and rounded to float32 after every bin. Calls are processed in chunks of 256, including validation. Inputs are validated: plain arrays, float32 energy and float64 `cw`, shape `(calls, 513)`, equal call counts, finite, non-negative. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_partitions.py` was written first; red evidence is a collection error and 4 architecture failures. Coverage:
+  - exact `eb` and `cb` on all 8 Probe E calls, singly and batched;
+  - the embedded table and mapping equal the captured ones, and partition 0 is DC plus 465–512;
+  - every table boundary, and selected bins including 464/465 and 511/512;
+  - Nyquist energy and `cw` into partition 0;
+  - an order-sensitive `cb` case: partition 61 with 1e8 then 72 ones gives 1e8 in ascending order, and a different float32 value in descending order;
+  - float64 `eb`: 2²⁴ + 1 is kept;
+  - empty input, read-only and fresh outputs, chunk boundaries, no memory growth, mapping protection, validation.
+
+  The Python-chain report prints the strong-partition worst residuals (`eb` 1.78e−5 at the quiet target, call 6, p16; `cb` 2.47e−3 at the burst, call 4, p50) and retains (burst, 4, 50) as the named case for the threshold comparison. One report test divided by zero on zero `cb` (a runtime warning); fixed with a guarded divide.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 48:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | High bins to partition 62 | 16 |
+  | Mapping shifted | 22 |
+  | `cb` in float64 | 10 |
+  | Descending order | 8 |
+  | `eb` in float32 | 11 |
+  | `cb` without `cw` | 24 |
+  | Nyquist dropped | 8 |
+- Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: reject float32 overflow in the cb accumulator (Codex review of Task 3H)
+- Finding: finite, valid inputs whose `cb` partition sum exceeds the float32 range produced `inf`, with only a cast warning. Under a raising NumPy policy they produced `FloatingPointError` instead of `ValueError`. Reproduced: 73 bins of partition 61 at float32 max with `cw` = 1.
+- Fix: the accumulation loop runs under a local `np.errstate(over="ignore")`. Each chunk is then checked for `inf` in `cb` (an overflow persists once reached, because all terms are finite and non-negative). On overflow, a `ValueError` names the first call and partition. This also covers an overflowing float64 product `cw·energy`. Results for in-range inputs are unchanged; the 8 Probe E calls are still exact. `eb` cannot overflow (513 × float32 max ≈ 1.7e41 in float64). Profile v1 int16 inputs stay far below the limit: the largest windowed-FFT energy is about (32768·1024)² ≈ 1.1e15.
+- Regressions:
+  - partition 61 overflow (message names call 0, partition 61);
+  - the same under `errstate(all="raise")`;
+  - the first affected call in a later chunk (call 300);
+  - a float64 product overflow;
+  - `cb` exactly at float32 max is kept;
+  - 513 × float32 max energies give a finite `eb`.
+
+  Before the fix, 4 failed. Removing the rejection or the local guard fails the same 4 (restored, SHA-256 checked).
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — dist10 spreading and tonality inputs: trace, reference capture and comparisons (Task 3I, Claude Code)
+- Start: clean tree at `4d1d806` (Task 3H committed), index tree `e6d9b134…`. Scope: reference evidence and contract revision 6 (§3.4). There is no production spreading, tonality or threshold code, and the earlier fixtures and kernels are unchanged.
+- Trace (l3psy.c):
+  - `s3_l[i][j]` is built in double from the `psy_data` `bval`; i is the output partition and j the input. The slope factor is ×3.0 for j ≥ i and ×1.5 otherwise; the bump is `8(t² − 2t)`; the zero cutoff is `tempy ≤ −60`, tested before the bump is added; the value uses `exp(·×0.2302585093)`.
+  - Convolution: b outer, k inner, ascending. `ecb` is a `FLOAT*`, stored as float32 per term; `ctb` is double.
+  - Ratio: `ctb/ecb` only if `ecb != 0`, then a lower clamp of 0.01 (no upper clamp), then `log`. Otherwise 0.
+- Probe F: observation-only, built on probe E (`make_probe_spreading.py`, `l3psy_spreading_probe.diff`, `harness_spreading.c`, `run_spreading_in_container.sh`). Calls: all 8 probe E calls.
+  - Build: a fresh extraction, with the B–E diffs regenerated identically; two runs byte-identical (binary `4c9c692d…`).
+  - Downstream: every output, with the E and F fields removed, was byte-identical to the stored D/C/B file, and the E fields equalled `expected_partition`. Only the F fields and the matrix (with the `bval` strings) are stored, 65 KB.
+- Findings:
+  - 3,114 of 3,969 matrix entries are zero, with the formula's zero pattern and values within 1.8e−16; the matrix is not symmetric.
+  - Direct reconstruction of `ecb`/`ctb`/ratio/clamp is exact on 8 of 8 calls, and the log within 5.6e−17.
+  - The division ran in all 63 partitions of every call: the zero-energy guard is unreachable for floored input. The clamp is active in silence and start-up and in impulse call 3.
+- Python chain (`capture/compare_spreading_inputs.py`): worst relative residuals are `ecb` 1.69e−3 (masker, call 3, p43), `ctb` 2.75e−3, ratio 2.80e−3 and tonality input 2.80e−3 absolute (masker, call 3, p50). At the retained case (burst, call 4, p50), `ctb` and ratio are 1.13e−3. Replacing only the burst's input `cb[50]` (−0.247%) leaves `ecb` unchanged and changes `ctb` exactly in outputs 47–62 (the nonzero rows of column 50): p50 by 1.08e−3, p51 by 6.1e−4, p49 by 1.6e−4, the rest below 6e−5. So the 0.247% `cb` difference reaches the ratio attenuated to at most 0.108%. The resulting `tbb` change is up to 4.6e−4, to be assessed in the threshold comparison.
+- Verifier: new checks on the hashes, stripped outputs, matrix zero pattern, values and asymmetry, exact convolution, transposed and double-`ecb` detectability, ratio, clamp and log, the never-skipped division and the exercised clamp. Injected errors were each detected:
+
+  | Injected error | Failures |
+  | --- | --- |
+  | Transposed matrix | 26 |
+  | Entry below the cutoff made nonzero | 13 |
+  | Clamp omitted | 3 |
+  | Skip flag | 1 |
+  | `ctb` changed by 1e−12 | 1 |
+
+  The unchanged copy passes.
+- Open: the end-to-end tolerance, pending the threshold comparison. Left uncommitted for Codex review.
+
+## 2026-11-12 — dist10 spreading and tonality input (Task 3J, Claude Code)
+- Start: HEAD `4d1d806` with Task 3I's evidence uncommitted (preserved, untouched), index tree `e6d9b134…`. Scope: spreading and the log ratio only. There is no `tbb`/SNR, threshold history or band mapping.
+- Change: new `adapters.dsp_analysis.spreading` (standard library and NumPy) with:
+  - `DIST10_LONG_BVAL_44100`: the 63 `bval` of the pinned `psy_data`, embedded with its SHA-256;
+  - `dist10_spreading_matrix()`: a fresh read-only copy, rows = output partition;
+  - `dist10_spread_tonality_input(eb, cb, *, spreading_matrix=None) -> SpreadTonalityInput(ecb float32, ctb float64, divided, ratio, log_ratio)`.
+
+  Inputs are ascending, `ecb` is rounded to float32 per term, zero matrix entries are skipped (they add exactly 0), and the ratio is formed only where `ecb != 0`, with a 0.01 lower clamp before the log and 0.0 where skipped. Calls are processed in chunks of 1,024, validation included. A float32 `ecb` overflow is rejected (`eb` sums can reach about 1.7e41). Inputs are validated: plain arrays, float64 `eb`, float32 `cb`, float64 (63, 63) matrix, finite and non-negative. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_spreading.py` was written first; red evidence is a collection error and 4 architecture failures. Coverage:
+  - the generated matrix against Probe F: zero pattern, ≤ 1e−15 relative, at least 3,900 bit-identical entries (observed 3,902);
+  - asymmetry and row orientation, the cutoff rule per entry, and matrix protection;
+  - exact `ecb`/`ctb`/`divided`/ratio on all 8 calls with the captured matrix;
+  - with the generated matrix, `ecb` within one ulp (observed 0), `ctb` within 1e−14 (observed 4.2e−16) and log within 1e−14 (observed 4.4e−16);
+  - the captured silence clamp (46 partitions), single-partition orientation, order-sensitive float32 `ecb`, the zero-energy skip branch, clamp before the log, no upper clamp, read-only outputs, empty input, chunk boundaries, memory growth, overflow and validation.
+
+  The full-chain report retains burst (4, 50): ratio 1.130e−3 and log 1.131e−3. It also retains masker (3, 50), which is the chain's worst case: ratio 2.797e−3 and log 2.801e−3.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 48:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Slopes swapped | 11 |
+  | Exact ln(10)/10 | 10 |
+  | Transposed matrix | 19 |
+  | `ecb` in float64 | 18 |
+  | Descending order | 17 |
+  | No clamp | 10 |
+  | Clamp after the log | 18 |
+  | Skip gives log(0.01) | 1 |
+  | No overflow rejection | 1 |
+  | Cutoff after the bump | 0 (equivalent at 44.1 kHz: the bump region has `tempy` between −1.3 and −16.8, far from −60; documented) |
+- Left uncommitted for Codex review.
+
+## 2026-11-12 — Correction: reject ctb and ratio overflow in the spreading kernel (Codex review of Task 3J)
+- Finding: `ctb` (float64) and `ctb/ecb` could become `inf` without an error: `ctb` silently, because the existing overflow suppression covered it, and the ratio with a divide warning. Reproduced with a supplied matrix: `s3[7][3] = 1e300` with `cb` = float32 max for `ctb`, and `s3[0][0] = 1e230` with `eb[0] = 1e−275` (a subnormal `ecb`) for the ratio. With the dist10 matrix (largest entry ≈ 1.0) neither can overflow: `ctb` ≤ 63 × float32 max ≈ 2.1e40, ratio ≤ ≈ 1.5e85.
+- Fix: after each chunk, `ecb`, `ctb` and the ratio are checked for `inf`, and a `ValueError` names the first call and output partition. The division now runs inside the local error-state guard.
+- Further finding, from the new finite-limit regression: under a caller's `errstate(under="raise")`, the float32 `ecb` store raised `FloatingPointError` when a tiny term rounded to a subnormal or to zero, which is the reference's own float32 behaviour. The guard now also ignores underflow. The formula, accumulation order and Probe F results are unchanged.
+- The full chain (framing → spectra → `cw` → partitions → spreading) also runs under `errstate(all="raise")` without error on all nine fixture inputs and on random and sparse int16 windows.
+- Regressions:
+  - `ctb` overflow (call 0, partition 7);
+  - ratio overflow (call 0, partition 0);
+  - first affected call in a later chunk (call 1200);
+  - finite limits with the dist10 matrix under a raising policy.
+
+  Before the fix, 4 failed. Removing the `ctb` check, the ratio check or the underflow guard fails 2, 1 and 2 tests respectively (restored, SHA-256 checked).
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-12 — Correction: check spreading accumulators before dividing (Codex review of Task 3J)
+- Finding: the `ecb`/`ctb` overflow checks ran after `ctb/ecb`. When both overflowed, the division computed `inf/inf`. That gave an "invalid value encountered in divide" warning under the default policy, and a `FloatingPointError` instead of `ValueError` under `errstate(all="raise")`. Reproduced with `s3[4][2] = 1e300`, `eb[2] = 1e300` and `cb[2]` = float32 max.
+- Fix: `ecb` and `ctb` are checked for `inf` right after accumulation and before the division. The division runs only on finite accumulators, and its quotient is then checked for overflow. The underflow handling, formula, order and Probe F results are unchanged.
+- Regressions: both accumulators overflowing gives `ValueError` (naming `ecb`, partition 4) under a raising policy, and with warnings as errors no division warning is emitted. An additional ordering guard (`ctb` overflow with finite `ecb`, partition 9) already passed. Before the fix, 2 failed; moving the checks back after the division fails the same 2 (restored, SHA-256 checked).
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-16 — dist10 tonality and partition-threshold reference capture (Task 3K, Claude Code)
+- Start: branch `feature/budget`, HEAD `4d1d806`, with the Task 3I/3J work and its Codex corrections uncommitted (6 modified and 8 untracked paths; preserved and not edited except where this task appends to the same documents and verifier). The pre-existing fixture README edit had converted that file to CRLF (HEAD is LF); left as found.
+- Trace (l3psy.c, original lines; contract §3.5): `L3para_read` reads the 44.1 kHz long `psy_data` columns `minval` (1 decimal, dB), `qthr` (3 decimals, unnormalised FFT energy) and `norm` (3 decimals) with `%lf` into static double arrays (l. 784); the only other `minval` assignments are under `#ifdef DEBUGP`. Per partition: `tbb = −0.299 − 0.43·cbb` → clamp to [0, 1] → `SNR = maximum(minval, 29 tbb + 6 (1 − tbb))` → `nb = ecb·norm·exp(−SNR·0.2302585093)` stored as float32 (`FLOAT*`) → `temp_1 = minimum(nb, minimum(2 nb_1, 16 nb_2))` → `thr = maximum(qthr, temp_1)`, all in double except `nb`. The history is read in the same loop iteration before `nb_2 = nb_1; nb_1 = nb`; it stores the unbounded float32 `nb`, starts from static zero, and is updated before the block-switching branch, so also on short-path calls.
+- Capture: probe G (`capture/make_probe_threshold.py` → `l3psy_threshold_probe.diff`, SHA-256 `28bc6723…`; `harness_threshold.c` `ef05a93c…`; `run_threshold_in_container.sh` `097560af…`), observation only, built on probe F. Fresh extraction of the pinned archive (SHA-256 `79f8321b…` checked); the B–F diffs regenerated byte-identically. Command: `docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2…cd525e sh /w/run_threshold_in_container.sh`, run twice: outputs, window, mapping, matrix and tables files and the binary (`608b4648…`; patched source `50a22ae3…`) byte-identical. Calls: tone 8192 calls 0–5 and burst calls 0–7 (14 calls). Stored: `expected_threshold/masker_1k_a8192.jsonl` (`a8cf8e81…`), `burst_1k_a8192_onset2000.jsonl` (`ff257f84…`), `tables_44100.json` (`105d620d…`). With the E, F and G fields removed every output equals the stored D/C/B file; the E/F fields equal the stored captures. So the earlier probe outputs are unchanged.
+- Comparison A (captured inputs and history): raw tonality, clamp, SNR, `temp_1` and `thr` exact; `nb` bit-identical with Python's `math.exp` on 882 of 882 partition values.
+- Comparison B (Python chain from call 0, history replayed from zero; `compare_threshold_inputs.py`): worst `ecb` 2.81e−3 rel (burst 5, p40), tonality input 2.80e−3 abs and raw `tbb` 1.20e−3 abs (tone 3, p50), clamped `tbb` 5.8e−4 and SNR 1.33e−2 dB (burst 5, p47), `nb`, `temp_1` and `thr` 3.32e−3 rel (p47 of the shared tone/burst call-5 window). No change of the deciding term, clamp side or SNR term (0 of 882 each).
+- Named cases: tone call 3, p50: `thr = nb` = 58.46, Python moves it only with `ecb` (4.8e−5), because `tbb` is clamped to 0 on both sides. Burst call 4, p50: `thr = qthr` = 0.18 on both sides (silent history makes the pre-echo limit 1.26e−5); the Task 3G `cb` difference is absorbed by the clamp and the quiet floor.
+- History effect, observed: burst call 5 and tone call 5 analyse the same window, with identical values up to `nb`, but `thr` is set by `qthr` for the burst and by `nb` for the tone.
+- Verifier (`verify_fixture.py` §7): exact reconstruction, history ages and stored value, table parse, coverage of every deciding term (`qthr`, `nb`, 2·nb₋₁, 16·nb₋₂), both SNR terms and both clamp ends, and three wrong variants: swapped ages (changes `thr` on tone call 2 and burst calls 6–7 only), `thr` stored in history (53–63 partitions per call from tone call 2 / burst call 4), quiet floor before the limit (63 partitions on every zero- or silent-history call). Tampering the stored call-3 records (swapped read ages, `thr` stored, floor-first `thr`) gives 6, 2 and 2 failures. Verifier passes on the stored fixture.
+- Uncovered: the zero-energy branch (unreachable, §3.4); ties `qthr = temp_1` and between nonzero pre-echo terms (none occur; the macros return equal values, so only the label would change); the short-block threshold path; stereo; other rates.
+- Open questions: the end-to-end tolerance stays open until the effect on band thresholds and margins is measured. The nearest clamp end (4.6e−4) is closer than the chain's worst raw-`tbb` residual (1.2e−3, elsewhere), and the `thr` winner's lead (≥ 1.28e−2) is about 4 times the worst `thr` residual, so other inputs could flip a decision. The derivation of the `psy_data` `minval`/`qthr`/`norm` values is not traced. The Python threshold kernel and band mapping are later tasks.
+- Left uncommitted for Codex review.
+
+## 2026-11-16 — dist10 partition-threshold kernel (Task 3L, Claude Code)
+- Start: the Task 3I–3K work uncommitted (preserved). Scope: partition thresholds only; no band mapping, short-block thresholds or perceptual entropy.
+- Change: new `adapters.dsp_analysis.thresholds` (standard library and NumPy) with the embedded 44.1 kHz `DIST10_LONG_MINVAL_44100`, `DIST10_LONG_QTHR_44100` and `DIST10_LONG_NORM_44100` (pinned `psy_data`, SHA-256 cited) and `dist10_partition_thresholds(ecb, log_ratio) -> PartitionThresholds(tonality, snr, nb float32, pre_echo_limit, thr)`. It follows contract §3.5 steps 1–7, with zero history per invocation and every call processed (start-up and short-path calls included). The history stores the float32 `nb`, the quiet floor comes after the limit, and processing is chunked at 1,024 calls with the last two `nb` rows carried across chunks. Since `nb` is independent of the history, the limit is formed from `nb` shifted by one and two calls. Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_thresholds.py` was written first; red evidence is a collection error (module missing). Coverage (45 tests):
+  - the tables against Probe G and the `psy_data` strings;
+  - exact replay of all 14 captured calls from call 0 with the captured `ecb` and tonality input, including the short-path calls (tone 0–1, burst 4–5) and every deciding term;
+  - the history read against the captured history, and the shared tone/burst call-5 window with different `thr`;
+  - start-up calls, age order (both orders discriminated), `nb` rather than `thr` stored, quiet-floor precedence, the float32 `nb`, the clamp and SNR floor;
+  - a scalar transcription on random input; independent clips; chunk boundaries at 1,024 and 2,048; bounded memory; underflow under a raising policy; the largest `ecb`; read-only outputs; empty input; validation.
+- Full-chain report (no tolerance): worst `thr`, `nb` and limit 3.32e−3 relative, SNR 1.33e−2 dB and tonality 5.8e−4 absolute (tone/burst call 5, p47); 0 quiet-floor decisions changed. Named: tone (3, 50) `thr` 58.4603 → 58.4631 (4.78e−5); burst (4, 50) 0.18 on both sides.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 45:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Swapped history ages | 9 |
+  | Floored `max(qthr, nb)` stored in history | 9 |
+  | `thr` stored in history (sequential rewrite) | 16 |
+  | Quiet floor before the limit | 11 |
+  | History reset at each chunk | 1 |
+  | Non-zero start history | 8 |
+  | `nb` kept in float64 | 16 |
+  | Exact ln(10)/10 | 1 (constant test only: on the captured calls the change never moves a float32 `nb`) |
+  | No tonality clamp | 19 |
+  | No `minval` floor | 18 |
+  | `rpelev` 2 → 4 | 8 |
+  | One `qthr` value off by 0.001 | 11 |
+  | `qthr` floor omitted | 22 |
+- Open: the end-to-end tolerance, pending the band-threshold and margin comparison (next increment: scale-factor-band mapping). Left uncommitted for Codex review.
+
+## 2026-11-16 — Correction: normalise ndarray subclasses in the threshold kernel (Codex review of Task 3L)
+- Finding: `dist10_partition_thresholds` validated and computed on the caller's ndarray subclass. An `np.matrix` failed with a matrix-multiplication shape error, because `*` is matmul for it. A subclass with overridden indexing passed NaN through validation and was computed from its hidden slice values, so the result was silently wrong (reproduced before the fix). The sibling kernels (framing, spectra, unpredictability, partitions, spreading, masking) already normalise with `np.asarray`.
+- Fix: after masked arrays are rejected, inputs are read as plain ndarray views (`np.asarray`, no copy), so validation and computation see the same data with ndarray semantics. The formula, float32 `nb` rounding, history and Probe G results are unchanged.
+- Regression: `np.matrix` inputs give results identical to plain arrays, as plain ndarray outputs. A slice-hiding subclass carrying NaN, −inf or a negative `ecb` is rejected with the matching `ValueError`. Before the fix the test failed. The test filters only numpy's `np.matrix` PendingDeprecationWarning, which its own construction triggers.
+- Checks: fixture verifier passes. Threshold and architecture tests with warnings as errors: 272 passed. Full suite: 4916 passed, 4 skipped. Ruff check and scoped format are clean. Left uncommitted.
+
+## 2026-11-16 — dist10 long scale-factor-band mapping and directional margins (Task 3M, Claude Code)
+- Start: branch `feature/budget`, HEAD `f1b6486`, clean working tree. Scope: reference evidence and the mapping contract only. There is no production band-mapping kernel and no tolerance.
+- Trace (contract §3.6): `L3para_read` reads the `freq=44100.0 sb=20` block of `psy_data` (rows sb 0–20) with `fscanf("sb=%d cbw=%d bu=%d bo=%d w1=%lf w2=%lf")` (ll. 938–968). It checks `bo = bu + cbw` and `|1 − w1[sb] − w2[sb−1]| ≤ 0.01` only from sb 1 on; sb 0 (`cbw` 3, `bu` 0, `bo` 4) breaks the first relation unchecked. The 21 bands cover partitions 0–61 and share their endpoints; partition 62 is never read. Mapping (ll. 652–660): `w1·v[bu] + w2·v[bo]` first, then `v[bu+1 .. bo−1]` ascending, in double; `en` from `eb`, `thm` from the final `thr` (after the pre-echo limit and the quiet floor). Probe B applies it on every call, short-path calls included.
+- Existing evidence reused: probe B `en`/`thm`/`thm_quiet` on all 92 calls, probe E `eb` (8 calls) and probe G `thr` (14 calls). Missing inputs: `eb`/`thr` on the other calls and the band tables as parsed. Hence probe H (`make_probe_band.py` → `l3psy_band_probe.diff` `7ac7172f…`; `harness_band.c` `ce297d96…`; `run_band_in_container.sh` `b7550f85…`), observation only, on G. It copies `eb`/`thr` as the mapping reads them and the tables. It was built from a fresh extraction (archive SHA-256 checked; B–G diffs regenerated identically) and run twice with `docker run --rm --network none -v <build>:/w gcc@sha256:d47e63a2…cd525e sh /w/run_band_in_container.sh`. Both runs were byte-identical in outputs and binary (`cffe8ec2…`; patched source `0ee14903…`). Stored: `expected_band_inputs/` (92 calls of 9 inputs, 204 KB; `bands_44100.json` `bab20379…`), with hashes in `provenance.json` `probe_band`. With the E–H fields removed every output equals its stored D/C/B file, and the E/F/G fields equal the stored captures.
+- Reconstruction from captured inputs: `en`, `thm` and `thm_quiet` exact on all 92 probe B calls (13 short-path). Swapped endpoint weights and the interior moved by one partition at either end fail on every call. Interior-first summation fails `en` on 92 and `thm` on 91 calls, so the order is observable. Tampered records (`eb`/`thr` swapped, `thr[50]` × (1 + 1e−6)) are rejected.
+- Python chain through the same mapping, against probe B: worst `en` 1.28e−3 relative (tone 8192, call 9, band 12) and 5.23e5 absolute (burst, call 7, band 6, of 6.13e12); worst `thm` 1.05e−3 (tone 8192, call 5, band 15) and 1.34e5 (burst, call 7, band 6). On short-path calls `thm` is exact (`thr = qthr` there) and `en` is within 1.16e−3. Partition 50 enters band 16 only. At tone call 3 its `eb` and `thr` differences (7.2e−5, 4.8e−5) become 2.9e−4 and 1.7e−4 at band level, carrying 26% and 24% of the band. At burst call 4 band-16 `thm` = `thm_quiet` = 0.6978 on both sides.
+- Directional margins (approved kernel; valid frames 2–11; tone pairs at both levels, both directions): largest errors 4.67e−3, 5.55e−3, 4.16e−4 and 2.35e−4 dB. No sign change; cells `T > E` are identical (70, 60, 50, 39 of 210); the cell nearest 0 dB lies 1.1–1.8 dB away. Exact-silence controls are reported separately: every valid frame of a silent target is flagged by the int16 window (Python flag equals probe B), so its 28.7–147.7 dB "exceedances" are identifiable as FFT-floor driven.
+- Coverage gaps: no short-path call with signal-derived `thr`; no margin within the errors of 0 dB; Layer III long bands, 44.1 kHz and mono only; the `w1`/`w2` derivation is not traced.
+- Open questions: the end-to-end tolerance, for review. The production band-mapping kernel follows after review. Left uncommitted for Codex review.
+
+## 2026-11-16 — Correction: framer metadata and short-path reporting in the band/margin comparison (Codex review of Task 3M)
+- Findings:
+  - `compare_band_margins.py` re-derived silence from its own padded stream and eligibility from a local helper instead of using the production framer's metadata.
+  - Its short-path maxima masked long-path rows to zero rather than excluding them, so an all-zero `thm` summary named a long-path call (burst call 0).
+- Fix:
+  - The Python side keeps `frame_long_blocks`'s `LongBlockFrames`: `.windows` for the spectra, `.eligible` for eligible calls and `.nonzero_samples == 0` for silence. The duplicate padded-stream calculation is removed.
+  - The reference side derives eligibility independently from the raw clip length (checked equal to Probe B's `clip_samples`) with the §2.2 rule, and takes silence from Probe B's `window_nonzero_samples`.
+  - Both arrays are compared on every call, and the script stops with the input and call on the first disagreement. Directional margins use the calls eligible for both stems.
+  - Short-path maxima are taken over the short-path rows only, keeping the original call IDs; inputs without short-path calls are skipped. All-zero differences are reported as exact agreement, and an empty selection as "no calls selected".
+- Checks:
+  - The fixture verifier passes. Metadata equals the reference on all 92 calls.
+  - Short-path `thm` reports exact agreement on 13 calls (273 cells), naming no call.
+  - Tone pairs: 840 eligible cells, worst 5.552e−3 dB, 0 sign changes (unchanged).
+  - Deliberately flipped flags are each detected with input and call: reference eligibility (truncated clip, call 10), framer eligibility (tone, call 1), framer silence (silence, call 4) and reference silence (target, call 0). A selection without short-path rows reports "no calls selected".
+  - Captures, mapping arithmetic and production kernels are unchanged. Left uncommitted.
+
+## 2026-11-16 — dist10 long scale-factor-band mapping kernel (Task 3N, Claude Code)
+- Start: HEAD `f1b6486` with the Task 3M evidence and its review fix uncommitted (preserved), empty index. Scope: the band-mapping kernel only; no analyzer integration, margin interpretation or tolerance.
+- Change: new `adapters.dsp_analysis.bands` (standard library and NumPy). It embeds `DIST10_LONG_BU/BO/W1/W2_44100` (pinned `psy_data`, block `freq=44100.0 sb=20`, SHA-256 cited) and provides `dist10_long_bands(eb, thr) -> LongBandValues(en, thm)`.
+  - Endpoints are summed first, then the interior partitions ascending. `bu`/`bo` are used as recorded (band 0 ends at partition 4), and partition 62 is unused.
+  - Every call is kept in order. Processing is chunked at 1,024 calls.
+  - Validation follows the sibling kernels: plain or subclass-normalised ndarray, float64, `(n, 63)`, equal call counts, finite and non-negative. A mapped overflow is rejected with quantity, call and band under any NumPy error policy. The result is fresh, read-only and `(0, 21)` when empty.
+  - Architecture: inventory entry and both isolation probes.
+- Tests: `tests/unit/test_dsp_bands.py` was written first; red evidence is a collection error. Coverage (35 tests):
+  - the tables against Probe H and the `psy_data` strings;
+  - exact `en`/`thm`/`thm_quiet` against Probe B on all 92 calls of 9 inputs from Probe H's `eb`/`thr` (13 short-path and 18 start-up calls);
+  - one-hot partition weights, which fix the endpoints, the interior range, band 0 and partition 62;
+  - summation order (a 2**53 case), the same mapping for both quantities, call order, chunk boundaries and bounded memory;
+  - read-only fresh outputs, empty input, subclasses, validation, and overflow naming the call and band.
+- Mutation probes, restored byte-identically (SHA-256 checked); failing tests out of 35:
+
+  | Mutation | Failing tests |
+  | --- | --- |
+  | Swapped endpoint weights | 15 |
+  | Interior from `bu` | 14 |
+  | Interior from `bu + 2` | 14 |
+  | Interior to `bo` | 16 |
+  | Interior to `bo − 2` | 15 |
+  | Interior first | 13 |
+  | Band 0 `bo = bu + cbw` | 12 |
+  | Partition 62 added to band 20 | 14 |
+  | One weight off by 0.001 | 12 |
+  | No overflow check | 1 |
+  | No negative check | 2 |
+- Comparison script: the Python chain now uses the kernel, checked equal to the verifier's independent mapping on every call (the verifier itself is unchanged). The output is byte-identical to before: 840 eligible tone-pair cells, largest margin difference 5.552e−3 dB, 0 sign changes (descriptive).
+- Open: the end-to-end tolerance. Analyzer integration and margin interpretation are later tasks. Left uncommitted for Codex review.
+
+## 2026-11-16 — Correction: band mapping independent of NumPy's underflow policy (Codex review of Task 3N)
+- Finding: `dist10_long_bands` suppressed only overflow during the mapping. A weighted endpoint of a tiny value (for example 0.056 × 1e−308, a subnormal) raised `FloatingPointError` under a caller's `errstate(under="raise")`, and emitted a `RuntimeWarning` under `"warn"` (an error when warnings are errors). That is ordinary IEEE double rounding, which the reference also performs.
+- Fix: the mapping now runs with overflow and underflow ignored. An infinite sum is still rejected afterwards with quantity, call and band. The table, endpoint-first order and reference checks are unchanged.
+- Regression: subnormal-producing inputs (1e−308 and 5e−324 in every partition) give the scalar endpoint-first result exactly under the `raise`, `warn` and `ignore` policies, with warnings as errors. Before the fix, `raise` and `warn` failed.
+- Checks:
+  - Fixture verifier passes. The comparison is unchanged: 840 tone-pair cells, worst 5.552e−3 dB, 0 sign changes.
+  - Band, threshold and architecture tests with warnings as errors: 313 passed. Full suite: 4957 passed, 4 skipped.
+  - Ruff check and scoped format are clean.
+- Left uncommitted.
+
+## 2026-11-16 — dist10 clip-to-band front end (Task 3O, Claude Code)
+- Start: HEAD `f1b6486` with the Task 3M/3N work uncommitted (preserved), empty index. Scope: composition only; no WAV conversion, analyzer integration or margin interpretation.
+- Change: new `adapters.dsp_analysis.front_end` with `dist10_clip_to_bands(samples, *, sample_rate_hz) -> ClipBandAnalysis`.
+  - It validates and frames with `frame_long_blocks`, then composes the long/short spectra, unpredictability, partition sums, spreading, partition thresholds and long-band mapping over every call, start-up calls included.
+  - Result fields: `sample_count`, `sample_rate_hz`, `call`, `window_start`, `window_end`, `eligible`, `nonzero_samples`, `en` and `thm` (read-only float64, `(calls, 21)`). Windows and spectra are not kept; ineligible and silent calls stay.
+  - Architecture: an exact edge entry (the eight kernels, NumPy) and an isolation test (loads exactly the package initializers, the eight kernels and itself; no soundfile or scipy; no forbidden layer); also added to the level-analysis isolation list.
+- Tests: `tests/unit/test_dsp_front_end.py` was written first; red evidence is a collection error. Coverage (42 tests):
+  - equality with the direct kernel composition on all nine fixture clips, and metadata equal to Probe B on every call;
+  - the exact result fields, and start-up history (calls 0–1 give `thm_quiet`; starting the history at call 2 changes calls 2–3);
+  - the shared tone/burst call-5 window, and the 1,407/1,408-sample eligibility boundary;
+  - the truncated clip (eligible 2–10; calls 0–10 equal the full clip, call 11 differs);
+  - exact silence (`en`/`thm` equal Probe B, the FFT floor, flagged by `nonzero_samples`) and the silence-then-burst flags;
+  - empty input, byte order, the input left unmodified, and invalid rate, shape and dtype, with the rate keyword-only.
+- Comparison script: the Python path uses the entry point. The lower-level kernels supply `eb`/`thr` for the partition-50 diagnostics, and the verifier's independent mapping of them must equal the entry point on every call. The output is unchanged apart from the metadata label: 840 eligible tone-pair cells, worst 5.552e−3 dB, 0 sign changes (descriptive).
+- Open: the end-to-end tolerance. Left uncommitted for Codex review.
+
+## 2026-11-17 — dist10 WAV input boundary (Task 3P, Claude Code)
+- Start: branch `feature/budget`, HEAD `9523f48`, clean working tree. Scope: the file boundary of profile v1 only. There is no pair alignment, directional measurement or analyzer integration.
+- Architecture: the boundary must reuse the shared verification path, but ADR-028 allowed no `dsp_analysis` client besides `file_analyzer`. New ADR-029 (Proposed; ADR-028 left unchanged) adds `dsp_analysis.wav_input` as one more exact client of `audio_io.integrity`/`limits`/`locations`. `front_end` and the kernels stay free of file access. The engineering conventions and the ADR index are updated.
+- Change: new `adapters.dsp_analysis.wav_input` with `read_dist10_pcm16(location: ResolvedArtifactLocation, *, limits: AudioReadLimits) -> Dist10Pcm16Clip(artifact, samples, container, subtype, verified_sha256)`, `pcm16_counts(audio: CheckedAudio)` and `Dist10InputError`/`Dist10InputFailureCode`.
+  - The declared rate and channel count are checked before any file access. The file is then verified with `check_resolved_wav_integrity`, whose errors propagate unchanged.
+  - Only PCM_16 is accepted. Counts are the decoded value × 32768 (libsndfile's PCM_16 divisor), checked integral and within [−32768, 32767] before the `int16` cast.
+  - The result keeps the verified `AudioArtifact` (timeline start for pair alignment). Other rates, stereo and other subtypes are rejected with codes, never converted.
+- Tests: `tests/unit/test_dsp_wav_input.py` was written first; red evidence is a collection error. Coverage (36 tests, real WAV files written with soundfile to `tmp_path`):
+  - exact recovery of −32768, −1, 0, 1 and 32767 and of all 65,536 counts; WAVEX accepted;
+  - identical band results from the WAV and from the original `int16` array; the artifact and timeline kept;
+  - 48/32/22.05/96 kHz and stereo rejected before reading; PCM_24/PCM_32/PCM_U8/FLOAT/DOUBLE rejected;
+  - hash, frame-count, rate (declared 44,100 against a 48 kHz file), resource-limit and missing-file failures propagated;
+  - the shared entry point called with the limits; the scaling, integrality, range and profile checks on verified audio; argument validation.
+- Architecture tests: the client edge, the module's exact edges (`audio_io.integrity`/`limits`/`locations`, `core.records.artifacts`, NumPy), allowed and forbidden import cases (private names, package form, rendering, and `front_end`/`framing` importing the component), and fresh-process isolation. Removing the client entry makes rule (c) flag all three `audio_io` imports.
+- Docs: contract §2.3 (boundary and producer export settings: WAV, 44,100 Hz, mono, 16-bit signed PCM, no SRC) and the §2.1 "Input samples" row; revision 9.
+- Left uncommitted for Codex review.
+
+## 2026-11-17 — Correction: check the decoded PCM_16 range before scaling (Codex review of Task 3P)
+- Finding: `pcm16_counts` scaled the decoded values by 32768 before checking their range. Verified files cannot produce such values (PCM_16 decodes within [−1, 32767/32768]), but the public helper also accepts other `CheckedAudio`. There a huge finite value (for example 1e308) overflowed to infinity in the scaling: `FloatingPointError` under `errstate(over="raise")`, a `RuntimeWarning` otherwise. NaN, and values just outside the range, were reported as non-integral rather than out of range.
+- Fix: the range is checked first on the decoded values, against the exact doubles −32768/32768 and 32767/32768, written as "not within" so NaN is rejected too. Only in-range values are scaled, which cannot overflow, and integrality is checked afterwards. The verified-file path, the scaling and the results for valid PCM_16 are unchanged.
+- Regression: ±1e308, the float64 maximum, ±inf and NaN give `OUT_OF_RANGE_SAMPLES` naming the frame under the `raise`, `warn` and `ignore` policies, with warnings as errors. The exact bounds −1.0 and 32767/32768 convert, and their next doubles outward are out of range. Before the fix, 10 of these cases failed.
+- Checks: reported in the handoff. Left uncommitted.
+
+## 2026-11-17 — FL Studio gain feasibility trial, owner-authorized under ADR-009 (Claude Code)
+- Authorization: the owner explicitly assigned an FL Studio gain feasibility trial under ADR-009 (FL Studio integration deferred and optional). It is a **technical feasibility test** on a disposable project or a dedicated project copy. FL Studio's documented scripting interface makes the mixer change, and FL Studio's own save and export commands are used, by hand for this trial. External Python-to-FL messaging and virtual MIDI installation are deferred. FR-14 stays withdrawn; ADR-009 and the `.flp` exclusion in `requirements.md` are unchanged. No repository code parses or writes `.flp` files. A proposed ADR and requirement for adopting FL Studio as the thesis renderer follow after the trial establishes what works. The producer's kick/bass project and any musical evaluation come later.
+- Start: HEAD `9523f48`. Uncommitted at the start: the Task 3P work (WAV input boundary, ADR-029) and Codex's handoff (`scripts/fl_studio/device_gain_trial.py`, `scripts/fl_studio/test_gain_trial.py`, `docs/research/fl-studio-gain-trial.md`, 2026-11-17 13:40). Claude Code took ownership of the handoff and preserved its modes, guards, bounds and procedure.
+- Environment:
+  - FL Studio 2026 build `26.1.7.5654`. No producer `.flp` was found, so a disposable project is planned.
+  - MIDI input: WinMM reports 0 inputs. FL Studio's device records list MIDI outputs only, both after its 13:14 settings write and after a 14:03 start (that session left open). Windows MIDI Services runs but exposes only its diagnostic "Service Test Loopback A/B" endpoints, with no app loopback pair and no tools installed.
+  - Result: no MIDI input can host the controller script, so the live steps are pending. Owner setup step: make one MIDI input available, for example a USB MIDI controller, enable it in FL Studio's MIDI settings and assign "Thesis Gain Trial (user)". The Input list in that window remains to be confirmed by eye.
+- API check against the Image-Line FL Studio API stubs: the draft called `general.getProjectTitle()` and `mixer.getTrackCount()`, which are not in the documented API, and would have failed in FL Studio. They are replaced by `ui.getProgTitle()` (the copy's file name must appear in the window title) and `mixer.trackCount()` (inserts 1 … `trackCount() − 2`; Master and the current track are excluded). The minimum API is 29 (`safeToEdit`). The stubs leave open which `getTrackVolume` mode returns dB, and the normalized-to-dB curve.
+- Change:
+  - The script records the intended dB change (`INTENDED_DB_CHANGE`, bounded to a cut of at most 3 dB) separately from the normalized value sent and FL Studio's dB read-back. It reports `measured_db_change`, `intended_minus_measured_db` and a label: either the intended change was reached within 0.05 dB at this one point, or the result is a bounded normalized-fader change with a measured dB change.
+  - All results print as `RESULT key=value` lines.
+  - New `scripts/fl_studio/check_exports.py` checks exports without modifying them: hashes, container, subtype, rate, channels and frames; profile-v1 compliance (mono, 44,100 Hz, PCM_16) with named mismatches; common rate and frame count; and per-role alignment evidence (bit identity, cross-correlation lag, least-squares gain and residual for the changed role). The procedure document is updated in place.
+- Checks:
+  - The device script's local checks (simulated FL modules exposing only documented names, plus a source check of the called names): 8 passed. Restoring `getTrackCount` makes them fail (1 failure, 15 errors; source restored byte-identically).
+  - `tests/unit/test_fl_export_check.py`: 10 passed with warnings as errors.
+  - Pending live: insert identity, starting gain and the `DB_MODE` plausibility check, the bounded change with dB read-back, manual save/reopen persistence, baseline and candidate exports, and the export check.
+- Left uncommitted for review.
+
+## 2026-11-17 — Kick/808 manual FL Studio trial: before/after analysis (Claude Code)
+- Label: manual feasibility trial under the owner's ADR-009 authorization. There is no listening or quality conclusion. The production WAV input profile (ADR-029) is unchanged; FR-14 stays withdrawn.
+- Inputs: six owner exports in `C:/uni/Bachelor-Thesis/test/trap-baseline` (stereo PCM_16, 44,100 Hz, 302,400 frames each). Their hashes are in `docs/research/fl-studio-kick-808-trial.md`. The originals and `.flp` files were only read; SHA-256 was rechecked after each run.
+- What changed: the kick, by a least-squares −2.974 dB (residual 2e−9). The 808 audio is bit-identical; its files differ only in the INFO title chunk. The master changed. Lag 0 everywhere and equal lengths.
+- Channels: no substantial cancellation. The L/R mean loses −0.0004 dB (kick) and −6e−9 dB (808) of energy; side is 40.6 dB (kick) and 88.4 dB (808) below mid.
+- Derived mono rule: `round_half_even((L + R) / 2)` on int16 counts, for all four stems. The masters stay stereo.
+- New `scripts/fl_studio/analyze_trial.py`. It covers the channel report, derived mono WAVs with hashes, the dist10 front end, both margin directions on the 523 frames eligible in all four clips and all 21 bands, and silent target windows flagged and excluded. It also produces the largest changes in time and frequency, zero crossings, a breakdown by band energy above an int16 rounding-noise reference, and master peak and RMS. Tests: `tests/unit/test_fl_trial_analysis.py` (6), passing with warnings as errors. Two repeated runs gave byte-identical outputs.
+- Results:
+  - 808 → kick: median +2.96 dB. Cells ≥ 40 dB above rounding noise move +2.87…+3.02 dB (median +2.974).
+  - kick → 808: median 0 (the kick threshold is threshold in quiet in most cells). Cells with the kick ≥ 40 dB above noise move −3.22…0 dB (median −2.973). 27 cells at kick onsets went from T > E to T ≤ E.
+  - Master: peak −1.249 dB, RMS −0.620 dB.
+  - Outliers (±6–8 dB) sit at kick onsets in 0.9–3.8 kHz, where the kick's band energy is within about 10 dB of rounding noise and the candidate is not a scaled copy (partition energies up to +11 dB). They reflect export re-quantization through the tonality, SNR and pre-echo stages, not the gain.
+- `check_exports.py` now also accepts `role=baseline.wav:candidate.wav` for FL Studio's prefixed names; 13 tests pass. The documented command reproduces the kick −2.974 dB, the 808 identity and lag 0.
+- Open: whether a renderer integration should export float or 24-bit stems (rounding noise near empty bands) and mono or stereo stems (the production profile needs mono). A listening comparison. Left uncommitted for review.
+
+## 2026-11-17 — Correction: kick/808 trial analysis (Codex review)
+- Rounding-noise reference: it now covers every bin 0–512, Nyquist included. The reproduced dist10 partition mapping accumulates bin 512 (with bins 465–511) into partition 0, although the FFT energy floor excludes it. Partition 0's reference is 49 instead of 48 bins. The regression `test_rounding_noise_includes_nyquist_in_partition_0` fails if the loop stops at bin 511.
+- Labels: frequency ranges are **nominal** (`band_hz_nominal` in the output; key renamed from `band_hz`), counting bins below 465. dist10 assigns bins 465–512 (about 20.0–22.05 kHz) to partition 0, band 0's lower endpoint, so band 0 also holds energy outside its displayed 0–172 Hz.
+- Rerun: only band 0's noise reference changed, 1,633.792 → 1,665.792 (+0.08 dB). Unchanged, compared field by field with the previous output:
+  - inputs and derived mono hashes, master levels, eligible frames and silent windows;
+  - raw margins in all listed cells, change statistics and per-band and per-frame means;
+  - exceedance counts (125 → 98 and 543 → 550) and zero crossings;
+  - every noise-group count and summary.
+
+  The original FL Studio projects and exports still match their SHA-256.
+- Wording: the large outliers are described as *consistent with* sensitivity to quantization in low-energy bands. The trial includes two roundings (FL Studio's PCM_16 export and the derived mono conversion), and it cannot isolate their contributions.
+- Corrects the previous entry's claims, which were drawn from the top-5 lists only:
+  - **Time:** the changes larger than ±3.5 dB do not sit at kick onsets. Checked over all cells, they fall in the late calls (decay) of each kick hit (calls 6–11, 105–109, 137–142, 269–273, 498–503 and others). The 27 kick → 808 zero crossings are in early calls of hits.
+  - **Energy:** the kick's band energy in those cells is not uniformly "within about 10 dB" of the reference. It is at most 25 dB above it (median about 2 dB), with 69% (kick → 808, 36 cells) and 77% (808 → kick, 110 cells) within 10 dB.
+  - **Bands:** 6–13 for kick → 808 and 3–20 for 808 → kick, not 6–12 for both.
+
+  `docs/research/fl-studio-kick-808-trial.md` is corrected in place.
+- Checks: reported in the handoff. Left uncommitted for Codex review.
+
+## 2026-11-17 — Agent decision pilot 1: baseline packet, action menu and verification draft (Claude Code)
+- Scope: preparation only, under the owner's ADR-009 authorization. The agent has not been asked. The producer goal is left for the owner to state, and all thresholds are pilot settings for review. Proposals stay proposals: admission, rendering and verification are deterministic (ADR-004).
+- Inputs: only the baseline kick, 808 and master exports of `C:/uni/Bachelor-Thesis/test/trap-baseline`. The manual kick-cut candidate, its measurements and its result are excluded. New `scripts/fl_studio/prepare_decision_packet.py` opens only `trap-baseline_*.wav`, refuses a candidate prefix, and records the insert titles (RIFF INAM), stem and master peak/RMS, the channel relation, both directional margins on calls 2–524 × 21 bands, supporting regions and per-band evidence, and three cell categories:
+  - silent target windows (excluded);
+  - masker threshold equal to threshold in quiet (exceedance not attributed to the masker);
+  - low-energy cells within 10 dB of the int16 rounding-noise reference (pilot setting, flagged).
+- Packet: `C:/uni/Bachelor-Thesis/test/agent-pilot-packet/decision-packet.json`, SHA-256 `9ea69f8c…`, reproduced byte-identically and with no candidate reference. The original exports were unchanged.
+- Observations (model exceedance, not perceptual masking):
+  - kick → 808: 118 cells attributable to the kick (117 not low-energy), at the attacks of the four kick hits that start with an 808 note, bands 2–20 (nominal 0.3–19 kHz), median +5…+7.6 dB.
+  - 808 → kick: 536 cells (206 not low-energy), in the decays of the same hits, all bands. The evidence without the flag is mostly in bands 0–4 (104 of 118); above 0.8 kHz most of it is low-energy flagged.
+  - The four kick hits in the 808's gaps give no evidence in either direction.
+- Drafts in `docs/research/agent-decision-pilot-packet.md`:
+  - **Menu:** abstention plus Kick or 808 cuts of −1, −2 or −3 dB. Cuts only, matching the trial bridge. Insert indices are to be confirmed in FL Studio.
+  - **Execution rule:** read-back within ±0.25 dB.
+  - **Verification rule tied to the owner's goal:** a primary median change of −1.0 dB over a pre-registered baseline evidence set. Guards cover the other stem (median +1.0 dB, 10 % newly exceeding), the master (peak ≤ −1.0 dBFS, RMS change ≥ −1.5 dB) and uncertainty (flagged cells reported apart). The integrity checks are exact.
+- Tests: `tests/unit/test_fl_decision_packet.py` (5; baseline-only reading proven with a candidate file present). 25 FL Studio script tests pass with warnings as errors; ruff is clean.
+- Open: the producer goal (owner), review of the pilot settings, and confirmation of the insert indices. Left uncommitted for review.
+
+## 2026-11-17 — Agent decision pilot 1: packet and verification revised after Codex review (Claude Code)
+- **Evidence terms.** The previous entry's "attributable to the masker" counts (118 kick → 808, 536 808 → kick) only showed `T > E` with `T > thm_quiet` (`thm_quiet` = band mapping of the threshold in quiet). They are now called *exceedances with an elevated masker threshold*. A *masker-dependent* exceedance also requires `thm_quiet ≤ E < T`: 118 kick → 808 (unchanged) and 534 808 → kick (2 fewer, where the kick was already below the threshold in quiet). Only masker-dependent cells support observations and the evidence set. Unflagged counts are unchanged: 117 and 206.
+- **Frozen sets.** `decision-packet.json` now carries, per direction, `frozen_cells.evidence` (masker-dependent, not low-energy flagged) and `frozen_cells.guard` (eligible, target window not silent, not flagged), each as `[call, band, baseline margin]`, fixed before any action. Evidence: 117 and 206 cells. Guard: 5,600 (5,483 at risk, baseline margin ≤ 0) and 1,228 (1,022 at risk).
+- **Verification draft** (`docs/research/agent-decision-pilot-packet.md` §5) now states:
+  - the guard on the reverse direction's frozen guard set G;
+  - "newly exceeding" as a share of the at-risk subset G₀ (passing when G₀ is empty);
+  - empty evidence or guard sets give *not verified* (only A0 is verifiable without evidence);
+  - cells that become unusable after the edit (silent target window, undefined margin) are never dropped or imputed and make the result *not verified*;
+  - the master rule `candidate RMS − baseline RMS ≥ −1.5 dB` explicitly.
+- **Execution.** The pilot is executed manually. The owner confirms the insert indices and names in the FL Studio mixer before the pilot, edits a fresh copy of `trap-baseline.flp` with FL Studio's fader, and records the displayed before and after values. The action counts as executed only if the displayed change is within ±0.25 dB of the intended one (pilot setting). The scripted bridge is not used.
+- **Menu file.** The packet script writes `action-menu.json` (A0 abstain, A1–A6 Kick/Bass cuts of −1, −2 and −3 dB, manual execution rule). Packet SHA-256 `5ed835c3…`, menu `da7594e1…`; both were reproduced byte-identically, with no candidate reference. The original exports are unchanged.
+- **Tests and checks.** `tests/unit/test_fl_decision_packet.py` has 7 tests (new: masker-dependence requires `E ≥ thm_quiet`; flagged cells leave both frozen sets; the menu contents). 27 FL Studio script tests pass with warnings as errors; ruff is clean.
+- **Open.** The owner's goal and insert confirmation. Then the decision agent runs in a fresh, isolated session (packet, goal and menu only), and its choice is recorded before the manual kick-cut result is revealed. Left uncommitted for review.
+
+## 2026-11-17 — Agent decision pilot 1: producer goal recorded; guard conflict flagged (Claude Code)
+- **Goal.** The owner's goal, verbatim: "make kick more dominant then bass". It is recorded in `C:/uni/Bachelor-Thesis/test/agent-pilot-packet/producer-goal.json` (SHA-256 `fec915c2…`), separate from the unchanged packet (`5ed835c3…`). Verification mapping: P = kick, C = 808. E = the 808 → kick frozen evidence set (206 cells, unrestricted). G = the kick → 808 frozen guard set (5,600 cells; G₀ 5,483).
+- **Conflict.** It is found from baseline values only, and the agent does not get it. A 808 cut of g dB lowers the primary margins by about g but raises the kick → 808 guard margins by about g. The drafted guard (median ≤ +1.0 dB) would reject the −2 and −3 dB 808 cuts and leave −1 dB marginal. The newly-exceeding rule does not bind (at most 29 of 5,483 at-risk cells within 3 dB of 0). The guard thus treats the goal's intended effect as a regression.
+- **Options for the owner:** keep the guard; bound the shift (median ≤ +3.0 dB, proposed); or use an 808 level guard. Insert indices are still to be confirmed.
+- **Status.** The agent has not been run, and nothing was changed in FL Studio. Left uncommitted.
+
+## 2026-11-17 — Agent decision pilot 1: guard finalized, bundle prepared, run not possible here (Claude Code)
+- **Owner-approved guard** (recorded before any agent run): `candidate 808 RMS − baseline 808 RMS ≥ −3.25 dB`, with pooled-channel RMS on the original stereo 808 stem. The kick → 808 margin changes are reported descriptively only. Unchanged:
+  - the primary check (206 frozen 808 → kick cells, median Δ ≤ −1.0 dB, fewer cells exceeding);
+  - the master peak and RMS guards, the export integrity checks and the ±0.25 dB fader tolerance.
+- **Packet split.** The frozen verification cell sets made `decision-packet.json` 706 KB (about 230k tokens), almost all cell lists. They now go to a verifier-only `verification-sets.json` (`9560eb7f…`); the agent-facing packet is 37 KB (`285426ec…`). `producer-goal.json` was re-recorded with unchanged text (`bebead07…`). Tests are updated (7 pass with warnings as errors).
+- **Bundle.** `C:/uni/Bachelor-Thesis/test/agent-pilot-input/` contains exactly `decision-packet.json`, `producer-goal.json` and `action-menu.json` (41 KB, no candidate reference). The exact request (`agent-request.txt`, `47b5a2e1…`), a manifest and an empty run record are in `C:/uni/Bachelor-Thesis/test/agent-pilot-run/`. The original exports are unchanged.
+- **Not run.** No Anthropic API key and no Claude Code CLI are available in this environment. A sub-agent or session started here could read the repository, candidate exports and trial report, so the isolation requirement cannot be met. Per the owner's instruction, work stops with the bundle prepared. No choice has been recorded and no edit was made in FL Studio.
+
+## 2026-11-17 — Agent decision pilot 1: two-round outcome (Claude Code)
+- **Report:** [`docs/research/agent-decision-pilot-1-report.md`](agent-decision-pilot-1-report.md). The packet, rules and owner decisions are in [`agent-decision-pilot-packet.md`](agent-decision-pilot-packet.md). The earlier manual kick-cut trial stays separate ([`fl-studio-kick-808-trial.md`](fl-studio-kick-808-trial.md)).
+- **Sequence:** goal "make kick more dominant then bass".
+  - **Round 1, A6 (Bass −3 dB):** measured −2.894 dB. The primary check passed (median −2.894 dB over the 206 frozen 808 → kick cells; 206 → 199 positive). The 808 RMS and master peak guards passed; the master RMS guard failed (−1.900 dB < −1.5 dB). Rolled back.
+  - **Round 2, A5 (Bass −2 dB)**, from a fresh baseline copy after the feedback: measured −1.885 dB. Primary median −1.885 dB, 206 → 201 positive. 808 RMS −1.885 dB, master peak −2.150 dBFS, master RMS −1.288 dB. All measured criteria passed.
+- **Recomputation.** New `scripts/fl_studio/verify_pilot_round.py` (tests: `tests/unit/test_fl_pilot_verification.py`, 5) recomputes both rounds from the original exports with the frozen rules and cells. It reuses `analyze_trial.py`, `check_exports.py`, the dist10 front end and the masking kernel.
+  - Integrity passes: equal frames, lag 0, kick decoded bit-identical.
+  - The baseline reproduces the frozen margins exactly. All owner-reported values agree.
+  - Reports `verification-round1-a6.json` (`3b059563…`) and `verification-round2-a5.json` (`123e772d…`) in `C:/uni/Bachelor-Thesis/test/agent-pilot-run/` are byte-identical on rerun. The original exports are unchanged.
+- **Missing evidence:**
+  - the round-2 agent response (not saved locally); A5 as its choice and its stated lack of the primary criterion rest on the owner's report;
+  - model ID, interface, parameters and time for both rounds;
+  - round-2 isolation and the exact message as sent;
+  - mixer insert indices;
+  - displayed fader readings. The execution-tolerance rule therefore cannot be evaluated, and A5 is accepted on measured criteria only.
+- **Criteria supplied to the agent:**
+  - round 1: no verification rules;
+  - round 2: round-1 outcomes and implicitly the master RMS limit, not the primary threshold or the other thresholds.
+
+  Future runs need the full machine-readable rule set from round 1, a structured round history with every criterion's value and threshold, and the raw responses with model details saved.
+- **Limits:** one development mix, a cuts-only menu, manual execution, dist10 model exceedance only. The listening judgment is pending. Left uncommitted for Codex review.
+
+## 2026-11-17 — Correction: decision-pilot verifier gates on baseline agreement (Codex review)
+- **Finding.** `verify_pilot_round.py` reported whether the baseline exports reproduce the frozen evidence margins, but the flag did not affect the outcome.
+- **Fix.** A mismatch now makes the round *not verified* before any accept or roll back, and the reason is listed in `not_verified_reasons`. The guard set's baseline agreement is reported too; it does not gate, because that set is descriptive.
+- **Regression.** A frozen margin shifted by 1e−9 gives *not verified* with that single reason. It fails against the previous verifier (1 of 6 tests); all 6 pass now, with warnings as errors.
+- **Rerun.** Results are unchanged: A6 roll back, A5 accept on measured criteria with execution tolerance unknown, both gates passing with exact agreement. New report hashes: `verification-round1-a6.json` `f7aa67cd…` and `verification-round2-a5.json` `cac102d2…`, byte-identical on rerun. The original exports are unchanged.
+- **Round-2 response.** The review asked to recover it from the development chat, but it is not in the Claude Code conversation that produced the report. The only round-2 text pasted there is the feedback message, already recorded. The response therefore stays missing, pending the owner's copy. The fader readings stay unknown and are not reconstructed from the measured gain.
+- Left uncommitted.
+
+## 2026-11-17 — Clarification: round-2 A5 response recovered as an owner-supplied transcript (Claude Code)
+- **Source.** The owner supplied a transcript of the round-2 response, recovered from the separate Codex development chat, where it was posted after the round-2 feedback prompt and before the A5 render. A byte-identical copy is saved as `C:/uni/Bachelor-Thesis/test/agent-pilot-run/recovered-round-2-A5-response.txt` (SHA-256 `5dea341c…`).
+- **What it is.** A transcription, not an interface export. Quotation marks are normalized and line continuations omitted. It parses as JSON with `action_id` A5 (a valid menu ID), the rationale and the uncertainty statement, including that the agent lacked the exact primary criterion.
+- **Still unverified:** model identity, the original timestamp, session isolation and the exact request as sent. The displayed fader readings stay unknown.
+- **Correction.** This clarifies the previous entry: the response was not lost. It was in the Codex development chat, separate from the Claude Code conversation that wrote the report.
+- **Report update.** `docs/research/agent-decision-pilot-1-report.md` now records the provenance and quotes the transcript verbatim (checked programmatically against the saved file). It replaces the "missing" status with "recovered as an owner-supplied transcript". The verification results are unchanged.
+- Left uncommitted for review.
+
+## 2026-11-17 — Listening judgment recorded; FL Studio bridge still blocked on a MIDI input (Claude Code)
+- **Listening judgment.** The owner's judgment is recorded in `docs/research/agent-decision-pilot-1-report.md` §8: A5 makes the kick more dominant, retains enough 808 weight, and is preferred because it sounds cleaner. It is labelled **informal**, with playback level matching unconfirmed (A5 lowers master RMS by 1.288 dB, so level may have influenced it) and no blind comparison.
+- **Endpoint re-check.** Unchanged:
+  - WinMM reports 0 inputs;
+  - FL Studio's device records list MIDI outputs only;
+  - Windows MIDI Services exposes only its diagnostic test loopbacks, with no app loopback and no tools;
+  - no loopMIDI, LoopBe or rtpMIDI driver is installed.
+
+  No usable virtual input exists, and nothing was installed. FL Studio was open with the owner's `trap-agent-A5.flp` and was left untouched.
+- **Owner setup step** (in `docs/research/fl-studio-gain-trial.md`): install loopMIDI and create the port `Thesis Bridge` (or connect a USB MIDI controller), install the trial script under `Settings/Hardware/Thesis Gain Trial/`, then enable the input in FL Studio with controller type "Thesis Gain Trial (user)". The Bass test procedure (disposable copy, inspect, one apply, duplicate-command reload, back to inspect) is written out.
+- **Duplicate-command handling.** The command is an absolute fader target, and every write is gated on the recorded baseline reference, with a cut larger than twice its tolerance. A resend is therefore refused before any write; the local checks pass, including the one-write assertion. Residual risk: a startup `OnInit` with `MODE = "apply"` left set on a fresh baseline copy; the procedure resets to inspect.
+- **Status.** The live bounded Bass test was not run: no single write, read-back or duplicate check was done live. Save and export stay manual. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio gain trial: live single write recorded; script reconciled (Claude Code)
+- **Source.** The live results come from the FL Studio Script output pasted by the owner (FL Studio Producer Edition 26.1.7, build 5654, scripting API 45). They were not captured by repository tooling.
+- **Observations:**
+  - **Identity:** `general.getProjectTitle()` returned the project metadata title `Thesis Bass Bridge Test`, which matched; `ui.getProgTitle()` returned only `FL Studio 2026`. Insert 2 had the exact name `Bass`.
+  - **Gain:** starting at 0.800000 / 0.000000 dB, one absolute write to 0.780000 read back as −0.574523 dB. The intended −1.0 dB was **not** achieved (difference +0.425477 dB).
+  - **Duplicate command:** reloading the same apply was refused by the baseline check before the write.
+  - **Persistence:** after a manual save and reopen, inspect read 0.780000 / −0.574523 dB.
+- **Identity scope.** The script checked the project's metadata title. It did not establish the file path.
+- **Installed script** (`Documents/Image-Line/FL Studio/Settings/Hardware/Thesis Gain Trial/device_gain_trial.py`, SHA-256 `93879cf1…`) was read and left unchanged in inspect mode. It differs from the repository version in its trial configuration (insert 2 "Bass", reference (0.8, 0.0), intended −1.0 dB, target 0.78), a hard-coded title and an API guard.
+- **Correction to the 2026-11-17 entries.** The claim that `general.getProjectTitle()` (and `mixer.getTrackCount()`) are undocumented was **wrong**. It came from the IL-Group stub repository only; Image-Line's MIDI scripting manual documents both from API 38. The window-title replacement could not have identified the project, because the live window title held no project name. Codex's original call was right.
+- **Reconciliation.**
+  - `scripts/fl_studio/device_gain_trial.py` now checks `general.getProjectTitle()` against a configurable `PROJECT_TITLE`, records the window title without checking it, and requires API ≥ 38; `DB_MODE = 1` is documented.
+  - `scripts/fl_studio/test_gain_trial.py` (9 checks, all passing) replays the live values: the identity lines, intent against measurement, the duplicate refusal before any write, and verify after reopen.
+  - `docs/research/fl-studio-gain-trial.md` records the live result and the corrected API table, and the procedure now uses the Project Info title. Ruff is clean.
+- **Next.** The external command bridge and the normalized-to-dB conversion need their own design. Save and export stay manual. Left uncommitted for review.

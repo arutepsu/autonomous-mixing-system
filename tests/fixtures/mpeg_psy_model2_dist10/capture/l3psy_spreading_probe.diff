@@ -1,0 +1,27 @@
+--- l3psy_partition_probe.c
++++ l3psy_spreading_probe.c
+@@ -48,2 +48,5 @@
+ int probe_e_partition[HBLKSIZE], probe_e_numlines[CBANDS];
++/* --- spreading probe F (fixture capture only; copies values, writes no encoder variable) --- */
++double probe_f_ctb[CBANDS], probe_f_s3[CBANDS][CBANDS], probe_f_ratio[CBANDS], probe_f_ratio_clamped[CBANDS];
++double probe_f_log_ratio[CBANDS]; FLOAT probe_f_ecb[CBANDS]; int probe_f_divided[CBANDS];
+ #include <assert.h>
+@@ -635,2 +638,8 @@
+ 
++	{ int probe_f_n, probe_f_m; /* probe F: spread values after the convolution, and the spreading matrix */
++	  for ( probe_f_n = 0; probe_f_n < CBANDS; probe_f_n++ ) {
++	    probe_f_ecb[probe_f_n] = ecb[probe_f_n]; probe_f_ctb[probe_f_n] = ctb[probe_f_n];
++	    probe_f_divided[probe_f_n] = 0; probe_f_ratio[probe_f_n] = 0.0; probe_f_ratio_clamped[probe_f_n] = 0.0;
++	    for ( probe_f_m = 0; probe_f_m < CBANDS; probe_f_m++ )
++	      probe_f_s3[probe_f_n][probe_f_m] = s3_l[probe_f_n][probe_f_m]; } }
+ 	/* calculate the tonality of each threshold calculation partition */
+@@ -644,3 +653,5 @@
+ 		cbb = ctb[b]/ecb[b];
++		probe_f_ratio[b] = cbb; probe_f_divided[b] = 1; /* probe F */
+                 if (cbb <0.01) cbb = 0.01;
++		probe_f_ratio_clamped[b] = cbb; /* probe F */
+ 		cbb = log( cbb);
+@@ -649,2 +660,3 @@
+ 		cbb = 0.0 ;
++	    probe_f_log_ratio[b] = cbb; /* probe F: value passed to tbb */
+ 	    tbb = -0.299 - 0.43*cbb;  /* conv1=-0.299, conv2=-0.43 */

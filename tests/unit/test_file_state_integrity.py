@@ -17,8 +17,8 @@ import pytest
 import soundfile as sf
 
 import autonomous_mixing.adapters.rendering.state_integrity as inspector_module
-from autonomous_mixing.adapters.rendering.integrity import CheckedAudio, IntegrityError, IntegrityFailureCode
-from autonomous_mixing.adapters.rendering.locations import LocationResolutionError, LocationResolutionFailureCode
+from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio, IntegrityError, IntegrityFailureCode
+from autonomous_mixing.adapters.audio_io.locations import LocationResolutionError, LocationResolutionFailureCode
 from autonomous_mixing.adapters.rendering.state_integrity import FileStateIntegrityInspector
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector, validate_state_integrity_response
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact

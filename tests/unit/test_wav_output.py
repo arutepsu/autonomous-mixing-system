@@ -30,8 +30,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import autonomous_mixing.adapters.rendering.wav_output as writing  # moved in ADR-027 step M3; tests patch or inspect its internals
-from autonomous_mixing.adapters.rendering.locations import resolve_artifact_location
+import autonomous_mixing.adapters.rendering.wav_output as writing  # moved in ADR-027 step M3 and to audio_io by ADR-028; tests patch or inspect its internals
+from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location
 from autonomous_mixing.adapters.rendering.wav_output import (
     WavOutputError,
     WavOutputFailureCode,

@@ -16,6 +16,16 @@
 \label{sec:eval-measures}
 \todo{Reported measures, which of them the decision process or verification can see, and loudness control (D9).}
 
+\subsection{Directional masking case study}
+\label{sec:eval-masking-case}
+The first case study will use a kick and bass from a mix exported by the producer from FL Studio. Both estimates will use the same aligned stems and the same evaluation interval. The analysis will report kick as masker and bass as target, then bass as masker and kick as target. Each result will identify the direction, time interval, frequency region and measurement configuration. When the evidence for a direction is unavailable, that direction will be reported as unassessed. The proposed estimator follows Ronan's cross-adaptive masking calculation for a pair of sources~\cite[Sec.~7.2.4.2, Eqs.~7.11--7.13]{Ronan2018Thesis}. For each direction, the other stem provides the masking threshold. On the common frame and scale-factor band grid, the signed margin is the threshold-to-target-energy ratio in decibels. This calculation requires positive threshold and target energy. A zero-energy target is unassessable. Ronan's positive-margin aggregation is recorded separately from the signed margin.
+
+The planned reproduction will establish the margin calculation with known intermediate values first. Reproduction of the threshold front end requires a documented MPEG psychoacoustic model and an independent intermediate reference. The analysis will document the front-end settings and any departures from the original method before the case study.
+
+Analytical fixtures will first check the estimator against known inputs, including silence, non-overlapping activity and a controlled change in masker level with the target held fixed. These checks will test the numerical implementation. For the music case, the same measurement configuration will be used before and after a single bounded gain change. Any decision criterion will be set on calibration material and kept fixed for evaluation.
+
+A separate, level-matched listening comparison will examine the audibility of each part and any perceived change in mix balance. Where feasible, the listening order will be varied and condition labels concealed. The objective estimates and the listening observations will be reported separately because objective masking measures have shown limited agreement with perceived masking in multitrack mixes~\cite{Hafezi2015}. Listening observations from a single mix will be treated as case-study evidence.
+
 \section{Experimental Procedure}
 \label{sec:eval-procedure}
 \todo{Conditions B0--B3, repeated trials (D8), budgets and the frozen configuration.}

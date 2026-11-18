@@ -29,12 +29,12 @@ import stat
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import soundfile as sf
 
-from autonomous_mixing.adapters.rendering.locations import (
+from autonomous_mixing.adapters.audio_io.limits import _require_limit
+from autonomous_mixing.adapters.audio_io.locations import (
     LocationResolutionError,
     LocationResolutionFailureCode,
     ResolvedArtifactLocation,
@@ -90,12 +90,6 @@ class CheckedAudio:
     container: str
     subtype: str
     verified_sha256: str
-
-
-def _require_limit(value: Any, field: str) -> int:
-    if type(value) is not int or value < 1:
-        raise ValueError(f"{field} must be a positive built-in int, got {value!r}")
-    return value
 
 
 def _fail(code: IntegrityFailureCode, message: str) -> IntegrityError:

@@ -24,7 +24,7 @@ from enum import Enum
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from autonomous_mixing.adapters.rendering.locations import (
+from autonomous_mixing.adapters.audio_io.locations import (
     LocationResolutionError,
     ResolvedArtifactLocation,
     resolve_artifact_location,
