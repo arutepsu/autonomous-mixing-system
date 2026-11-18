@@ -26,10 +26,13 @@ autonomous_mixing/
     audio_io/       shared read-only WAV access: location resolution, WAV integrity reading, read limits
                     (ADR-028, Proposed; used only by the listed rendering modules, dsp_analysis.file_analyzer
                     and, by ADR-029 (Proposed), dsp_analysis.wav_input)
-    rendering/      implements Renderer (gain/mix, WAV output, workspaces, state inspection)
+    rendering/      implements Renderer (gain/mix, WAV output, workspaces, state inspection) and, by ADR-033
+                    (Proposed), the unintegrated DawExportHandoff: pending-export preparation and verified
+                    file import, never a render result
     fl_studio/      unintegrated DawParameterController and DawRecoveryController: calibrated MIDI parameter
                     control, exact-target recovery, explicit reconciliation and a local command journal with one
-                    append-only ledger (ADR-030/031/032 Proposed; no driver or export continuation); its FL device
+                    append-only ledger, plus journal-backed state anchors and coherent continuity snapshots for
+                    ADR-033 (ADR-030/031/032/033 Proposed; no driver or export automation); its FL device
                     script v2 lives outside the package in device/fl_studio/ and is never imported
     journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance)
     decision_agent/ implements DecisionMaker with Claude (ADR-005 name)

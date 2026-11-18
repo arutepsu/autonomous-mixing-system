@@ -1712,3 +1712,36 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
      - inconsistency fails closed on open.
 - **ADR-032** (Proposed) is revised in place to state the lineage-wide freshness rule and the marker and namespace invariants.
 - **Checks.** Five new mutation probes, all caught. Locked: focused 746 passed; full 5,901 passed, 4 skipped; ruff, format, CLI, lock and `git diff --check` clean; protocol hashes unchanged. No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-18 — DAW pending-export handoff and verified import (Claude Code)
+- **Source.** The owner approved plan revision 2 with three continuity amendments (revision 3):
+  - coherent snapshots captured under the controller lock;
+  - the complete journaled binding and profile instead of references;
+  - anchor and continuity rules living in records.
+
+  Preparation is described as recording journal-backed source evidence only.
+- **Implemented (ADR-033, Proposed; unintegrated):**
+  - `core.records.daw_export`, `core.ports.daw_export` and `core.admission.daw_export.assess_daw_import`;
+  - `DawRecoveryController.state_anchor` and `continuity_snapshot`, with their FL journal and controller implementations;
+  - `adapters.rendering.export_handoff.FileExportHandoff` as a new listed `audio_io` client.
+- **What it establishes.** A pending export is a waiting state, never a render success. Candidate evidence comes only from the pure assessment of verified files plus two coherent continuity snapshots. Continuity is observed agreement only, not proof that nothing moved during the export. The timeline is declared, with physical alignment unverified. Stereo exports stay stereo.
+- **Evidence:**
+  - 144 new tests: 96 contract, 15 FL anchor and snapshot against device v2 on a fake host, 33 adapter on real temporary directories with synthetic unit-test WAVs;
+  - eighteen mutation probes, all caught. One survived at first, the request-file handle identity, and was caught after a test that replaces the file between its `lstat` and its `open` was added.
+  - None of this is live FL evidence.
+- **Open.** Whether a device-refused write should keep an anchor current; currently it supersedes the anchor (fail closed). Baseline export settings. A predeclared timing method for any physical alignment claim. Capture of routing declarations.
+- **Not done.** No coordinator integration, saving, exporting, installation or live calls. Requirement statuses are unchanged. Left uncommitted for review.
+
+## 2026-11-18 — DAW export import: in-place change review fix (Claude Code)
+- **Source.** Codex reproduced the defect with a disposable WAV: a one-byte in-place change made immediately after verification passed. The import returned `DawFilesVerified`, and `assess_daw_import` built `DawImportVerified` with the old hash. Codex independently verified 408 tests.
+- **Fix (`adapters.rendering.export_handoff`).**
+  - Each file's identity, size, modification and change timestamps, link count, mode and attributes are compared after its read with what was observed before it.
+  - All files, the request file included, are re-checked before returning, so a change to an earlier file during a later read is caught.
+  - Any difference is `WORKSPACE_CHANGED`.
+  - Still not race-free: it depends on timestamp granularity and on writers not resetting timestamps, and a change after the final re-check is not detected.
+- **ADR-033** (Proposed) is revised in place to state this.
+- **Evidence.**
+  - Three regressions, failing before the fix. Their timestamps are backdated so the result does not depend on clock granularity.
+  - Four new mutation probes, all caught. One survived at first and was caught after a fail-fast assertion was added. All 22 probes of the slice are caught.
+- **Kept.** The conservative anchor rule: any later reservation supersedes an anchor. The owner accepted it for this slice.
+- No live calls and no installs. Left uncommitted for review.

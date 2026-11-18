@@ -25,6 +25,7 @@ from autonomous_mixing.core.records.budgets import BudgetOperation
 from autonomous_mixing.core.records.daw import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
     DawApplyOutcome,
+    DawWriteConfirmed,
     DawWriteOffTarget,
     DawWriteRefused,
     DawWriteUncertain,
@@ -455,6 +456,54 @@ class SqliteCommandJournal:
         root = self._root(rows, row.command_id if row.kind == "apply" else row.root)
         request = root.request["request"]
         return request["resolution"]["state"]["binding"], request["profile"]
+
+    def state_anchor(self, source_id: str) -> dict:
+        """Journal-backed source evidence for an export anchor, from one locked read pass (export plan, revision 3).
+
+        The source is a confirmed apply or restoration, or a resolution; binding, profile and execution come from its
+        journaled request (for a resolution, from its root apply's). Refused (``JournalRefusal``): any unresolved
+        command; an unknown source or one of another kind; a source superseded by a later reservation or resolution.
+        Watermarks are the highest ``RESERVED`` and ``RESOLVED`` seqs (0 if none) and the highest seq of any kind.
+        """
+        with self._lock:
+            rows, ledger = self._rows(), self._ledger()
+            if self._unresolved(rows, ledger):
+                raise JournalRefusal("unresolved", "a command is unresolved: no state can be anchored")
+            reserved = max((seq for seq, kind, *_ in ledger if kind == "RESERVED"), default=0)
+            resolved = max((seq for seq, kind, *_ in ledger if kind == "RESOLVED"), default=0)
+            top = max((seq for seq, *_ in ledger), default=0)
+            row = next((row for row in rows if row.command_id == source_id), None)
+            if row is not None:
+                confirmed = row.reserved_seq is not None and (
+                    (row.kind == "apply" and isinstance(row.outcome, DawWriteConfirmed))
+                    or (row.kind == "restore" and isinstance(row.outcome, DawRestoreConfirmed))
+                )
+                if not confirmed:
+                    raise JournalRefusal("not_confirmed", "only a confirmed apply or restoration can be anchored")
+                if row.kind == "apply":
+                    request = row.request["request"]
+                    basis, binding = "confirmed_write", request["resolution"]["state"]["binding"]
+                    profile, execution = request["profile"], request["execution_id"]
+                else:
+                    request = row.request["restore"]
+                    basis, binding, profile = "confirmed_restore", request["binding"], request["profile"]
+                    execution = request["authorization"]["execution_id"]
+                seq, reading = row.reserved_seq, _plain_reading(row.outcome.after)
+                current = reserved == seq and resolved < seq
+            else:
+                entry = next(((s, r) for s, k, e, _, r in ledger if k == "RESOLVED" and e == source_id), None)
+                if entry is None:
+                    raise JournalRefusal("unknown_source", "no confirmed command or resolution has this ID")
+                seq, record = entry
+                request = self._root(rows, record["root"]).request["request"]
+                basis, binding = "resolved", request["resolution"]["state"]["binding"]
+                profile, execution, reading = request["profile"], request["execution_id"], record["reading"]
+                current = resolved == seq and reserved < seq
+            if not current:
+                raise JournalRefusal("superseded", "a later reservation or resolution supersedes the source")
+            return {"basis": basis, "source_seq": seq, "execution_id": execution, "binding": binding,
+                    "profile": profile, "reading": reading, "reservation_watermark": reserved,
+                    "resolution_watermark": resolved, "ledger_watermark": top}  # fmt: skip
 
     def ledger_entry(self, kind: str, entry_id: str):
         """(seq, subject, record) of one ledger entry, or None."""

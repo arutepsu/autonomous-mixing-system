@@ -1,6 +1,7 @@
 """FL parameter and recovery ports: intent before send, stable replay, explicit reconciliation, no audio authority."""
 
 import json
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import asdict, replace
@@ -13,15 +14,20 @@ from autonomous_mixing.adapters.fl_studio.serialization import (
     _dumps,
     _plain,
     grant_json,
+    load_binding,
+    load_execution_id,
+    load_profile,
     request_json,
     restore_request_json,
 )
 from autonomous_mixing.adapters.fl_studio.transport import MidiTransport, TransportCleanupError
 from autonomous_mixing.core.ports.daw import validate_daw_apply_outcome, validate_daw_inspection
 from autonomous_mixing.core.ports.daw_recovery import (
+    validate_daw_continuity_snapshot,
     validate_daw_reconciliation,
     validate_daw_resolution,
     validate_daw_restore_outcome,
+    validate_daw_state_anchor,
 )
 from autonomous_mixing.core.records.daw import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
@@ -38,6 +44,7 @@ from autonomous_mixing.core.records.daw_control import (
     DawWriteRefused,
     DawWriteUncertain,
 )
+from autonomous_mixing.core.records.daw_export import DawContinuitySnapshot, DawStateAnchor, DawStateBasis
 from autonomous_mixing.core.records.daw_recovery import (
     DawControlState,
     DawReconcileFinding,
@@ -61,6 +68,7 @@ from autonomous_mixing.core.records.daw_recovery import (
 from autonomous_mixing.core.records.invariants import require_finite, require_instance
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult, Success
 
+_SOURCE_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _REFUSALS = {
     "transport_playing": DawRefusalCode.TRANSPORT_PLAYING,
     "edit_unavailable": DawRefusalCode.EDIT_UNAVAILABLE,
@@ -694,3 +702,58 @@ class FlStudioParameterController:
                                             reading, request.evidence_id, seq, False)  # fmt: skip
             validate_daw_resolution(request, outcome)
             return outcome
+
+    # --- export anchors and coherent continuity snapshots (export plan 2026-11-18, revision 3) ---------------------
+
+    def _anchor(self, source_id):
+        data = self.journal.state_anchor(source_id)
+        return DawStateAnchor(
+            source_id, DawStateBasis(data["basis"]), data["source_seq"], load_execution_id(data["execution_id"]),
+            load_binding(data["binding"]), load_profile(data["profile"]), DawFaderReading(**data["reading"]),
+            data["reservation_watermark"], data["resolution_watermark"], data["ledger_watermark"],
+        )  # fmt: skip
+
+    def state_anchor(self, source_id: str) -> PortResult[DawStateAnchor]:
+        """Journal-backed source evidence only: nothing is sent to the DAW."""
+        with self._lock:
+            if not isinstance(source_id, str) or not _SOURCE_ID.fullmatch(source_id):
+                return PortFailure(PortFailureCode.INVALID_INPUT, "invalid anchor source ID", False)
+            try:
+                result = Success(self._anchor(source_id))
+            except JournalRefusal as error:
+                return PortFailure(PortFailureCode.INVALID_INPUT, str(error), False)
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            validate_daw_state_anchor(source_id, result)
+            return result
+
+    def continuity_snapshot(self, source_id: str) -> PortResult[DawContinuitySnapshot]:
+        """Anchor and control state, one fresh inspection, then both again, all under the controller lock.
+
+        A snapshot is returned only when the two journal queries agree exactly. A ledger entry of any kind appended
+        in between (by any writer of this journal) yields a retryable ``PortFailure``, never a mixed snapshot.
+        """
+        with self._lock:
+            opened = self.state_anchor(source_id)
+            if isinstance(opened, PortFailure):
+                return opened
+            try:
+                opening_state = self.journal.control_state()
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            anchor = opened.value
+            read = self.inspect(DawInspectRequest(anchor.binding, anchor.profile))
+            if isinstance(read, PortFailure):
+                return read
+            try:
+                closing, closing_state = self._anchor(source_id), self.journal.control_state()
+            except JournalRefusal as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, "the journal changed during the capture: " + str(error),
+                                   True)  # fmt: skip
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            if (closing, closing_state) != (anchor, opening_state):
+                return PortFailure(PortFailureCode.UNAVAILABLE, "the journal changed during the capture", True)
+            result = Success(DawContinuitySnapshot(closing, read.value, closing_state))
+            validate_daw_continuity_snapshot(source_id, result)
+            return result

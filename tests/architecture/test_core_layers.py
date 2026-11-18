@@ -35,6 +35,7 @@ ALLOWED_PACKAGES = {
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
     "admission.daw": ("resolve_daw_gain", "daw_gain_bounds", "gate_daw_apply", "gate_daw_restore"),  # 2026-11-18
+    "admission.daw_export": ("assess_daw_import",),  # export handoff plan, 2026-11-18 (revision 3)
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
     "loop.completion": ("finalize",),
     "loop.correction": ("render", "verify_candidate"),
@@ -71,7 +72,10 @@ BEHAVIOR_INVENTORY = {
         "validate_daw_reconciliation",
         "validate_daw_resolution",
         "validate_daw_control_state",
+        "validate_daw_state_anchor",  # export handoff plan, 2026-11-18 (revision 3)
+        "validate_daw_continuity_snapshot",
     ),
+    "ports.daw_export": ("DawExportHandoff", "validate_daw_export_preparation", "validate_daw_files_verified"),
     "ports.acceptance": (
         "AcceptanceJournal",
         "validate_acceptance_commit_response",

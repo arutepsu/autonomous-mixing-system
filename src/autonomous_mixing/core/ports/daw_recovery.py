@@ -11,7 +11,13 @@ uncertain):
   (outcome ``before`` when recorded, else the root request's inspected reading);
 - ``reconcile`` performs its own fresh read and appends its finding; it never clears anything;
 - ``resolve`` accepts only subject-specific, latest relevant evidence with no reservation after it;
-- conversion blocks are never cleared by this version (no method exists).
+- conversion blocks are never cleared by this version (no method exists);
+- ``state_anchor`` returns only the latest state-establishing ledger event (a confirmed write or restoration, or a
+  resolution) with the complete binding and profile journaled with it, refuses while anything is unresolved, and
+  reads every watermark in one journal pass (export plan 2026-11-18, revision 3);
+- ``continuity_snapshot`` holds the adapter's lock across the whole capture, queries the anchor and the control
+  state before and after one fresh inspection of the anchor's binding and profile, and returns the snapshot only
+  when both queries agree; otherwise a ``PortFailure`` (never a partially consistent snapshot).
 
 Restoring one fader proves only that fader's readings, never routing, plugins, the project or audio.
 """
@@ -19,6 +25,7 @@ Restoring one fader proves only that fader's readings, never routing, plugins, t
 from typing import Protocol
 
 from autonomous_mixing.core.records.daw_control import DawInspectRequest
+from autonomous_mixing.core.records.daw_export import DawContinuitySnapshot, DawStateAnchor
 from autonomous_mixing.core.records.daw_recovery import (
     DawControlState,
     DawReconcileRequest,
@@ -51,6 +58,10 @@ class DawRecoveryController(Protocol):
     def restore(self, request: DawRestoreRequest) -> DawRestoreOutcome: ...
 
     def resolve(self, request: DawResolutionRequest) -> DawResolutionOutcome: ...
+
+    def state_anchor(self, source_id: str) -> PortResult[DawStateAnchor]: ...
+
+    def continuity_snapshot(self, source_id: str) -> PortResult[DawContinuitySnapshot]: ...
 
 
 def validate_daw_restore_outcome(request: DawRestoreRequest, outcome: DawRestoreOutcome) -> None:
@@ -107,3 +118,21 @@ def validate_daw_control_state(result: PortResult[DawControlState]) -> None:
         return
     if not isinstance(result, Success) or not isinstance(result.value, DawControlState):
         raise ValueError("a control-state response must be Success(DawControlState) or a PortFailure")
+
+
+def validate_daw_state_anchor(source_id: str, result: PortResult[DawStateAnchor]) -> None:
+    if isinstance(result, PortFailure):
+        return
+    if not isinstance(result, Success) or not isinstance(result.value, DawStateAnchor):
+        raise ValueError("a state-anchor response must be Success(DawStateAnchor) or a PortFailure")
+    if result.value.source_id != source_id:
+        raise ValueError("the anchor answers another source")
+
+
+def validate_daw_continuity_snapshot(source_id: str, result: PortResult[DawContinuitySnapshot]) -> None:
+    if isinstance(result, PortFailure):
+        return
+    if not isinstance(result, Success) or not isinstance(result.value, DawContinuitySnapshot):
+        raise ValueError("a continuity response must be Success(DawContinuitySnapshot) or a PortFailure")
+    if result.value.anchor.source_id != source_id:
+        raise ValueError("the snapshot answers another source")

@@ -5,9 +5,12 @@ from dataclasses import asdict
 from enum import Enum
 
 from autonomous_mixing.core.records.budgets import BudgetGrant, BudgetOperation, BudgetUsage
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import (
     DawApplyRequest,
+    DawBuild,
+    DawControlProfile,
+    DawRange,
     DawRefusalCode,
     DawUncertainReason,
     DawWriteConfirmed,
@@ -22,6 +25,7 @@ from autonomous_mixing.core.records.daw_recovery import (
     DawRestoreRequest,
     DawRestoreUncertain,
 )
+from autonomous_mixing.core.records.identifiers import ExecutionId, ProjectId, TrackId, VersionRef
 
 _KINDS = {
     "confirmed": DawWriteConfirmed,
@@ -122,3 +126,48 @@ def load_outcome(value: str):
         return cls(**fields)
     except (TypeError, KeyError, ValueError) as error:
         raise ValueError("invalid serialized DAW outcome") from error
+
+
+# --- journaled request context (export plan 2026-11-18, revision 3) ---------------------------------------------------
+
+
+def _round_trip(record, data, what):
+    if _plain(asdict(record)) != data:
+        raise ValueError(f"journaled {what} does not serialize back to its journaled text")
+    return record
+
+
+def load_binding(data) -> DawTrackBinding:
+    """The complete journaled binding; fails unless it serializes back to exactly the journaled dictionary."""
+    try:
+        record = DawTrackBinding(
+            VersionRef(**data["reference"]), ProjectId(**data["project_id"]), TrackId(**data["track_id"]),
+            data["project_title"], data["insert_index"], data["insert_name"], data["baseline_gain_db"],
+            DawFaderReading(**data["baseline_fader"]),
+        )  # fmt: skip
+    except (TypeError, KeyError) as error:
+        raise ValueError("invalid journaled binding") from error
+    return _round_trip(record, data, "binding")
+
+
+def load_profile(data) -> DawControlProfile:
+    """The complete journaled profile; fails unless it serializes back to exactly the journaled dictionary."""
+    try:
+        fields = dict(data)
+        fields["reference"] = VersionRef(**data["reference"])
+        fields["build"] = DawBuild(**data["build"])
+        fields["conversion"] = VersionRef(**data["conversion"])
+        fields["normalized_range"] = DawRange(**data["normalized_range"])
+        fields["fader_db_range"] = DawRange(**data["fader_db_range"])
+        record = DawControlProfile(**fields)
+    except (TypeError, KeyError) as error:
+        raise ValueError("invalid journaled profile") from error
+    return _round_trip(record, data, "profile")
+
+
+def load_execution_id(data) -> ExecutionId:
+    try:
+        record = ExecutionId(**data)
+    except TypeError as error:
+        raise ValueError("invalid journaled execution ID") from error
+    return _round_trip(record, data, "execution ID")

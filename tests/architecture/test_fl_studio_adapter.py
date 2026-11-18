@@ -25,6 +25,7 @@ EDGES = {
         f"{CORE}.records.daw",
         f"{CORE}.records.daw_control",
         f"{CORE}.records.daw_recovery",
+        f"{CORE}.records.identifiers",  # export plan 2026-11-18: journaled binding, profile and execution loaders
     },
     "journal": {
         f"{BASE}.serialization",
@@ -42,6 +43,7 @@ EDGES = {
         f"{CORE}.ports.daw_recovery",
         f"{CORE}.records.daw",
         f"{CORE}.records.daw_control",
+        f"{CORE}.records.daw_export",  # export plan 2026-11-18: state anchors and continuity snapshots
         f"{CORE}.records.daw_recovery",
         f"{CORE}.records.invariants",
         f"{CORE}.records.results",

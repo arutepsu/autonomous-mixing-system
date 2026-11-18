@@ -119,6 +119,36 @@ Proposed by [ADR-032](../decisions/0032-daw-exact-recovery-and-reconciliation.md
 
 **Limits.** Restoring a fader proves only its readings, never routing, plugins, the project or audio. No coordinator integration, recovery budgeting in the loop, export continuation or live trial.
 
+### DAW pending-export handoff and verified import (`core.records.daw_export`, `core.ports.daw_export`, `core.admission.daw_export`, `adapters.rendering.export_handoff`, `adapters.fl_studio`; implemented 2026-11-18, not integrated)
+
+Proposed by [ADR-033](../decisions/0033-daw-export-handoff-and-verified-import.md). [Plan](../superpowers/plans/2026-11-18-daw-export-handoff-import.md): approved revision 2 with the revision 3 continuity amendments.
+
+**Preparation.**
+- `DawExportHandoff.prepare` persists an immutable `DawExportRequest` exclusively in a fresh workspace that overlaps no protected original, and returns `DawExportAwaiting`: awaiting operator export, never a render success or candidate-ready.
+- The request carries a journal-backed `DawStateAnchor`: source evidence only, with no fresh inspection.
+- Its outputs replace named before-members exactly: the target stem, one stem per declared dependent, one master.
+
+**Anchor and continuity.**
+- `DawRecoveryController.state_anchor` returns the latest state-establishing ledger event with the complete journaled binding and profile.
+- `continuity_snapshot` captures the anchor, a fresh inspection and the control state coherently under the controller lock.
+- `daw_continuity_rejection` (in records) requires the snapshot to agree exactly with the prepared anchor (watermarks included), nothing unresolved, no blocked conversion, the bound identity and build, and the exact fader reading.
+
+**Import.**
+- `import_files` checks:
+  - the workspace's and request file's file-system identity, size and hash;
+  - the manifest;
+  - the listing and every file object (no links, hard links or duplicate physical files);
+  - each WAV, through the shared verifier, against the requested container and subtype;
+  - after each read and again before returning, every file's identity, size, timestamps and link count against what was observed before the reads. This detects in-place writes, but is not race-free.
+
+  It returns `DawFilesVerified` and writes nothing.
+- Only `assess_daw_import` builds `DawImportVerified`, from the file result and the `before_import` and `after_import` snapshots. Its timeline is declared, with physical alignment unverified.
+
+**Limits.**
+- Continuity is observed agreement only: a move and move-back during the export, or a routing or plugin change, is undetectable.
+- No file check is race-free.
+- Saving and exporting stay manual. No coordinator integration, receipt, analysis conversion or live trial exists. `Renderer` and `RunRenderer` are unchanged.
+
 ### Budget gate (`core.loop.budgets`; implemented 2026-11-04, not integrated)
 Implements Task 1 of `docs/superpowers/plans/2026-11-04-control-loop-budget-gate-plan.md` (attempt contract, sections 25–26 and 29). `core.records.budgets` adds `BudgetOperation` (decision call, attempt, render call, recovery operation), `BudgetBlockReason` (elapsed time, decision-call, attempt, render-call and recovery-capacity limits), the frozen outcomes `BudgetGrant(operation, usage_after_charge)` and `BudgetBlock(operation, reason, usage)` and the union `BudgetAssessment`; a block rejects a reason unrelated to its operation. `BudgetLimits` and `BudgetUsage` are unchanged. `check_budget(operation, *, limits, usage, elapsed_seconds)` takes a caller-supplied elapsed checkpoint (finite, non-negative, not earlier than recorded usage, else `ValueError`) and returns, in this order: an elapsed-time block at or above the limit; a block when the operation's own count has reached its limit (count limits are inclusive); for a render, a recovery-capacity block when no recovery slot is unused; otherwise a grant whose usage increments only that operation's counter. Recovery is not blocked by exhausted decision, attempt or render counters. Recorded overruns are kept, not clamped; integer counts stay exact. Evidence: `tests/unit/test_loop_budgets.py`.
 

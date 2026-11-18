@@ -46,6 +46,8 @@ SHARED_CLIENTS = {
     f"{ADAPTERS}.dsp_analysis.file_analyzer": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
     # dist10 WAV input boundary (ADR-029, Proposed; Task 3P, 2026-11-17): the shared verification path only.
     f"{ADAPTERS}.dsp_analysis.wav_input": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
+    # DAW export handoff and verified import (ADR-033, Proposed; export plan 2026-11-18): the shared verifier only.
+    f"{ADAPTERS}.rendering.export_handoff": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
 }
 
 
@@ -182,6 +184,13 @@ RENDERING_EDGES = {
     # File-backed RunRenderer (file-run-renderer plan, 2026-11-10): sibling preparation and processing only.
     "run_renderer": (
         _a("gain_mix", "workspaces") | _s("locations") | _r("actions", "coordinator_runtime", "invariants"),
+        set(),
+    ),
+    # DAW export handoff (ADR-033, Proposed): workspace allocation and revalidation plus the shared verifier.
+    "export_handoff": (
+        _a("revalidation", "workspaces")
+        | _s("integrity", "limits", "locations")
+        | _r("daw_export", "invariants", "project"),
         set(),
     ),
 }
