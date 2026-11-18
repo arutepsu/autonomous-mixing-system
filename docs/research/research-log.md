@@ -1392,3 +1392,196 @@
   - `scripts/fl_studio/test_gain_trial.py` (9 checks, all passing) replays the live values: the identity lines, intent against measurement, the duplicate refusal before any write, and verify after reopen.
   - `docs/research/fl-studio-gain-trial.md` records the live result and the corrected API table, and the procedure now uses the Project Info title. Ruff is clean.
 - **Next.** The external command bridge and the normalized-to-dB conversion need their own design. Save and export stay manual. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio command bridge: contract v1 and read-only inspect round trip (Claude Code)
+- **Starting state.** Git was clean at `f1b3d14` on `feature/budget`. The gain-trial script (repository and installed copy, `Thesis Gain Trial/`) was left unchanged and stays available for reproduction.
+- **Evidence.**
+  - FL Studio receives SysEx in `OnSysEx` and replies with `device.midiOutSysex` to the output whose port number equals the input's (Image-Line manual, API 1).
+  - The embedded Python 3.12 ships `json` and `re`.
+  - The project environment has no `mido` or `python-rtmidi`, so the client uses `winmm.dll` through `ctypes`, with no new dependency.
+  - loopMIDI has one port, `Thesis Bridge`.
+  - FL Studio's SysEx size limit is undocumented.
+- **Contract** (`docs/research/fl-studio-bridge-contract.md`, draft for review):
+  - **Ports:** two loopMIDI ports (`Thesis Bridge Cmd` in, `Thesis Bridge Reply` out, paired by port number).
+  - **Encoding:** `F0 7D <compact sorted ASCII JSON> F7`, version 1, at most 1024 bytes (pilot setting).
+  - **Commands** carry a unique ID, the expected metadata title, and the insert index and name. **Replies** carry the same ID, observed identity, normalized and dB gain, and a status.
+  - **Timeout:** 2.0 s pilot default.
+  - **Identity limitation:** a metadata title is not a file path.
+  - **Write semantics for the later `set_gain`:**
+    - an absolute target and an expected starting gain;
+    - a duplicate ID with the same payload returns the recorded reply; a conflicting payload is rejected;
+    - an acknowledgement timeout is uncertain and needs an inspect before another write;
+    - a reload loses the in-memory duplicate record, which leaves only the precondition as protection.
+- **Implemented:**
+  - `scripts/fl_studio/bridge_protocol.py`, `device_bridge.py` (inspect only; `set_gain` answered `unsupported`) and `bridge_client.py`;
+  - `tests/unit/test_fl_bridge.py`.
+- **Simulated checks:** 42 pass (fake host and transport): malformed messages, mismatched identities, response correlation with stray and malformed replies, timeout reporting.
+- **Live, transport only (not FL Studio):** over the single `Thesis Bridge` port,
+  - WinMM SysEx looped back byte-exact at 64, 512 and 1024 bytes;
+  - the CLI recorded its own echoed command as malformed and reported `timeout` (exit 2);
+  - missing bridge ports gave exit 3.
+- **Inside FL Studio: not run.** The second port, the script install and the MIDI-settings pairing are owner steps, listed in the contract. Gain writes, dB conversion, save/export automation and coordinator integration are later increments. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio bridge: reply-validation fix and script install (Claude Code)
+- **Review finding (P2).** Validate successful replies before accepting them. The first draft accepted any `ok` reply carrying two numeric gain values. That included booleans, NaN, normalized values outside [0, 1], missing or extra identity fields, and an `ok` that named another project or insert.
+- **Fix.**
+  - `bridge_protocol.validate_reply` now checks every status:
+    - exact `observed` keys and types, with integer `api` and insert index (not booleans);
+    - finite gain, with normalized gain in [0, 1];
+    - no gain on a mismatch, and no observations on other statuses;
+    - an ID on `ok` and `identity_mismatch`, and a named error on every non-`ok` status.
+  - NaN and infinity are refused by `encode` and rejected by `decode`.
+  - New `reply_consistency`: an `ok` must report exactly the expected title and insert, and an `identity_mismatch` must differ from them.
+  - The client ends a command as `invalid_reply` (exit 4) when a reply with its ID fails these checks; it does not accept a later reply.
+  - The FL script validates its own `ok` before sending; on failure it sends `error` / `invalid_observation`.
+- **Checks (simulated):** 78 bridge tests pass (42 before). Ruff is clean.
+- **Install.** `device_bridge.py` and `bridge_protocol.py` were copied to `Settings/Hardware/Thesis Bridge/`, byte-identical to the repository (`e78746b8…`, `2e2bda86…`). `Thesis Gain Trial/device_gain_trial.py` is unchanged (`93879cf1…` before and after).
+- **Live state.** WinMM still lists only `Thesis Bridge`; `Thesis Bridge Cmd` and `Thesis Bridge Reply` do not exist yet. The FL Studio round trip (successful inspect, title mismatch, insert-name mismatch) waits for the owner's loopMIDI ports and FL Studio's port pairing. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio bridge: live inspect recorded; bounded `set_gain` implemented and simulated (Claude Code)
+- **Live inspect trial (inside FL Studio).**
+  - **Evidence:** the client log retained at `C:/Users/my_goconut/.codex/.chatgpt-projects/g-p-6ac5f45645e88191bc2efa98d1049408/fl-bridge-live-inspect.jsonl`.
+    - 2435 bytes, 5 records, SHA-256 `82ca7f96e71b72edaa2167e642ff0b0b35dea776be5c613aa5254ae035f2f965`.
+    - Kept outside the repository; read, not modified.
+    - Script installed: the inspect version, `e78746b8…` / `2e2bda86…`.
+  - **Outcomes, in order:**
+    - two inspect **timeouts** (11:32:47 UTC after 2.0 s; 11:34:28 UTC after 5.0 s), with no strays or malformed replies;
+    - then **`ok`** at 11:39:42 UTC: API 45, `Producer Edition v26.1.7 [build 5654]`, insert 2 `Bass`, 0.7800000002607703 / −0.5745229721069336 dB;
+    - then **`identity_mismatch`** for title `Wrong Trial Title` (error `project_title`) and for insert name `Wrong Insert Name` (error `insert`). Both reported the observed identity and no gain.
+  - Every reply carried its command's ID. The log does not record why the first two commands timed out; this is left open rather than attributed.
+  - Recorded in `docs/research/fl-studio-bridge-contract.md` ("Live inspect trial").
+- **`set_gain` (feasibility increment, not run live).**
+  - **Command:** ID, expected metadata title, insert index and name, expected starting normalized and dB gain, and an absolute `target_normalized`.
+  - **Bounds:** cut in (0.002, 0.03], target > 0, compared at 1e-9. These are the gain trial's `MAX_NORMALIZED_CUT` and twice its tolerance.
+  - **Pre-write checks, in order:** validation and bounds, API ≥ 38, project title, insert, stopped transport, `safeToEdit`, starting gain within the trial's 0.001 normalized and 0.05 dB tolerances, and the cut from the actual start.
+  - **The write:** one `setTrackVolume`, then a read-back. The reply returns before, after and `db_change`, the achieved dB change.
+  - **`uncertain`:** a read-back disagreement, an exception after the setter, or an invalid post-write observation.
+  - **Duplicates:** the per-session history replays the recorded result (`replayed: true`, no write); a reused ID with different content is rejected (`duplicate_id_conflict`). The history is lost on reload, which leaves only the starting-gain precondition against a resend.
+  - **Client:** checks bounds before sending, and checks `applied` values for consistency with the command.
+  - **Write guard:** after a write timeout, invalid reply or `uncertain` reply, writes are blocked until an `ok` inspect of the same title and insert. `set-gain` requires `--log`, and the guard is rebuilt from it.
+- **Size limit.** Text limits now count escaped bytes (128 for the title; 64 for the name, version and error), and FL-observed text is clipped. Worst-case command and reply sizes are tested against the explicit 1024-byte limit.
+  - **Correction:** the earlier contract claimed maximal inspect messages stay well below the limit. That was wrong for non-ASCII titles, which escape to six bytes a character.
+- **Runtime check.** FL Studio's own `Shared/Python/python.exe` (3.12.1, outside FL Studio) imports `math`, which is built in, `json` and `re`, and loads both bridge files.
+- **Checks (simulated):** 160 bridge tests pass, written before the implementation. Scoped ruff check and format are clean.
+- **Not done.** The updated script is **not installed**: the installed copy is still the inspect version. The live write, duplicate and conflict trial on `bass-bridge-test.flp` follows review. Gain stays normalized, and dB conversion, save/export automation and coordinator integration come later. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio bridge: post-write boundary and pending-write journal (Claude Code)
+- **Review findings (P2, both).**
+  1. Not all post-write processing ran inside the uncertain-outcome boundary. A read-back such as `None` raised `TypeError` in the `db_change` arithmetic. That reached `handle()`'s generic handler and was reported as a definite `error` after the fader had changed.
+  2. The client logged a write only after its outcome. A process that died, or a send that failed, mid-dispatch left no trace, so the write guard did not hold.
+- **Fix in `device_bridge.py`.**
+  - From the moment the setter is called (`state["attempted"]`), everything runs inside one `try`: the setter, the read-back, the `db_change` arithmetic, the read-back rule, and the reply's own check and encoding.
+  - Any failure there becomes `uncertain` through `_post_write_uncertain`, which cannot fail. It takes identity from the validated command, keeps `before` if valid, and reports no post-write values.
+  - `handle()` applies the same fallback to anything that escapes after a write attempt, including encoding. Before a write, failures stay `error`.
+- **Fix in `bridge_client.py`.**
+  - Every write is journaled as `pending` before dispatch; with `--log`, the CLI journals it to the log. A pending write blocks like an uncertain one.
+  - It is resolved only by an accepted, non-`uncertain` reply to the same ID, or by an `ok` inspect of its title and insert.
+  - A failed send leaves it pending and blocked.
+- **Checks (simulated).**
+  - The 12 new regression tests were written first. Ten failed before the fix: the four reproductions of the reported case, the read-back-rule and `_finish` stages, and the four pending-write checks.
+  - 172 bridge tests and the full suite pass (5275 passed, 4 skipped). Scoped ruff check and format are clean.
+  - FL Studio's own Python 3.12.1 loads both bridge files (run with `-B`, outside FL Studio).
+- **Not done.** Still not installed: the installed copy remains the inspect version. Next is the install and the live write, duplicate-replay and conflicting-ID trial on `bass-bridge-test.flp`. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio bridge: live write trial recorded; dB conversion design drafted (Claude Code)
+- **Live write trial (inside FL Studio).**
+  - **Source:** the captured client requests and replies in `C:/Users/my_goconut/.codex/.chatgpt-projects/g-p-6ac5f45645e88191bc2efa98d1049408/fl-bridge-live-write.jsonl`. 4701 bytes, 8 records, SHA-256 `3be5fff158af62d61afef55a209c73c14c1ab1c2bb1dc308e3534a1aa23aee7c`; kept outside the repository, read and not modified. The Script output was not captured.
+  - **Installed script:** `Thesis Bridge/device_bridge.py` `477139b1…` and `bridge_protocol.py` `901c69af…`, byte-identical to the repository's reviewed versions. They were installed before the trial, not by Claude Code. `Thesis Gain Trial/device_gain_trial.py` is unchanged (`93879cf1…`).
+  - **Sequence on insert 2 `Bass`:**
+    - inspect `ok` at 0.7800000002607703 / −0.5745229721069336 dB;
+    - `set_gain` ID `live_write_20261118_01`, target 0.76, journaled `pending` and then `applied`: read back 0.7599999997764826 / −1.1527416706085205 dB, `db_change` −0.5782186985015869;
+    - the identical resend returned the same result with `replayed: true`;
+    - the same ID with target 0.755 got `invalid_command` / `duplicate_id_conflict`;
+    - the final inspect read 0.7599999997764826 / −1.1527416706085205 dB.
+  - Every record was re-validated against the repository protocol: all consistent, no strays, and the guard ends clear.
+- **Limits.**
+  - That the replay made no second write rests on `replayed: true`, not on the fader, since a second absolute write would read the same.
+  - Reload, timeouts, uncertain outcomes and persistence were not exercised live.
+  - The project file was last saved at 09:39 UTC, so 0.76 exists only in the open session; it was left as observed.
+- **dB conversion check.**
+  - Image-Line's manual documents dB only as a read mode (`getTrackVolume(i, 1)`). `setTrackVolume` takes normalized 0–1.0 (optional `pickupMode`). No dB-to-normalized helper is documented.
+  - The shipped, undocumented `utils.VolTodB` (FL `Shared/Python/Lib/utils.py`) is not the mixer curve: it is −4.55 to −4.72 dB off at the three live points, and it rounds to 0.1 dB.
+  - A third-party variant (NI Komplete Kontrol script, ×1.25) gives H(v) = 20·log10((11^(1.25v) − 1)/10). It matches all three live points to about 2·10⁻⁶ dB (H(0.8) = 0 dB, H(1.0) = +5.59 dB). Because those points selected it, it is recorded as a **hypothesis only**.
+- **Design** (`docs/research/fl-studio-db-conversion-design.md`, draft):
+  - **Conversion:** the target is H⁻¹(read-back start dB + intended Δ), one absolute write.
+  - **Bounds:** Δ ∈ [−3.0, −0.1] dB, the target inside the calibrated range, and a normalized move above 0.002. The 0.03 normalized cap would refuse cuts of about 0.87 dB or more from the default fader.
+  - **Verification by dB read-back:** `applied` if the normalized value is within 0.001 and the dB within 0.05 of the intent; a new `applied_off_target` status, with a separate conversion block, if the fader moved but the dB missed; otherwise `uncertain` as now.
+  - **Prerequisite:** a pre-registered calibration on `bass-bridge-test.flp` with a separate `probe_gain` command:
+    - 11 primary points in [0.62, 0.86] and 5 wider ones, none of them the three selecting points, in a shuffled order and visited from both directions;
+    - acceptance: |H − read-back| ≤ 0.01 dB at every primary point, read-back normalized within 1e-6, and no hysteresis;
+    - a held-out table fallback; otherwise conversion is not established.
+- **Not done.** No conversion code was written, nothing was installed, and FL Studio was not touched. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio bridge: `probe_gain` calibration command pinned and simulated (Claude Code)
+- **Pinned before any run** (`bridge_protocol.CALIBRATION_*`):
+  - plan `fl-mixer-cal-v1` on `Thesis Bass Bridge Test`, insert 2 `Bass`;
+  - 11 primary points (0.62–0.86) twice and 5 wide points (0.30, 0.45, 0.55, 0.92, 1.00) once, none of 0.76, 0.78 or 0.80;
+  - a 27-probe order drawn once with seed 20261118, under the rules: first a wide point, no repeats, and each primary point approached once from above and once from below.
+  - Plan and tolerance digest `8b4512b6…fbd00`, checked by a test.
+- **`probe_gain`:**
+  - The target must be the pinned position for its step, or, for `restore`, a target in (0, 1] that must equal the start recorded at step 0 in the session.
+  - It keeps every `set_gain` check except the cut bounds: identity, stopped transport, `safeToEdit`, starting gain against `expected`, the post-write uncertain-outcome boundary, the pending journal, duplicate replay and conflict, and the write guard. An uncertain probe also blocks `set_gain`.
+- **Runner** (`calibrate`): a fresh inspect, 27 chained probes, a restore to the exact inspected normalized value, then a final inspect. After a known refusal it restores; after an unknown outcome it stops without writing, and `calibration-restore` restores from the logged start after an `ok` inspect.
+- **Evaluator** (`evaluate_calibration.py`): the predeclared criteria (1e-6 stored value, |H − dB| ≤ 0.01 dB at primary points, visits within 1e-6 dB) and the held-out table fallback.
+  - Noted before any run: on an H-shaped curve the fallback's own interpolation error reaches about 0.007 dB.
+- **Checks (simulated):** 224 bridge test cases, 52 of them new (31 test functions) and written first; the full suite (5327 passed, 4 skipped); scoped ruff check and format are clean. FL Studio's Python 3.12.1 loads both bridge files (outside FL Studio).
+- **Not done.** Not installed: the installed bridge is still the reviewed `set_gain` version (`477139b1…` / `901c69af…`). No calibration has run, and FL Studio was not touched (the live fader stays at the observed 0.76, unsaved). `set_gain_db` is the following increment. Stopped for code review; left uncommitted.
+
+## 2026-11-18 — FL Studio calibration evaluator validates its records (Claude Code)
+- **Review finding (P2).** Validate calibration records before accepting the curve. `evaluate_calibration.py` selected applied records by ID prefix and step, took targets from the pinned sequence, and never checked identity, the targets in the commands, order, or the probe-to-probe chain. A log from the wrong project, with an edited target or with swapped probes, could still yield `H_accepted`.
+- **Fix.** New `check_records`. Before evaluation, every run record is checked against the protocol:
+  - the command is valid (plan ID, plan project and insert, pinned target for its step);
+  - the ID matches the step;
+  - the reply is valid, answers the command, and passes `reply_consistency`;
+  - the initial inspect is an `ok` reply for the plan's insert;
+  - applied steps appear in order with no gap;
+  - each step expects the previous read-back (step 0: the initial inspect);
+  - second replies are faithful replays;
+  - restores target the initial inspect's exact normalized gain.
+
+  Any problem gives the verdict `invalid_records`, with the problems listed. The restore summary now uses the initial inspect as the start.
+- **Regressions, written first:** 12 new tests (11 failed before the fix, and the twelfth requires the new problems list):
+  - wrong identity: a reply from another project, a command for another insert, an initial inspect of another project;
+  - a changed target (command and reply edited to agree), and a read-back contradicting the target;
+  - swapped probe order, a gap, and a broken chain;
+  - an ID not matching its step, an unfaithful replay, a malformed reply, and a wrong restore target.
+
+  The incomplete-run test now truncates the run rather than deleting a middle step, which is now `invalid_records`.
+- **Checks:** 236 bridge test cases and the full suite pass (5339 passed, 4 skipped). Ruff is clean. The plan digest is unchanged (`8b4512b6…`): positions and criteria stay as drafted.
+- **Not done.** Not installed, and no calibration has run. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio calibration accepted; `set_gain_db` implemented and simulated (Claude Code)
+- **Calibration recorded.**
+  - **Evidence, both retained outside the repository and read without modification:**
+    - log `C:/uni/Bachelor-Thesis/test/fl-calibration/fl-calibration-live.jsonl`: 61 records, SHA-256 `adbc5e58…7601e`, run `live20261118codex`;
+    - evaluation `…/fl-calibration-evaluation.json`: SHA-256 `1f3e2ed2…6b6e8`.
+  - **Installed script during the run:** `bda34ec4…` / `e69eac73…`, byte-identical to the reviewed repository versions. The replaced copies are kept in `test/fl-calibration/installed-before-calibration/`.
+  - **Revalidated:** the repository evaluator, with record validation, reproduces the retained evaluation in every field:
+    - verdict `H_accepted`, no record problems, plan digest matching;
+    - 27/27 probes; stored values within 4.5·10⁻¹⁰;
+    - max |H − dB| **2.40·10⁻⁶ dB** at primary points and 1.77·10⁻⁶ dB at wide points; visits identical;
+    - restore exact to 0.7599999997764826 / −1.1527416706085205 dB, with a final inspect equal.
+  - **Accepted:** normalized **0.62–0.86** on `Producer Edition v26.1.7 [build 5654]`, API 45, `Thesis Bass Bridge Test`, insert 2 `Bass` only. Wide points do not extend the range.
+  - The log also holds the earlier no-write version check, answered by the old script before the reload.
+- **`set_gain_db`** (conversion `fl-mixer-h125-v1`):
+  - **Conversion:** the target is `h_inverse(start read-back dB + Δ)`. Client and script share the validation, and the script rejects disagreement (`conversion_mismatch`, > 1e-9) and unknown conversions or scope.
+  - **Bounds:** Δ ∈ [−3.0, −0.1] dB; start and target inside [0.62, 0.86]; start on H within 0.01 dB.
+  - **Pre-write checks:** the script adds build, actual-start range and curve checks to every `set_gain` check.
+  - **Success, judged by both read-backs:** `uncertain` if the fader is not at the target; `applied` if the dB change is within 0.05 dB of Δ; otherwise `applied_off_target`, a known write with its observed state, which sets the client's conversion block (rebuilt from the log) but not the write guard.
+  - **Kept:** duplicate replay and conflict, the pending journal, the uncertain boundary and the write guard.
+  - **Restore:** `calibration-restore --start-log` restores from the calibration log's start while writing to another log.
+- **Checks (simulated):** 303 bridge test cases, 67 of them new and written first; the full suite (5406 passed, 4 skipped); scoped ruff check and format are clean. FL Studio's Python 3.12.1 computes the same L1 target, 0.7257362319041692.
+- **Live dB trial pre-registered** (design section 9), not run:
+  - L1: −1 dB to 0.7257362319;
+  - L2: the duplicate, expecting a replay;
+  - L3: the conflict;
+  - L4: −2 dB to ≈ 0.6585855514;
+  - L5: −3 dB, refused locally as out of range;
+  - L6: restore (`restore-2`) to the exact start;
+  - L7: inspect.
+- **Not done.** Nothing was installed (the installed bridge is the calibration version) and FL Studio was not touched. Stopped for review; left uncommitted.
+
+
+## 2026-11-18 — Codex live set_gain_db trial
+
+Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdrawn. Codex ran the pre-registered sequence and inspected the saved log: −1 dB measured −0.9995951652526855 dB, −2 dB measured −1.9992120265960693 dB; replay, conflict refusal and local range refusal passed. Restore and final inspect exactly matched the initial gain. Detailed evidence and procedural differences (log location and ID prefix) are recorded in [the conversion design](fl-studio-db-conversion-design.md#live-db-trial-result-2026-11-18-125613-utc). Log SHA-256: `14f4a7958ca8b5a8560209778905f8b45edbfd1e7818921eee82310e6057d3b7`. Updated the bridge status to verified live in its calibrated scope. Documentation-only update; no code/tests changed or test suite rerun. No save/export was issued; no requirement status changed. Coordinator integration and exported-audio verification remain pending.
