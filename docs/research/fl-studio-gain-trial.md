@@ -6,6 +6,8 @@ Codex drafted the script, its checks and this procedure (handoff 2026-11-17, 13:
 
 ## Status on 2026-11-17
 
+*Superseded in part by the live result of 2026-11-18 (below): the script was hosted live, and its identity check, single write, read-back, duplicate refusal and reopen were observed.*
+
 | Item | Status |
 | --- | --- |
 | FL Studio | 2026, build `26.1.7.5654` (`FL64.exe` file version) |
@@ -33,28 +35,135 @@ The one observation still to make by eye is the Input list in FL Studio's MIDI s
 
 External Python-to-FL messaging and virtual MIDI installation (an app loopback pair created with Windows MIDI Services tools, or loopMIDI) remain deferred, as instructed.
 
-## API calls (checked against the Image-Line FL Studio API stubs)
+## Status update, 2026-11-17 (after decision pilot 1)
+
+The owner asked to continue the bridge trial with one bounded Bass fader change on a disposable copy of the baseline. The live step has **not** been run, because FL Studio still has no MIDI input that can host the script.
+
+### Endpoint re-check (evening)
+
+- **Classic Windows MIDI (WinMM):** 0 inputs, 1 output (unchanged).
+- **FL Studio's own device records** (`HKCU\Software\Image-Line\FL Studio 26\Devices`): MIDI outputs only (Microsoft GS Wavetable Synth, Microsoft MIDI Mapper), no input.
+- **Windows MIDI Services:** the service runs, but its only endpoints are the diagnostic "Service Test Loopback A/B" (`MIDIU_DIAG_LOOPBACK_A/B`). The app and loop transports exist with no app-to-app loopback created, and the Windows MIDI Services tools are not installed.
+- **Other drivers:** no loopMIDI, LoopBe or rtpMIDI.
+- **The trial script** is not yet installed under `Settings/Hardware`.
+- **FL Studio** was open with the owner's `trap-agent-A5.flp` during the check. It was left untouched.
+
+**Conclusion:** no virtual MIDI input usable by FL Studio exists. Software must be installed, or a hardware controller connected, before the live step. Nothing was installed.
+
+### Exact setup step for the owner (before any live attempt)
+
+**Recommended: loopMIDI** (free, by Tobias Erichsen). It creates a standard Windows MIDI port that FL Studio lists as an input. The trial only needs the port to exist and be enabled: the script runs on **Reload**, and no MIDI messages have to be sent.
+1. Download loopMIDI from the author's page, https://www.tobias-erichsen.de/software/loopmidi.html, and install it.
+2. Start loopMIDI, type the port name `Thesis Bridge`, and click **+**. Leave loopMIDI running (or set it to start with Windows): the port exists only while it runs.
+3. Copy `scripts/fl_studio/device_gain_trial.py` to `Documents/Image-Line/FL Studio/Settings/Hardware/Thesis Gain Trial/device_gain_trial.py`.
+4. Restart FL Studio and open Options > MIDI settings. Confirm that `Thesis Bridge` is listed under **Input**, select it, click **Enable**, and set **Controller type** to **Thesis Gain Trial (user)**.
+
+**Alternative without installing software:** connect any USB MIDI controller and use it in steps 3–4 instead of the loopMIDI port.
+
+**Not recommended for this trial:** Windows MIDI Services app-to-app loopbacks. They need Microsoft's Windows MIDI Services tools, and whether FL Studio 2026 sees those endpoints is unverified.
+
+### Bass test procedure, once the input exists (owner-driven; save and export stay manual)
+
+1. **Copy.** Open `trap-baseline.flp`, use **Save As** to make `bass-bridge-test.flp` in the trial folder, and record its SHA-256. Work only in this disposable copy; leave `trap-agent-A5.flp` and the baseline untouched.
+2. **Identity and starting gain.** In the installed script, set:
+   - `PROJECT_TITLE` = the copy's Project Info (F11) title, for example `"Thesis Bass Bridge Test"` (the window title does not show the project name);
+   - `INSERT_INDEX` and `INSERT_NAME = "Bass"`, as shown in the mixer;
+   - `MODE = "inspect"`.
+
+   Reload. Record the `RESULT` lines: `fl_studio`, `scripting_api`, `window_title`, `project_title`, `project_identity_check`, `insert`, `insert_name`, `current_normalized` and `current_db`. At the default fader position, `current_db` should read about 0 dB (the `DB_MODE` check).
+3. **One bounded change.** Set:
+   - `REFERENCE = (current_normalized, current_db)`;
+   - `INTENDED_DB_CHANGE`, for example −2.0;
+   - `TARGET_NORMALIZED`: the baseline minus a cut greater than 0.002 and at most 0.03;
+   - `MODE = "apply"`.
+
+   Reload **once**. Record `intended_db_change`, `sent_normalized`, `candidate_normalized`, `candidate_db`, `measured_db_change` and `label`. **APPLIED** requires the read-back to be within 0.001 normalized of the value sent and more than 0.05 dB below the baseline.
+4. **Duplicate-command check.** With `MODE = "apply"` unchanged, reload a second time. The script must stop with "Current fader value is outside the reference tolerances." and write nothing. Then set `MODE = "inspect"` and reload: `current_db` must still equal `candidate_db`. Record both outputs.
+5. **Leave the script in inspect mode.** Saving, reopening (verify mode) and exporting stay manual, as before.
+
+### Duplicate-command handling (checked locally)
+
+- **The command is absolute.** `TARGET_NORMALIZED` is an absolute fader value, not a relative step, so resending it cannot compound a second cut.
+- **The baseline reference gates every write.** The script writes only while the fader still matches `REFERENCE` (within 0.001 normalized and 0.05 dB). The cut must exceed twice that tolerance, so after one apply the reference cannot match again: a resent command is refused before any write.
+- **Tests:** `test_apply_records_intent_separately_from_measurement_and_prevents_second_write` sends the same apply twice and asserts exactly one `setTrackVolume` call. The local checks pass (`uv run python scripts/fl_studio/test_gain_trial.py`: OK).
+- **Residual risk:** FL Studio also runs `OnInit` when the script loads at startup. If `MODE = "apply"` is left set and a *fresh* copy at the baseline gain is open, it would apply again. That would be a new first apply on that copy, not a second cut on the same one, but the procedure resets to inspect immediately after the apply for this reason.
+
+### What worked live / what remains (as of 2026-11-17; see the live result of 2026-11-18)
+
+- **Live so far:** FL Studio 2026 build 26.1.7.5654 starts and records its devices. The manual edits, saves and exports of the kick-cut trial and of pilot rounds A6 and A5 were done by the owner in FL Studio.
+- **Not yet live (needs the MIDI input):**
+  - the script loading as a controller script, and the insert identity read;
+  - the `DB_MODE` check and the starting gain;
+  - the single bounded write with dB read-back, and the duplicate-command refusal;
+  - reopen verification through the script.
+
+## Live result, 2026-11-18 (owner-pasted FL Studio output)
+
+**Source.** The observations below are **attributed to the FL Studio Script output that the owner pasted** into the development chat. They were not captured by repository tooling.
+- **Environment:** FL Studio Producer Edition 26.1.7, build 5654, MIDI scripting API **45**.
+- **Script:** the installed copy at `Documents/Image-Line/FL Studio/Settings/Hardware/Thesis Gain Trial/device_gain_trial.py`, SHA-256 `93879cf1e5459195db7664bf46588bdc0fdafc4b8f3052798e1110de234860ee` (read 2026-11-18; left unchanged, `MODE = "inspect"`). It differs from the repository version only in its trial configuration, a hard-coded project title, documentation and an API-version guard (see "Installed script").
+- **MIDI input:** this record does not say which input hosted the script.
+
+| Step | Observed (owner-pasted output) |
+| --- | --- |
+| Project identity | `general.getProjectTitle()` returned the metadata title **`Thesis Bass Bridge Test`**, which matched. `ui.getProgTitle()` returned only **`FL Studio 2026`**. The script checked the project's **metadata title; it did not establish the file path**. |
+| Insert identity | Insert **2** named exactly **`Bass`** (exact-name check passed) |
+| Starting gain | normalized **0.800000**, read back as **0.000000 dB** (confirms dB mode 1 at the default fader position) |
+| One bounded write | one absolute write to **0.780000**, read back as **−0.574523 dB** |
+| Intended vs measured | intended −1.0 dB, measured **−0.574523 dB**, a difference of **+0.425477 dB**: the intended dB change was **not** achieved. The normalized cut of 0.02 is a bounded fader change, not a −1 dB change. |
+| Duplicate command | reloading the same apply command was **refused by the baseline check before the write**; no second cut |
+| Persistence | the owner saved the trial project manually, reopened it, and inspect read **0.780000 / −0.574523 dB** |
+
+**What worked live:**
+- the script hosted by FL Studio's controller-script mechanism;
+- the metadata-title and exact insert-name checks, and the starting gain in normalized and dB form;
+- one absolute write with dB read-back, refusal of a resent command, and persistence across a manual save and reopen.
+
+**What remains:**
+- **External command bridge** (sending a request from outside FL Studio): its own design.
+- **Normalized-to-dB conversion:** one measured point (0.80 → 0.78 gives −0.574523 dB) does not define the fader curve, so an intended dB change cannot yet be turned into a fader value. This is its own design.
+- **File-path identity:** no documented call establishes the project file path.
+- **Export:** not part of this step. Save and export stay manual.
+
+## Installed script and repository reconciliation (2026-11-18)
+
+**Installed copy against the repository:**
+- **Configuration:** `PROJECT_FILENAME = "bass-bridge-test.flp"` (unused in its identity check), `INSERT_INDEX = 2`, `INSERT_NAME = "Bass"`, `REFERENCE = (0.8, 0.0)`, `INTENDED_DB_CHANGE = -1.0`, `TARGET_NORMALIZED = 0.78`, `MODE = "inspect"`.
+- **Identity check:** it calls `general.getProjectTitle()` when the API is ≥ 38 and compares the result with the hard-coded `"Thesis Bass Bridge Test"`. It records that the file path is not verified, and still records `ui.getProgTitle()`.
+
+**Repository script (`scripts/fl_studio/device_gain_trial.py`), reconciled with the live findings:**
+- The identity check is now the metadata title, `general.getProjectTitle()` against a configurable `PROJECT_TITLE` (set in Project Info, F11), with the result recorded as "metadata title matches; file path not verified by this API".
+- The window title (`ui.getProgTitle()`) is recorded, not checked.
+- `MIN_API_VERSION` is 38.
+- `DB_MODE = 1` is now documented.
+- The repository keeps blank defaults; the installed copy keeps the owner's trial configuration.
+
+**Local checks** (`scripts/fl_studio/test_gain_trial.py`, 9) replay the live values: insert 2 "Bass", 0.800000 / 0.000000 → 0.780000 / −0.574523 dB with an intended −1.0 dB, the duplicate refusal before any write, and verify after reopen.
+
+## API calls (Image-Line MIDI scripting manual; corrected 2026-11-18)
 
 The script uses only these documented calls. The local check fails if it calls anything else.
 
 | Call | API | Use |
 | --- | --- | --- |
 | `general.getVersion()` | 1 | Scripting API version |
-| `general.safeToEdit()` | 29 | Edit guard (so the trial needs API ≥ 29) |
+| `general.safeToEdit()` | 29 | Edit guard |
+| `general.getProjectTitle()` | 38 | Project metadata title (Project Info); the identity check (so the trial needs API ≥ 38) |
 | `ui.getVersion(5)` | 1 | FL Studio version string |
-| `ui.getProgTitle()` | 1 | Window title; must contain the trial copy's file name |
+| `ui.getProgTitle()` | 1 | Program title; recorded only (live: `FL Studio 2026`, no project name) |
 | `mixer.trackCount()` | 1 | Number of tracks, including Master (0) and the last "current" track; inserts are 1 … `trackCount() − 2` |
+| `mixer.getTrackCount()` | 38 | Documented as well (excludes Master and "Current"); not used by the script |
 | `mixer.getTrackName(i)` | 1 | Insert identity |
-| `mixer.getTrackVolume(i, mode)` | 1 | Normalized fader value (0.0–1.0, default 0.8), or "in decibels" by the `mode` flag |
+| `mixer.getTrackVolume(i, mode)` | 1 | Normalized fader value (0.0–1.0, default 0.8), or dB with `mode = 1` (documented) |
 | `mixer.setTrackVolume(i, v)` | 1 | The only write: normalized fader value |
 | `transport.isPlaying()` | 1 | Refuse while playing |
 
-**Corrections to the draft:** the draft called `general.getProjectTitle()` and `mixer.getTrackCount()`. Neither exists in the documented API, so the script would have stopped with an `AttributeError` in FL Studio. They are replaced by `ui.getProgTitle()` (the copy's file name, `PROJECT_FILENAME`, must appear in the window title) and `mixer.trackCount()` (Master and the current track are excluded). The minimum API version is 29 (`safeToEdit`), not 38.
+**Correction (2026-11-18), superseding the 2026-11-17 statement here:** the earlier claim that `general.getProjectTitle()` and `mixer.getTrackCount()` are undocumented was **wrong**. It was based only on the IL-Group stub repository, which lacks them. Image-Line's MIDI scripting manual documents both from API 38. Live on API 45, `general.getProjectTitle()` returned the project metadata title, while `ui.getProgTitle()` returned only `FL Studio 2026`, so the window-title check that replaced Codex's call could not have identified the project. The script again uses `general.getProjectTitle()`, and the minimum API is 38.
 
 **Gain mapping:**
-- The stubs do not state which `mode` value returns dB, nor the normalized-to-dB curve. The script uses `mode = 1` (`DB_MODE`) and never converts dB to a fader value itself.
+- `mode = 1` returns dB (documented; live 0.800000 read 0.000000 dB). The normalized-to-dB curve is not documented, and the script never converts dB to a fader value itself.
 - The intended change (`INTENDED_DB_CHANGE`, dB) is recorded separately from the normalized value actually sent (`TARGET_NORMALIZED`) and from FL Studio's dB read-back.
-- Until inspect confirms on this build that `mode = 1` reads about 0 dB at the default 0.8, and the mapping is checked at more than one point, the result is a **bounded normalized-fader change with a measured dB change**. One applied point does not establish the mapping.
+- Live, 0.80 → 0.78 gave −0.574523 dB against an intended −1.0 dB. Until the mapping is designed and checked at more than one point, the result is a **bounded normalized-fader change with a measured dB change**.
 
 ## Prepare the copy and baseline
 
@@ -62,14 +171,14 @@ The script uses only these documented calls. The local check fails if it calls a
    - With the producer's project: hash the original `.flp` with `Get-FileHash -Algorithm SHA256 -LiteralPath 'path-to-original.flp'`, then use **Save As** to make a dedicated copy in a trial directory outside the repository.
    - Otherwise: make a disposable project with two named inserts (for example "Trial Kick" and "Trial Bass") and audio routed to them, and save it as `gain-trial-copy.flp`.
 
-   Check the file name in the window title before editing, and confirm that all samples and plugins load. Keep the source project and media immutable.
+   Give the copy a unique Project Info (F11) title, which the script checks (it cannot see the file name), and confirm that all samples and plugins load. Keep the source project and media immutable.
 2. **Insert.** In the mixer, identify the numbered kick and bass inserts and their routing to Master. Choose one active insert whose fader has no automation, linked controller or initialized value that could override the test. Record its index and exact name. Keep playback and recording stopped during script operations.
 3. **Script.**
    - Copy `scripts/fl_studio/device_gain_trial.py` to `Documents/Image-Line/FL Studio/Settings/Hardware/Thesis Gain Trial/device_gain_trial.py` (the active FL Studio user data folder). Edit that installed copy.
-   - Set `PROJECT_FILENAME`, `INSERT_INDEX` and `INSERT_NAME`, and leave `MODE = "inspect"`.
+   - Set `PROJECT_TITLE` (the copy's metadata title), `INSERT_INDEX` and `INSERT_NAME`, and leave `MODE = "inspect"`.
    - Make the MIDI input available as described in **Setup step for the owner**, and select **Thesis Gain Trial (user)** for it.
    - Open **View > Script output**, select the script tab and use **Reload**. Copy every `RESULT` line into the trial record.
-4. **Inspect.** Record `fl_studio`, `scripting_api`, `window_title`, `insert`, `insert_name`, `current_normalized` and `current_db`. If the insert is at its default 0.8, `current_db` should read about 0; if it does not, `DB_MODE` is wrong for this build, and the trial reports normalized values only. Export the baseline according to the common render procedure below.
+4. **Inspect.** Record `fl_studio`, `scripting_api`, `window_title`, `project_title`, `insert`, `insert_name`, `current_normalized` and `current_db`. If the insert is at its default 0.8, `current_db` should read about 0 (confirmed live on API 45). Export the baseline according to the common render procedure below.
 
 ## Apply once and check persistence
 

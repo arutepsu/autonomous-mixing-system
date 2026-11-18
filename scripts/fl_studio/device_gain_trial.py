@@ -5,17 +5,21 @@ Owner-authorized trial under ADR-009 on a disposable project or a dedicated proj
 The script runs inside FL Studio when it is loaded or reloaded (Script output window, Reload) as the controller
 script of an enabled MIDI input. Save, reopen and export are manual.
 
-Only documented MIDI-scripting calls are used (Image-Line FL Studio API stubs, ``midi_controller_scripting``):
-``general.getVersion`` (API 1), ``general.safeToEdit`` (API 29), ``ui.getVersion`` (API 1), ``ui.getProgTitle``
-(API 1, window title), ``mixer.trackCount`` (API 1; includes Master and the "current" track),
-``mixer.getTrackName``, ``mixer.getTrackVolume`` and ``mixer.setTrackVolume`` (API 1), ``transport.isPlaying``.
+Only calls documented in Image-Line's MIDI scripting manual are used: ``general.getVersion`` (API 1),
+``general.getProjectTitle`` (API 38, the project's metadata title from Project Info), ``general.safeToEdit`` (API 29),
+``ui.getVersion`` (API 1), ``ui.getProgTitle`` (API 1, program title; recorded only), ``mixer.trackCount`` (API 1;
+includes Master and the "Current" track), ``mixer.getTrackName``, ``mixer.getTrackVolume`` and
+``mixer.setTrackVolume`` (API 1), ``transport.isPlaying`` (API 1).
+
+Project identity: the script checks the project's **metadata title** (``general.getProjectTitle``) against
+``PROJECT_TITLE``; it does not establish the file path, and no documented call returns it. Live on FL Studio 2026
+(26.1.7, API 45) ``ui.getProgTitle()`` returned only "FL Studio 2026", so the window title is recorded, not checked.
 
 Gain: ``setTrackVolume`` takes the normalized fader value (0.0-1.0, default 0.8). ``getTrackVolume(index, mode)``
-returns it normalized or "in decibels" by its ``mode`` flag; the stubs do not state which value selects dB, so
-``DB_MODE = 1`` is an assumption checked on the installed build by inspect (a default insert should read about
-0 dB at 0.8). The script never converts dB to a fader value itself: the intended dB change is recorded separately,
-the normalized value is what is sent, and FL Studio's own dB read-back is what is measured. Until the mapping is
-verified, the trial is a bounded normalized-fader change with a measured dB change.
+returns it normalized (mode 0) or in dB (mode 1, documented). The script never converts dB to a fader value itself:
+the intended dB change is recorded separately, the normalized value is what is sent, and FL Studio's own dB read-back
+is what is measured. Live, a write from 0.800000 (0.000000 dB) to 0.780000 read back as -0.574523 dB against an
+intended -1 dB, so a normalized cut is not an intended dB change; that conversion needs its own design.
 """
 
 from math import isfinite
@@ -25,7 +29,7 @@ import mixer
 import transport
 import ui
 
-PROJECT_FILENAME = ""  # file name of the trial copy, e.g. "gain-trial-copy.flp"; must appear in the window title
+PROJECT_TITLE = ""  # Project Info (F11) metadata title of the trial copy, e.g. "Thesis Bass Bridge Test"
 INSERT_INDEX = 0  # numbered mixer insert (not Master 0, not the last "current" track)
 INSERT_NAME = ""  # exact insert name shown in the mixer
 MODE = "inspect"  # inspect, apply, or verify
@@ -33,8 +37,8 @@ REFERENCE = None  # (normalized, dB): baseline for apply, candidate for verify
 INTENDED_DB_CHANGE = None  # apply only: the change the trial intends, in dB (negative); recorded, not converted
 TARGET_NORMALIZED = None  # apply only: absolute fader value actually sent
 
-DB_MODE = 1  # getTrackVolume mode assumed to return dB; confirmed per build by inspect
-MIN_API_VERSION = 29  # safeToEdit
+DB_MODE = 1  # getTrackVolume mode 1 returns dB (documented; live 0.800000 read 0.000000 dB on API 45)
+MIN_API_VERSION = 38  # getProjectTitle (safeToEdit needs 29)
 NORMALIZED_TOLERANCE = 0.001  # read-back tolerance on the fader value (trial setting)
 DB_TOLERANCE = 0.05  # read-back tolerance in dB (trial setting)
 MAX_NORMALIZED_CUT = 0.03  # bounded change: normalized cut in (2 x NORMALIZED_TOLERANCE, MAX_NORMALIZED_CUT]
@@ -74,10 +78,12 @@ def _check_identity():
     _record("mode", MODE)
     if api_version < MIN_API_VERSION:
         raise RuntimeError(f"The trial requires MIDI scripting API {MIN_API_VERSION} or newer.")
-    title = ui.getProgTitle()
-    _record("window_title", repr(title))
-    if not PROJECT_FILENAME or PROJECT_FILENAME not in title:
-        raise RuntimeError("Open the designated trial copy; its file name must appear in the window title.")
+    _record("window_title", repr(ui.getProgTitle()))  # recorded only: live it held no project name
+    project_title = general.getProjectTitle()
+    _record("project_title", repr(project_title))
+    if not PROJECT_TITLE or project_title != PROJECT_TITLE:
+        raise RuntimeError("Project metadata title does not match the designated trial.")
+    _record("project_identity_check", "metadata title matches; file path not verified by this API")
     if not 1 <= INSERT_INDEX <= mixer.trackCount() - 2:
         raise RuntimeError("Configure a numbered mixer insert (not Master or the current track).")
     name = mixer.getTrackName(INSERT_INDEX)

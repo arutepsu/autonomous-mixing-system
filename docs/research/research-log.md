@@ -1279,3 +1279,116 @@
 
   `docs/research/fl-studio-kick-808-trial.md` is corrected in place.
 - Checks: reported in the handoff. Left uncommitted for Codex review.
+
+## 2026-11-17 — Agent decision pilot 1: baseline packet, action menu and verification draft (Claude Code)
+- Scope: preparation only, under the owner's ADR-009 authorization. The agent has not been asked. The producer goal is left for the owner to state, and all thresholds are pilot settings for review. Proposals stay proposals: admission, rendering and verification are deterministic (ADR-004).
+- Inputs: only the baseline kick, 808 and master exports of `C:/uni/Bachelor-Thesis/test/trap-baseline`. The manual kick-cut candidate, its measurements and its result are excluded. New `scripts/fl_studio/prepare_decision_packet.py` opens only `trap-baseline_*.wav`, refuses a candidate prefix, and records the insert titles (RIFF INAM), stem and master peak/RMS, the channel relation, both directional margins on calls 2–524 × 21 bands, supporting regions and per-band evidence, and three cell categories:
+  - silent target windows (excluded);
+  - masker threshold equal to threshold in quiet (exceedance not attributed to the masker);
+  - low-energy cells within 10 dB of the int16 rounding-noise reference (pilot setting, flagged).
+- Packet: `C:/uni/Bachelor-Thesis/test/agent-pilot-packet/decision-packet.json`, SHA-256 `9ea69f8c…`, reproduced byte-identically and with no candidate reference. The original exports were unchanged.
+- Observations (model exceedance, not perceptual masking):
+  - kick → 808: 118 cells attributable to the kick (117 not low-energy), at the attacks of the four kick hits that start with an 808 note, bands 2–20 (nominal 0.3–19 kHz), median +5…+7.6 dB.
+  - 808 → kick: 536 cells (206 not low-energy), in the decays of the same hits, all bands. The evidence without the flag is mostly in bands 0–4 (104 of 118); above 0.8 kHz most of it is low-energy flagged.
+  - The four kick hits in the 808's gaps give no evidence in either direction.
+- Drafts in `docs/research/agent-decision-pilot-packet.md`:
+  - **Menu:** abstention plus Kick or 808 cuts of −1, −2 or −3 dB. Cuts only, matching the trial bridge. Insert indices are to be confirmed in FL Studio.
+  - **Execution rule:** read-back within ±0.25 dB.
+  - **Verification rule tied to the owner's goal:** a primary median change of −1.0 dB over a pre-registered baseline evidence set. Guards cover the other stem (median +1.0 dB, 10 % newly exceeding), the master (peak ≤ −1.0 dBFS, RMS change ≥ −1.5 dB) and uncertainty (flagged cells reported apart). The integrity checks are exact.
+- Tests: `tests/unit/test_fl_decision_packet.py` (5; baseline-only reading proven with a candidate file present). 25 FL Studio script tests pass with warnings as errors; ruff is clean.
+- Open: the producer goal (owner), review of the pilot settings, and confirmation of the insert indices. Left uncommitted for review.
+
+## 2026-11-17 — Agent decision pilot 1: packet and verification revised after Codex review (Claude Code)
+- **Evidence terms.** The previous entry's "attributable to the masker" counts (118 kick → 808, 536 808 → kick) only showed `T > E` with `T > thm_quiet` (`thm_quiet` = band mapping of the threshold in quiet). They are now called *exceedances with an elevated masker threshold*. A *masker-dependent* exceedance also requires `thm_quiet ≤ E < T`: 118 kick → 808 (unchanged) and 534 808 → kick (2 fewer, where the kick was already below the threshold in quiet). Only masker-dependent cells support observations and the evidence set. Unflagged counts are unchanged: 117 and 206.
+- **Frozen sets.** `decision-packet.json` now carries, per direction, `frozen_cells.evidence` (masker-dependent, not low-energy flagged) and `frozen_cells.guard` (eligible, target window not silent, not flagged), each as `[call, band, baseline margin]`, fixed before any action. Evidence: 117 and 206 cells. Guard: 5,600 (5,483 at risk, baseline margin ≤ 0) and 1,228 (1,022 at risk).
+- **Verification draft** (`docs/research/agent-decision-pilot-packet.md` §5) now states:
+  - the guard on the reverse direction's frozen guard set G;
+  - "newly exceeding" as a share of the at-risk subset G₀ (passing when G₀ is empty);
+  - empty evidence or guard sets give *not verified* (only A0 is verifiable without evidence);
+  - cells that become unusable after the edit (silent target window, undefined margin) are never dropped or imputed and make the result *not verified*;
+  - the master rule `candidate RMS − baseline RMS ≥ −1.5 dB` explicitly.
+- **Execution.** The pilot is executed manually. The owner confirms the insert indices and names in the FL Studio mixer before the pilot, edits a fresh copy of `trap-baseline.flp` with FL Studio's fader, and records the displayed before and after values. The action counts as executed only if the displayed change is within ±0.25 dB of the intended one (pilot setting). The scripted bridge is not used.
+- **Menu file.** The packet script writes `action-menu.json` (A0 abstain, A1–A6 Kick/Bass cuts of −1, −2 and −3 dB, manual execution rule). Packet SHA-256 `5ed835c3…`, menu `da7594e1…`; both were reproduced byte-identically, with no candidate reference. The original exports are unchanged.
+- **Tests and checks.** `tests/unit/test_fl_decision_packet.py` has 7 tests (new: masker-dependence requires `E ≥ thm_quiet`; flagged cells leave both frozen sets; the menu contents). 27 FL Studio script tests pass with warnings as errors; ruff is clean.
+- **Open.** The owner's goal and insert confirmation. Then the decision agent runs in a fresh, isolated session (packet, goal and menu only), and its choice is recorded before the manual kick-cut result is revealed. Left uncommitted for review.
+
+## 2026-11-17 — Agent decision pilot 1: producer goal recorded; guard conflict flagged (Claude Code)
+- **Goal.** The owner's goal, verbatim: "make kick more dominant then bass". It is recorded in `C:/uni/Bachelor-Thesis/test/agent-pilot-packet/producer-goal.json` (SHA-256 `fec915c2…`), separate from the unchanged packet (`5ed835c3…`). Verification mapping: P = kick, C = 808. E = the 808 → kick frozen evidence set (206 cells, unrestricted). G = the kick → 808 frozen guard set (5,600 cells; G₀ 5,483).
+- **Conflict.** It is found from baseline values only, and the agent does not get it. A 808 cut of g dB lowers the primary margins by about g but raises the kick → 808 guard margins by about g. The drafted guard (median ≤ +1.0 dB) would reject the −2 and −3 dB 808 cuts and leave −1 dB marginal. The newly-exceeding rule does not bind (at most 29 of 5,483 at-risk cells within 3 dB of 0). The guard thus treats the goal's intended effect as a regression.
+- **Options for the owner:** keep the guard; bound the shift (median ≤ +3.0 dB, proposed); or use an 808 level guard. Insert indices are still to be confirmed.
+- **Status.** The agent has not been run, and nothing was changed in FL Studio. Left uncommitted.
+
+## 2026-11-17 — Agent decision pilot 1: guard finalized, bundle prepared, run not possible here (Claude Code)
+- **Owner-approved guard** (recorded before any agent run): `candidate 808 RMS − baseline 808 RMS ≥ −3.25 dB`, with pooled-channel RMS on the original stereo 808 stem. The kick → 808 margin changes are reported descriptively only. Unchanged:
+  - the primary check (206 frozen 808 → kick cells, median Δ ≤ −1.0 dB, fewer cells exceeding);
+  - the master peak and RMS guards, the export integrity checks and the ±0.25 dB fader tolerance.
+- **Packet split.** The frozen verification cell sets made `decision-packet.json` 706 KB (about 230k tokens), almost all cell lists. They now go to a verifier-only `verification-sets.json` (`9560eb7f…`); the agent-facing packet is 37 KB (`285426ec…`). `producer-goal.json` was re-recorded with unchanged text (`bebead07…`). Tests are updated (7 pass with warnings as errors).
+- **Bundle.** `C:/uni/Bachelor-Thesis/test/agent-pilot-input/` contains exactly `decision-packet.json`, `producer-goal.json` and `action-menu.json` (41 KB, no candidate reference). The exact request (`agent-request.txt`, `47b5a2e1…`), a manifest and an empty run record are in `C:/uni/Bachelor-Thesis/test/agent-pilot-run/`. The original exports are unchanged.
+- **Not run.** No Anthropic API key and no Claude Code CLI are available in this environment. A sub-agent or session started here could read the repository, candidate exports and trial report, so the isolation requirement cannot be met. Per the owner's instruction, work stops with the bundle prepared. No choice has been recorded and no edit was made in FL Studio.
+
+## 2026-11-17 — Agent decision pilot 1: two-round outcome (Claude Code)
+- **Report:** [`docs/research/agent-decision-pilot-1-report.md`](agent-decision-pilot-1-report.md). The packet, rules and owner decisions are in [`agent-decision-pilot-packet.md`](agent-decision-pilot-packet.md). The earlier manual kick-cut trial stays separate ([`fl-studio-kick-808-trial.md`](fl-studio-kick-808-trial.md)).
+- **Sequence:** goal "make kick more dominant then bass".
+  - **Round 1, A6 (Bass −3 dB):** measured −2.894 dB. The primary check passed (median −2.894 dB over the 206 frozen 808 → kick cells; 206 → 199 positive). The 808 RMS and master peak guards passed; the master RMS guard failed (−1.900 dB < −1.5 dB). Rolled back.
+  - **Round 2, A5 (Bass −2 dB)**, from a fresh baseline copy after the feedback: measured −1.885 dB. Primary median −1.885 dB, 206 → 201 positive. 808 RMS −1.885 dB, master peak −2.150 dBFS, master RMS −1.288 dB. All measured criteria passed.
+- **Recomputation.** New `scripts/fl_studio/verify_pilot_round.py` (tests: `tests/unit/test_fl_pilot_verification.py`, 5) recomputes both rounds from the original exports with the frozen rules and cells. It reuses `analyze_trial.py`, `check_exports.py`, the dist10 front end and the masking kernel.
+  - Integrity passes: equal frames, lag 0, kick decoded bit-identical.
+  - The baseline reproduces the frozen margins exactly. All owner-reported values agree.
+  - Reports `verification-round1-a6.json` (`3b059563…`) and `verification-round2-a5.json` (`123e772d…`) in `C:/uni/Bachelor-Thesis/test/agent-pilot-run/` are byte-identical on rerun. The original exports are unchanged.
+- **Missing evidence:**
+  - the round-2 agent response (not saved locally); A5 as its choice and its stated lack of the primary criterion rest on the owner's report;
+  - model ID, interface, parameters and time for both rounds;
+  - round-2 isolation and the exact message as sent;
+  - mixer insert indices;
+  - displayed fader readings. The execution-tolerance rule therefore cannot be evaluated, and A5 is accepted on measured criteria only.
+- **Criteria supplied to the agent:**
+  - round 1: no verification rules;
+  - round 2: round-1 outcomes and implicitly the master RMS limit, not the primary threshold or the other thresholds.
+
+  Future runs need the full machine-readable rule set from round 1, a structured round history with every criterion's value and threshold, and the raw responses with model details saved.
+- **Limits:** one development mix, a cuts-only menu, manual execution, dist10 model exceedance only. The listening judgment is pending. Left uncommitted for Codex review.
+
+## 2026-11-17 — Correction: decision-pilot verifier gates on baseline agreement (Codex review)
+- **Finding.** `verify_pilot_round.py` reported whether the baseline exports reproduce the frozen evidence margins, but the flag did not affect the outcome.
+- **Fix.** A mismatch now makes the round *not verified* before any accept or roll back, and the reason is listed in `not_verified_reasons`. The guard set's baseline agreement is reported too; it does not gate, because that set is descriptive.
+- **Regression.** A frozen margin shifted by 1e−9 gives *not verified* with that single reason. It fails against the previous verifier (1 of 6 tests); all 6 pass now, with warnings as errors.
+- **Rerun.** Results are unchanged: A6 roll back, A5 accept on measured criteria with execution tolerance unknown, both gates passing with exact agreement. New report hashes: `verification-round1-a6.json` `f7aa67cd…` and `verification-round2-a5.json` `cac102d2…`, byte-identical on rerun. The original exports are unchanged.
+- **Round-2 response.** The review asked to recover it from the development chat, but it is not in the Claude Code conversation that produced the report. The only round-2 text pasted there is the feedback message, already recorded. The response therefore stays missing, pending the owner's copy. The fader readings stay unknown and are not reconstructed from the measured gain.
+- Left uncommitted.
+
+## 2026-11-17 — Clarification: round-2 A5 response recovered as an owner-supplied transcript (Claude Code)
+- **Source.** The owner supplied a transcript of the round-2 response, recovered from the separate Codex development chat, where it was posted after the round-2 feedback prompt and before the A5 render. A byte-identical copy is saved as `C:/uni/Bachelor-Thesis/test/agent-pilot-run/recovered-round-2-A5-response.txt` (SHA-256 `5dea341c…`).
+- **What it is.** A transcription, not an interface export. Quotation marks are normalized and line continuations omitted. It parses as JSON with `action_id` A5 (a valid menu ID), the rationale and the uncertainty statement, including that the agent lacked the exact primary criterion.
+- **Still unverified:** model identity, the original timestamp, session isolation and the exact request as sent. The displayed fader readings stay unknown.
+- **Correction.** This clarifies the previous entry: the response was not lost. It was in the Codex development chat, separate from the Claude Code conversation that wrote the report.
+- **Report update.** `docs/research/agent-decision-pilot-1-report.md` now records the provenance and quotes the transcript verbatim (checked programmatically against the saved file). It replaces the "missing" status with "recovered as an owner-supplied transcript". The verification results are unchanged.
+- Left uncommitted for review.
+
+## 2026-11-17 — Listening judgment recorded; FL Studio bridge still blocked on a MIDI input (Claude Code)
+- **Listening judgment.** The owner's judgment is recorded in `docs/research/agent-decision-pilot-1-report.md` §8: A5 makes the kick more dominant, retains enough 808 weight, and is preferred because it sounds cleaner. It is labelled **informal**, with playback level matching unconfirmed (A5 lowers master RMS by 1.288 dB, so level may have influenced it) and no blind comparison.
+- **Endpoint re-check.** Unchanged:
+  - WinMM reports 0 inputs;
+  - FL Studio's device records list MIDI outputs only;
+  - Windows MIDI Services exposes only its diagnostic test loopbacks, with no app loopback and no tools;
+  - no loopMIDI, LoopBe or rtpMIDI driver is installed.
+
+  No usable virtual input exists, and nothing was installed. FL Studio was open with the owner's `trap-agent-A5.flp` and was left untouched.
+- **Owner setup step** (in `docs/research/fl-studio-gain-trial.md`): install loopMIDI and create the port `Thesis Bridge` (or connect a USB MIDI controller), install the trial script under `Settings/Hardware/Thesis Gain Trial/`, then enable the input in FL Studio with controller type "Thesis Gain Trial (user)". The Bass test procedure (disposable copy, inspect, one apply, duplicate-command reload, back to inspect) is written out.
+- **Duplicate-command handling.** The command is an absolute fader target, and every write is gated on the recorded baseline reference, with a cut larger than twice its tolerance. A resend is therefore refused before any write; the local checks pass, including the one-write assertion. Residual risk: a startup `OnInit` with `MODE = "apply"` left set on a fresh baseline copy; the procedure resets to inspect.
+- **Status.** The live bounded Bass test was not run: no single write, read-back or duplicate check was done live. Save and export stay manual. Left uncommitted for review.
+
+## 2026-11-18 — FL Studio gain trial: live single write recorded; script reconciled (Claude Code)
+- **Source.** The live results come from the FL Studio Script output pasted by the owner (FL Studio Producer Edition 26.1.7, build 5654, scripting API 45). They were not captured by repository tooling.
+- **Observations:**
+  - **Identity:** `general.getProjectTitle()` returned the project metadata title `Thesis Bass Bridge Test`, which matched; `ui.getProgTitle()` returned only `FL Studio 2026`. Insert 2 had the exact name `Bass`.
+  - **Gain:** starting at 0.800000 / 0.000000 dB, one absolute write to 0.780000 read back as −0.574523 dB. The intended −1.0 dB was **not** achieved (difference +0.425477 dB).
+  - **Duplicate command:** reloading the same apply was refused by the baseline check before the write.
+  - **Persistence:** after a manual save and reopen, inspect read 0.780000 / −0.574523 dB.
+- **Identity scope.** The script checked the project's metadata title. It did not establish the file path.
+- **Installed script** (`Documents/Image-Line/FL Studio/Settings/Hardware/Thesis Gain Trial/device_gain_trial.py`, SHA-256 `93879cf1…`) was read and left unchanged in inspect mode. It differs from the repository version in its trial configuration (insert 2 "Bass", reference (0.8, 0.0), intended −1.0 dB, target 0.78), a hard-coded title and an API guard.
+- **Correction to the 2026-11-17 entries.** The claim that `general.getProjectTitle()` (and `mixer.getTrackCount()`) are undocumented was **wrong**. It came from the IL-Group stub repository only; Image-Line's MIDI scripting manual documents both from API 38. The window-title replacement could not have identified the project, because the live window title held no project name. Codex's original call was right.
+- **Reconciliation.**
+  - `scripts/fl_studio/device_gain_trial.py` now checks `general.getProjectTitle()` against a configurable `PROJECT_TITLE`, records the window title without checking it, and requires API ≥ 38; `DB_MODE = 1` is documented.
+  - `scripts/fl_studio/test_gain_trial.py` (9 checks, all passing) replays the live values: the identity lines, intent against measurement, the duplicate refusal before any write, and verify after reopen.
+  - `docs/research/fl-studio-gain-trial.md` records the live result and the corrected API table, and the procedure now uses the Project Info title. Ruff is clean.
+- **Next.** The external command bridge and the normalized-to-dB conversion need their own design. Save and export stay manual. Left uncommitted for review.
