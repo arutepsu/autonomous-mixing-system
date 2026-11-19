@@ -9,15 +9,18 @@ never candidate readiness: no receipt or candidate exists until a verified impor
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 
 from autonomous_mixing.core.records.acceptance import AcceptedReference
-from autonomous_mixing.core.records.admission import TrackGainPermission
+from autonomous_mixing.core.records.admission import StemBinding, TrackGainPermission
+from autonomous_mixing.core.records.artifacts import ArtifactKind
 from autonomous_mixing.core.records.daw_binding import DawTrackBinding
 from autonomous_mixing.core.records.daw_control import DawApplyRequest, DawControlProfile, DawWriteConfirmed
 from autonomous_mixing.core.records.daw_export import (
     DawDependencyStatus,
     DawExportAwaiting,
     DawExportFormat,
+    DawExportManifest,
     DawExportOutput,
     DawExportRequest,
     DawExportTimeline,
@@ -29,15 +32,18 @@ from autonomous_mixing.core.records.daw_export import (
 from autonomous_mixing.core.records.decision import Decision, ProposeAction
 from autonomous_mixing.core.records.feedback import DecisionFeedback
 from autonomous_mixing.core.records.identifiers import (
+    ArtifactId,
     AttemptId,
     DecisionCallId,
     ExecutionId,
     ProjectId,
     Revision,
+    RunEventId,
     RunId,
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.integrity import ArtifactRootBinding
 from autonomous_mixing.core.records.invariants import (
     require_finite,
     require_instance,
@@ -241,6 +247,10 @@ class DawCorrectionSuspended:
     write: DawWriteConfirmed
     awaiting: DawExportAwaiting
     paused_at_utc: datetime
+    # Increment 3 (C1): the progress selection fields resumption needs, matching the before state.
+    stems: tuple[StemBinding, ...]
+    mix_id: ArtifactId
+    roots: tuple[ArtifactRootBinding, ...]
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -267,6 +277,25 @@ class DawCorrectionSuspended:
         require_utc(self.paused_at_utc, "DawCorrectionSuspended.paused_at_utc")
         self._check_correction()
         self._check_export()
+        self._check_selection()
+
+    def _check_selection(self) -> None:
+        """Stems, mix and roots select the before state's current audio, as ``RunRequest`` requires initially."""
+        require_tuple_of(self.stems, StemBinding, "DawCorrectionSuspended.stems", nonempty=True, distinct=False)
+        require_instance(self.mix_id, ArtifactId, "DawCorrectionSuspended.mix_id")
+        require_tuple_of(self.roots, ArtifactRootBinding, "DawCorrectionSuspended.roots", nonempty=True,
+                         distinct=False)  # fmt: skip
+        audio = self.before.audio
+        for binding in self.stems:
+            stem = audio.artifact_for(binding.artifact_id)
+            if stem is None or stem.kind is not ArtifactKind.STEM or stem.source_track_ids != (binding.track_id,):
+                raise ValueError(f"DawCorrectionSuspended stem binding for {binding.track_id} is not a current stem")
+        mix = audio.artifact_for(self.mix_id)
+        if mix is None or mix.kind is not ArtifactKind.MIX:
+            raise ValueError("DawCorrectionSuspended.mix_id is not a current mix of the before state")
+        bound = {binding.artifact_id for binding in self.roots}
+        if not audio.artifact_ids <= bound:
+            raise ValueError("DawCorrectionSuspended.roots must bind every current artifact of the before state")
 
     def _check_correction(self) -> None:
         if not isinstance(self.decision.outcome, ProposeAction):
@@ -334,3 +363,87 @@ class DawPlanReady:
 
     def __post_init__(self) -> None:
         require_instance(self.plan, DawCorrectionPlan, "DawPlanReady.plan")
+
+
+# --- continuation (Increment 3, amended) ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DawContinuationStarted:
+    """The first event of an explicit continuation of the suspension ``checkpoint_event_id`` with ``manifest``.
+
+    The pause (``resumed_at_utc - paused_at_utc``, wall-clock UTC) is informational and never charged to the budget.
+    """
+
+    run_id: RunId
+    checkpoint_event_id: RunEventId
+    export_id: str
+    manifest: DawExportManifest
+    paused_at_utc: datetime
+    resumed_at_utc: datetime
+
+    def __post_init__(self) -> None:
+        require_instance(self.run_id, RunId, "DawContinuationStarted.run_id")
+        require_instance(self.checkpoint_event_id, RunEventId, "DawContinuationStarted.checkpoint_event_id")
+        _require_id(self.export_id, "DawContinuationStarted.export_id")
+        require_instance(self.manifest, DawExportManifest, "DawContinuationStarted.manifest")
+        require_utc(self.paused_at_utc, "DawContinuationStarted.paused_at_utc")
+        require_utc(self.resumed_at_utc, "DawContinuationStarted.resumed_at_utc")
+        if self.manifest.export_id != self.export_id:
+            raise ValueError("DawContinuationStarted manifest answers another export")
+
+
+class DawContinuationDisposition(Enum):
+    ACCEPTED = "accepted"  # its candidate's acceptance was established; the run may continue or finish
+    ENDED = "ended"  # the continuation ended the run without an established acceptance
+
+
+@dataclass(frozen=True)
+class DawContinuationFinished:
+    """Completion evidence of one continuation (amendment A2), recorded exactly once.
+
+    ``ACCEPTED`` is recorded after the accepted attempt's feedback and before any next decision round, so a later
+    write and suspension always follow it; ``ENDED`` is the last event before the terminal snapshot.
+    """
+
+    run_id: RunId
+    started_event_id: RunEventId
+    export_id: str
+    disposition: DawContinuationDisposition
+
+    def __post_init__(self) -> None:
+        require_instance(self.run_id, RunId, "DawContinuationFinished.run_id")
+        require_instance(self.started_event_id, RunEventId, "DawContinuationFinished.started_event_id")
+        _require_id(self.export_id, "DawContinuationFinished.export_id")
+        require_instance(self.disposition, DawContinuationDisposition, "DawContinuationFinished.disposition")
+
+
+class DawContinuationRefusalCode(Enum):
+    ALREADY_CONTINUED = "already_continued"
+    MANIFEST_CONFLICT = "manifest_conflict"
+    CONTINUATION_IN_PROGRESS = "continuation_in_progress"
+    CONTINUATION_INTERRUPTED = "continuation_interrupted"
+    NOT_SUSPENDED = "not_suspended"
+    REQUEST_MISMATCH = "request_mismatch"  # review fix 2026-11-19: not the run's recorded RunRequest
+
+
+@dataclass(frozen=True)
+class DawContinuationRefused:
+    """An expected refusal of a continuation: nothing was dispatched or recorded.
+
+    ``evidence_event_id`` names the completion evidence (``ALREADY_CONTINUED``) or the earlier start.
+    """
+
+    run_id: RunId
+    export_id: str
+    code: DawContinuationRefusalCode
+    explanation: str
+    evidence_event_id: RunEventId | None
+
+    def __post_init__(self) -> None:
+        require_instance(self.run_id, RunId, "DawContinuationRefused.run_id")
+        require_text(self.export_id, "DawContinuationRefused.export_id")
+        require_instance(self.code, DawContinuationRefusalCode, "DawContinuationRefused.code")
+        require_text(self.explanation, "DawContinuationRefused.explanation")
+        if self.evidence_event_id is not None:
+            require_instance(self.evidence_event_id, RunEventId, "DawContinuationRefused.evidence_event_id")

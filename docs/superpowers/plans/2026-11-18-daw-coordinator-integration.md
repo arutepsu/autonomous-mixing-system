@@ -4,7 +4,8 @@
 > - **Increment 0 is done as documentation:** the owner decided D15, and ADR-034 is proposed.
 > - **Increment 1 is implemented** (owner approval 2026-11-19; ADR-035 proposed; uncommitted; see "Increment 1 outcome").
 > - **Increment 2 is implemented** (owner approval 2026-11-19; ADR-036 proposed; uncommitted; see "Increment 2 outcome").
-> - **Increments 3–6 are not implemented and not yet authorized.** Each needs its own approval, and then runs tests-first and stays uncommitted for owner and Codex review.
+> - **Increment 3 is implemented** (owner approval 2026-11-19, with amendment A; ADR-037 proposed; uncommitted; see "Increment 3 outcome").
+> - **Increments 4–6 are not implemented and not yet authorized.** Each needs its own approval, and then runs tests-first and stays uncommitted for owner and Codex review.
 > - **Never in scope here:** installation, live FL Studio calls, and automated saving or exporting.
 
 **Revision 3 (2026-11-19, owner amendment):**
@@ -504,3 +505,272 @@ A defensive no-master check is unreachable through a valid `RunRequest` and was 
 **Mutation probes.** The marker probes were re-anchored and one was added for the off-target marker; all five are caught, and so are all earlier sets. A separate ordering probe was dropped, because removing the confirmed-branch marker already covers it.
 
 **Previously untested case, now tested.** The off-target marker noted after the first fix is now pinned by the off-target regression above.
+
+## Increment 3 plan: continuation to analysis, verification and acceptance (proposed 2026-11-19; not started)
+
+> Amended by "Increment 3 plan, amendment A" below. Where they differ, the amendment governs.
+
+**Scope.**
+- **In scope:** an in-process continuation of a `RunSuspended` that captures continuity, imports and assesses the export, derives the candidate, and passes it through the existing analysis, verification and acceptance flow.
+- **Out of scope:** durable restart (Increment 5), recovery routing (Increment 4), CLI wiring (Increment 6), installation and live FL Studio calls.
+- **Implementation does not start until this section is reviewed.**
+
+### Channel count and analysis profiles (resolves the Increment 2 open question)
+
+**Native channels are preserved; nothing is converted.**
+- Every replaced artifact must itself be a native FL export with the session's export settings: its `render_spec`, `sample_rate_hz`, `timeline_start_seconds` and `frame_count` must equal the session's `render_spec` and `export_timeline`. Its own `channel_count` (1 or 2) is the native channel count the output declares.
+- **Change:** `preflight_daw_correction` replaces the Increment 2 rule (output channels copied from the replaced artifact, nothing else checked) with this full metadata equality.
+- **Refusal:** any mismatch is `INCOMPATIBLE_AUDIO` before any write. A stereo export is never planned against a mono baseline, and the reverse.
+- **Import side:** an export that differs from its declaration is still refused with `DIMENSIONS`.
+- **Why:** verification compares the candidate with the before and initial states through one fixed `MeasurementDefinition` per criterion. Its `SourceRequirement` names exact metadata (render spec, rate, channels, start, frames), so before, initial and candidate must be like-for-like. Converting one of them would compare unlike audio.
+
+**Supported analysis profile in this increment: only `FileAudioAnalyzer`** (full-band sample peak and RMS in dBFS):
+- one source per job;
+- mono or stereo, pooled over channels, never folded down;
+- the source selected by exact metadata.
+
+Criteria for a DAW run must therefore declare source requirements whose render spec, channel count, rate, start and frame count are the FL export settings. A request whose definitions name other settings fails initial analysis as today, before any write.
+
+**The mono masking profile is unchanged and unsupported here.** dist10 front-end profile v1 (mono, 44.1 kHz, PCM_16; ADR-029) is not an `AudioAnalyzer` and is not wired into the coordinator. DAW candidates are never folded down, resampled or requantized to reach it. Using exports for masking would need a later profile with an explicit, versioned derived artifact applied identically to before and candidate: a separate decision.
+
+### Missing contracts (proposed additions, each test-pinned)
+
+| # | Gap | Proposal |
+| --- | --- | --- |
+| C1 | The checkpoint lacks the progress selection fields resumption needs | `DawCorrectionSuspended` gains `stems`, `mix_id` and `roots` (required). Its validation requires them to match the before state, exactly as `RunRequest` requires for the initial state. |
+| C2 | Elapsed time across the pause | `RuntimeProgress` gains `elapsed_before: float = 0.0` and `segment_start: ClockReading or None = None`. `runtime.checkpoint` computes `elapsed_before + (reading - segment_start)` within a segment. `progress.first` stays the run's original first reading, so `RunRecord.created_at` is unchanged. The monotonic-decrease check applies within a segment; a new segment is a fresh baseline. |
+| C3 | The continuation start is not recorded | A trace payload `DawContinuationStarted(run_id, checkpoint_event_id, export_id, manifest, paused_at_utc, resumed_at_utc)`, recorded first. The pause duration is derived from the two UTC times and is informational, never charged. |
+| C4 | The assessment is not recorded | `DawImportVerified` and `DawImportRejected` become trace payloads. The continuity snapshots use the existing `DAW_STATE` kind with `DawStateQuery(source, fresh_inspection=True)`; the import uses `EXPORT_IMPORT`. |
+| C5 | An expected refusal of a continuation | A result record `DawContinuationRefused(run_id, export_id, code, explanation)` with codes `ALREADY_CONTINUED`, `MANIFEST_CONFLICT`, `CONTINUATION_IN_PROGRESS` and `NOT_SUSPENDED`. It is returned, not raised; nothing is dispatched or recorded. |
+| C6 | Shared candidate tail | `correction.verify_candidate` is split so the offline path keeps its receipt and candidate construction and its exact behaviour. A new `assess_candidate(progress, ctx, receipt, candidate, candidate_roots, ...)` holds the receipt record, the single candidate analysis, the `ATTEMPT` verification and routing. |
+| C7 | `promote` assumes exactly two outputs (target stem, mix) and the offline output root | A DAW promotion updates the stem binding of every exported stem, selects the exported master as `mix_id`, and binds every candidate artifact to the session's `export_root_key`. Offline `promote` is unchanged. |
+| C8 | `accept` routes pre-commit failures through offline `failed_attempt`, which would record a logical rollback of a state whose fader moved | `accept` and the verification routing take the unaccepted-effect handler as a parameter: offline `failed_attempt`, as today, or the DAW interim handler below. `restore_after_rejection` is never called for a DAW candidate. |
+
+### The continuation, step by step (`resume_daw(suspended, manifest, *, collaborators...)`)
+
+1. **Admission of the call.** `suspended` must be a `RunSuspended` of a request with a DAW session, and the journal must be bound to its run. The journal's current trace decides:
+   - the checkpoint is the last event: continue;
+   - a `DawContinuationStarted` for this export exists with the same manifest and a terminal event follows it: `ALREADY_CONTINUED`;
+   - the same exists with another manifest: `MANIFEST_CONFLICT`;
+   - a `DawContinuationStarted` exists with no terminal event after it (an interrupted continuation in this process): `CONTINUATION_IN_PROGRESS`;
+   - the checkpoint is not in the trace: `NOT_SUSPENDED`.
+
+   Nothing is dispatched for any refusal.
+2. **Rebuild the progress** from the trace snapshot and the checkpoint:
+   - `accepted`, `tokens`, `history`, `observations`, `stems`, `mix_id` and `roots` from the checkpoint;
+   - `usage` from the checkpoint event;
+   - `known` and `commits` from the snapshot;
+   - `verified=None`, because the fader is away from the selected state;
+   - `pending_effect=REQUIRED_RECOVERY_NOT_PERFORMED`;
+   - a new clock segment (C2).
+3. **Record** `DawContinuationStarted`.
+4. **Snapshot before the import:** `DAW_STATE` with a fresh inspection, `continuity_snapshot(anchor.source_id)`.
+5. **Import:** `EXPORT_IMPORT` with `import_files(DawImportRequest(awaiting, manifest))`.
+6. **Snapshot after the import:** `DAW_STATE` again.
+7. **Assess:** `assess_daw_import(...)`, then record the result.
+8. **If verified:**
+   - `daw_execution_receipt(before, verified, apply)` and `derive_daw_candidate_state(..., captured_at=progress.last.utc)`;
+   - `assess_candidate` with candidate roots bound to `export_root_key`;
+   - routing as today: accept (with C7 promotion) and finish or iterate, or the DAW interim handler for rejection or inconclusive.
+   - **Iteration** may lead to another write and another `RunSuspended` in the same process.
+9. **After an acknowledged commit,** `pending_effect` is cleared and the verified reference comes from the existing post-commit integrity inspection. The accepted state's DAW parameter state is the anchored reading, so the next capability view starts there.
+
+### Failure handling while Increment 4 recovery is absent
+
+**Every outcome below ends the run at once.** Each one:
+- **restores and clears nothing:** no restoration, reconciliation or resolution, and nothing cleared in the FL journal;
+- **claims no rollback:** the verified reference stays `None`, so the final state is `UNKNOWN`, never `UNCHANGED` or `RESTORED_TO_LAST_ACCEPTED`;
+- **records the attempt as `UNRESOLVED`:** when a receipt exists, as a `CorrectionAttempt` whose `RollbackReceipt` has scope `SELECTED_STATE_WITH_FADER`, status `UNCERTAIN`, `retained_audio=UNCERTAIN`, no fader evidence, and an explanation that the fader was not restored. Such a receipt can never be VERIFIED (ADR-035).
+
+| Failure | Terminal reason |
+| --- | --- |
+| Continuity rejection (`STATE_DISCONTINUITY`, `UNRESOLVED_COMMAND`, `CONVERSION_BLOCKED`), or a snapshot port failure (one retry if it is retryable) | `DAW_CONTINUITY_FAILED` |
+| File rejection (any other `DawImportRejectionCode`), or an invalid import response | `EXPORT_IMPORT_REJECTED` |
+| Receipt or candidate derivation refused, candidate analysis failed, verification inconclusive, candidate rejected by verification, acceptance refused or confirmed absent, post-commit integrity failure before selection, cancellation or time limit, recording failure, or any unexpected exception (`pending_effect`) | `REQUIRED_RECOVERY_NOT_PERFORMED`, with the cause in the explanation |
+| Acceptance authority unknown | `ACCEPTANCE_COMMIT_UNCERTAIN` (existing; no rollback claimed) |
+
+**Decision for review:** representing "the selected state is not re-established" as a DAW-scope `RollbackReceipt` with status `UNCERTAIN`. The alternative is a new `RollbackStatus.NOT_PERFORMED`, which would change a pinned enum. I recommend `UNCERTAIN`: it is truthful (the restoration is not established) and needs no enum change.
+
+### Pause-time accounting
+
+- **Elapsed budget** (`max_elapsed_seconds`): controller time only, the sum of clock segments (C2). The operator pause is never charged.
+- **Pause duration:** recorded in `DawContinuationStarted` from UTC times, for the report only. It is not a budget, and no pause limit exists in this increment (open question).
+- **Cancellation** is read from the continuation's clock as usual.
+
+### Tests (written first; real adapters, simulated FL host, temporary WAV files)
+
+**Collaborators:**
+- **FL and export:** the real FL runtime protocol, exchange, journal and controller against device script v2 on the fake host; the real `FileExportHandoff`.
+- **Analysis and integrity:** the real `FileAudioAnalyzer` and the real `FileStateIntegrityInspector` over temporary synthetic WAVs (unit-test data only). The baseline files are written by the test, with their hashes in the initial state.
+- **Operator export:** simulated by the test, which writes the stereo PCM_24 output WAVs into the prepared workspace with chosen levels, plus a manifest.
+- **Doubles:** labelled doubles for decisions and diagnosis only.
+
+**Scenarios:**
+1. **Accept:** the candidate meets the target. The run finishes `CANDIDATE_CRITERIA_MET`, `ACCEPTED_EDITS_RETAINED`, with the receipt superseding exactly the replaced IDs. The accepted state's DAW parameter state holds the anchored reading, and the stem, mix and root bindings point at the exports.
+2. **Iterate:** an intermediate improvement is accepted, then a second write suspends again in the same process.
+3. **Rejected by verification:** `REQUIRED_RECOVERY_NOT_PERFORMED`, `UNKNOWN`, with the attempt `UNRESOLVED` and an `UNCERTAIN` DAW-scope rollback. No VERIFIED or complete-state rollback, and no restore sent.
+4. **Inconclusive verification and candidate-analysis failure:** the same safe termination.
+5. **File rejection:** a stray file, a hash mismatch, and a mono file declared stereo, each giving `EXPORT_IMPORT_REJECTED`, `UNKNOWN`.
+6. **Continuity:** the fader moved during the pause, and a ledger entry appended during the pause, each giving `DAW_CONTINUITY_FAILED` with the FL journal unchanged.
+7. **Duplicates:** the same manifest again gives `ALREADY_CONTINUED`; another manifest gives `MANIFEST_CONFLICT`; a continuation interrupted by an exception, then retried, gives `CONTINUATION_IN_PROGRESS`. In every case no further FL or file call is made.
+8. **Pause accounting:** a monotonic jump far beyond `max_elapsed_seconds` during the pause does not hit the limit, and the elapsed time after resumption is the sum of the segments. The pause is recorded from UTC.
+9. **Exceptions during the continuation:** in the import, the analysis and the acceptance commit, each keeps `REQUIRED_RECOVERY_NOT_PERFORMED`, with the original exception re-raised.
+10. **Channel profile:** a session against a baseline with another render spec, rate, start or frame count is refused before any write with `INCOMPATIBLE_AUDIO`. A stereo end-to-end run passes, and no fold-down appears anywhere.
+11. **Offline unchanged:** the full existing coordinator suite passes unchanged after the C6 split. A pin checks that the offline trace order is identical for a fixed scenario.
+
+**Mutation probes**, each reverted byte-identically:
+- skip either continuity snapshot;
+- accept a duplicate continuation;
+- charge the pause to the elapsed budget;
+- promote with the offline root key;
+- route a DAW rejection through `restore_after_rejection`;
+- claim VERIFIED rollback;
+- relax the preflight metadata equality.
+
+### Open questions for review
+
+1. **Rollback representation:** an `UNCERTAIN` DAW-scope receipt (recommended) or a new `NOT_PERFORMED` status.
+2. **Pause limit:** whether the operator pause needs a reported limit.
+3. **Corrected manifests:** whether a file-level rejection should allow a corrected manifest instead of ending the run. The plan says no until recovery exists.
+4. **Faithful replay of a decided continuation:** returning the original `RunReport` needs durable storage (Increment 5). In-process, the duplicate is refused with `ALREADY_CONTINUED` and a reference to the recorded terminal event.
+
+### Increment 3 plan, amendment A (owner review, 2026-11-19; still not started)
+
+This amendment supersedes three parts of the plan above:
+- **C5's codes** (`CONTINUATION_INTERRUPTED` is added);
+- **C8** (a dedicated DAW acceptance path replaces parameterizing `accept`);
+- **the acceptance and integrity rows of the failure table, plus step 1 and scenarios 7 and 9.**
+
+Everything else stands.
+
+#### A1. Acceptance uncertainty is separate from recovery failure
+
+**Finding in today's code.**
+- **Commit exceptions:** `acceptance_flow.accept` calls `journal.commit(event)` with the authority still marked known. An exception there propagates to `_run`, which would record the post-write `REQUIRED_RECOVERY_NOT_PERFORMED` marker. Yet the commit may already have happened.
+- **Absent acceptance:** offline reconciliation turns a confirmed-absent acceptance into `VERIFIED_PREVIOUS_STATE`, setting `restored_last`, so the final state reads `RESTORED_TO_LAST_ACCEPTED`. That is false for a DAW candidate, whose fader is still moved.
+- **Correction:** the plan above listed "post-commit integrity failure" under recovery. It belongs to acceptance authority instead; superseded below.
+
+**Decision: a dedicated `accept_daw` and `reconcile_daw_acceptance`** (in `core.loop.daw_execution` or a sibling DAW module). The offline `accept`, `reconcile_unknown` and `failed_attempt` stay byte-identical; superseding C8's parameterization.
+
+`RuntimeProgress.pending_effect` gains `ACCEPTANCE_COMMIT_UNCERTAIN` as a permitted value.
+
+| Phase | Before it | Outcome |
+| --- | --- | --- |
+| Pre-commit: cancellation or time, acceptance-ID failure, acceptance-event recording failure, cancellation after recording | the candidate is not accepted and the fader is moved | DAW unaccepted handler: `REQUIRED_RECOVERY_NOT_PERFORMED`, attempt `UNRESOLVED` with an `UNCERTAIN` DAW-scope rollback receipt |
+| **Commit dispatch** | **immediately before `journal.commit`:** `authority_known=False`, `verified=None`, `pending_effect=ACCEPTANCE_COMMIT_UNCERTAIN` | see the rows below |
+| `commit` raises | the authority stays unknown | `_run` finalizes with `ACCEPTANCE_COMMIT_UNCERTAIN` (already preserved on a lost terminal append) and re-raises the original exception. Final state `UNKNOWN`; nothing restored or cleared. |
+| `AcceptanceCommitted` | **acceptance established:** commits appended, `authority_known=True`, `pending_effect=None`, then DAW promotion (C7) setting `accepted` and `verified` to the new reference | `finish_acceptance` as today. **Every later failure preserves the accepted authority:** a recording failure gives `RECORDING_FAILED` with `ACCEPTED_EDITS_RETAINED`, and an unexpected exception gives `RUNTIME_CONTRACT_FAILED`, also with the edit retained. Neither ever routes to the unaccepted handler. |
+| `AcceptanceNotCommitted` (a definitive refusal) | `authority_known=True` (the previous reference), `pending_effect=REQUIRED_RECOVERY_NOT_PERFORMED` | DAW unaccepted handler: `REQUIRED_RECOVERY_NOT_PERFORMED` |
+| `AcceptanceCommitUnknown` or an invalid response | the authority stays unknown | `reconcile_daw_acceptance`: one authority query (`QUERY_ACCEPTANCE`, charged as today) |
+| query answer `AcceptanceFound` | **acceptance established:** `accepted` is the found reference, `authority_known=True`, commits updated, `pending_effect=None` | integrity inspection of the found state, as today. `CONFIRMED_ACCEPTANCE` leads to DAW promotion, then the route. `ACCEPTED_STATE_FAILED` or `UNCERTAIN` give the existing accepted-state reasons, with the found reference kept as authoritative: never the unaccepted handler, never recovery. |
+| query answer `AcceptanceAbsent` | `authority_known=True` (the previous reference); **no** `restored_last` and no verified reference, because the fader is not restored | DAW unaccepted handler: `REQUIRED_RECOVERY_NOT_PERFORMED`. No integrity-based restoration claim. |
+| query answer `AcceptanceAuthorityUnknown`, the query not performed (budget, time, recording), or an exception before the answer | the authority stays unknown | `ACCEPTANCE_COMMIT_UNCERTAIN` |
+
+**Offline path.** It has the same latent commit-exception issue: an exception from `commit` is recorded as `RUNTIME_CONTRACT_FAILED` with the authority still known. It is left unchanged here to preserve offline behaviour, and is proposed as a separate follow-up.
+
+**Tests added (written first):**
+- **The commit succeeds, then raises:** a journal stand-in commits to the real journal and then raises. The terminal reason is `ACCEPTANCE_COMMIT_UNCERTAIN`, the authoritative and verified references are `None`, and the final state is `UNKNOWN`. The real journal's acceptance history holds the commit, the original exception propagates, and no restore is sent.
+- **Unknown commit responses:**
+  - `AcceptanceCommitUnknown` after a real write, then the query finds it: DAW promotion, `CANDIDATE_CRITERIA_MET`, `ACCEPTED_EDITS_RETAINED`, with the bindings pointing at the exports;
+  - before the write, so the query reports absent: `REQUIRED_RECOVERY_NOT_PERFORMED`, `UNKNOWN`, never `RESTORED_TO_LAST_ACCEPTED`;
+  - the query answers unknown: `ACCEPTANCE_COMMIT_UNCERTAIN`.
+- **Failure after an acknowledged acceptance:**
+  - recording `AcceptanceCommitted` is refused: `RECORDING_FAILED`, `ACCEPTED_EDITS_RETAINED`, verified equal to the accepted reference;
+  - an exception while recording the accepted attempt's feedback: `RUNTIME_CONTRACT_FAILED`, the edit retained, no `REQUIRED_RECOVERY_NOT_PERFORMED`;
+  - the found state fails integrity after reconciliation: `ACCEPTED_STATE_INTEGRITY_FAILED`, with the found reference authoritative.
+- **Pre-commit failure:** cancellation before the commit gives `REQUIRED_RECOVERY_NOT_PERFORMED`, with no acceptance in the journal.
+
+#### A2. Duplicate continuations when a continuation reaches another suspension
+
+**Completion evidence.** A new trace payload, `DawContinuationFinished(run_id, started_event_id, export_id, disposition)`, with disposition `ACCEPTED` or `ENDED`. It is recorded exactly once per continuation:
+- **Accepted:** after `finish_acceptance` is acknowledged, and before any next decision round. A later write and suspension of a new export therefore always follow it.
+- **Ended:** as the last event before the terminal snapshot, when the continuation ends the run.
+
+**A continuation counts as complete when** its `DawContinuationStarted` is followed by any of:
+- its `DawContinuationFinished`;
+- a terminal snapshot (covering an exception that skipped the marker but not finalization);
+- a later `DawCorrectionSuspended` (defensive: unreachable when the marker is recorded first, but still sufficient).
+
+**Admission rules (superseding step 1)**, decided from the journal snapshot taken under the lock. For the requested `export_id`:
+
+| Trace state | Result |
+| --- | --- |
+| The checkpoint of this export is the trace's last event | continue |
+| A `DawContinuationStarted` for this export with the same manifest, and the continuation is complete | `ALREADY_CONTINUED`. The refusal names the completion evidence's event ID, and the run's later state (suspended again, or terminated). |
+| The same, with a different manifest | `MANIFEST_CONFLICT`, whether complete or not |
+| Started, same manifest, not complete, and the lock was acquired | `CONTINUATION_INTERRUPTED` (new code): an earlier continuation stopped without completion evidence, for example because finalization also failed. Refused; recovery of such a run needs Increment 5. |
+| The per-run lock is held by another call | `CONTINUATION_IN_PROGRESS` |
+| The checkpoint is not in the trace | `NOT_SUSPENDED` |
+
+**Per-run exclusive lock.**
+- **New port:** `core.ports.run_journal.RunLock`, with `try_acquire(run_id) -> bool` and `release(run_id)`.
+- **In-process adapter:** `adapters.journal.run_memory.InMemoryRunLock`, with one non-reentrant `threading.Lock` per run ID. It is NON_DURABLE, like the journal; a durable journal supplies its own exclusive lock in Increment 5.
+- **Scope:** `resume_daw` acquires the lock before reading the snapshot for admission and holds it through admission and the whole execution. That includes any next write and suspension, and finalization. It is released in a `finally`, so admission and execution can never interleave with another continuation.
+- **Refusal:** when the lock is not acquired, the result is `CONTINUATION_IN_PROGRESS`, before any read that could admit.
+- **Scope of the lock:** `run_daw` does not take it, because a run's first segment has no continuation to race with.
+
+**Tests added (written first):**
+1. A continuation accepts the candidate, then suspends at the next export: one `DawContinuationFinished(ACCEPTED)` precedes the second checkpoint.
+   - a duplicate of the first continuation with the same manifest gives `ALREADY_CONTINUED`, citing the finished marker;
+   - with another manifest, it gives `MANIFEST_CONFLICT`;
+   - neither makes an FL, file, analysis or journal-append call.
+   - The continuation of the second export is then admitted normally.
+2. A continuation that ends the run: its duplicate gives `ALREADY_CONTINUED`, citing the `ENDED` marker. Separately, a run whose marker append was refused and whose terminal snapshot exists also gives `ALREADY_CONTINUED`, citing the terminal snapshot.
+3. A continuation with `DawContinuationStarted` but no completion evidence, built by a journal stand-in refusing every append after the start, including the terminal one: `CONTINUATION_INTERRUPTED`.
+4. A second `resume_daw` issued from inside a collaborator call of the first, while the lock is held: `CONTINUATION_IN_PROGRESS`, with no read or dispatch. After the first returns, the lock is free.
+5. `InMemoryRunLock` unit tests: exclusivity per run ID, independence across run IDs, release after an exception, and refusal of a release without ownership.
+
+**Superseded scenarios.** Scenario 7's "interrupted by an exception then retried gives `CONTINUATION_IN_PROGRESS`" is replaced by A2 tests 2 and 3: finalization after an exception is completion evidence. Scenario 9 is extended by A1: an exception from the commit gives `ACCEPTANCE_COMMIT_UNCERTAIN`, not `REQUIRED_RECOVERY_NOT_PERFORMED`.
+
+**Additional mutation probes:**
+- leave the authority known while committing;
+- treat confirmed-absent as a restoration;
+- route a post-acceptance failure to the unaccepted handler;
+- skip the `DawContinuationFinished` marker;
+- read the snapshot before taking the lock;
+- release the lock before execution.
+
+## Increment 3 outcome (2026-11-19, tests-first; uncommitted for review)
+
+Implemented as planned with amendment A and the approval's constraints, recorded in [ADR-037](../../decisions/0037-coordinator-daw-continuation.md) (Proposed).
+- **Accepted authority before promotion:** on `AcceptanceCommitted`, or a validated `AcceptanceFound`, the new reference is selected before promotion, recording or other fallible work, and `verified` stays `None` until established.
+- **One lock authority per run:** a per-run-ID registry in the in-memory adapter, shared by every journal instance of that run.
+- **Rollback wording:** the `UNCERTAIN` DAW-scope rollback receipt carries "recovery not attempted".
+
+**Deviations:**
+- **C6, the shared tail:** not a split of the offline `verify_candidate`. The DAW tail lives in `core.loop.daw_continuation`, keeping the offline path byte-identical.
+- **A contract found during implementation:** `FileExportHandoff` was bound to one before state, so a run could not prepare its second export. The adapter now accepts a driver-supplied state `inventory`. The port is unchanged.
+- **Found-state inspection:** reconciling a found acceptance binds the candidate exports' root keys (location facts, not authority) before the integrity inspection.
+- **No reconciliation record:** reconciliation records no `ReconciliationResult` for DAW, because the offline `reconcile_acceptance` validates with the offline derivation. The authority answer and the integrity report are recorded as operation observations.
+- **Increment 2 test fixture:** its session named a render spec its baselines did not have. It now uses the baselines' own, as the stricter preflight requires.
+
+**Tests:**
+- **Continuation** (`tests/unit/test_daw_continuation.py`, 27 tests):
+  - accept; iterate to a second suspension, with duplicate and conflict refusals afterwards;
+  - rejected and inconclusive candidates;
+  - three file rejections;
+  - continuity breaks: a fader moved during the pause, only during the import, or back during the import, and a ledger entry during the pause;
+  - pause accounting;
+  - commit succeeds then raises;
+  - unknown commits: found, absent and unknown;
+  - refused recording after an acknowledged acceptance, and an exception during promotion;
+  - interrupted, concurrent and foreign continuations;
+  - the one-authority lock;
+  - an exception during the import;
+  - export-settings refusal before any write;
+  - the export-root promotion.
+- **Handoff:** two inventory tests.
+
+**Mutation probes:** 14 new, each reverted byte-identically and caught. One survived first (an inventory state that is not the request's) and was caught after the adapter regression was added. All earlier sets are still caught.
+
+### Increment 3 review fixes (2026-11-19)
+
+1. **A found acceptance was established only after recording it.** In `reconcile_daw_acceptance`, `observed()` ran before `_established()`. Codex reproduced a valid `AcceptanceFound` followed by an exception appending its observation: the journal held the acceptance, but the terminal record reported unknown authority.
+   - **Fix:** the answer is validated against the submitted event and its reference established before it is recorded. A confirmed-absent answer sets the recovery-required marker first.
+   - **Regressions:** an exception while recording a found answer keeps the found reference authoritative. An exception while recording an absent answer keeps `REQUIRED_RECOVERY_NOT_PERFORMED`, with the previous reference.
+2. **Resume did not bind the supplied request to the recorded one.** Only the run ID and initial state were checked. A changed write budget went through import, analysis and commit, and was refused only when the final report was built.
+   - **Fix:** `admit_continuation` requires the supplied `RunRequest` to equal the trace's recorded one exactly, returning `REQUEST_MISMATCH` before anything is appended or dispatched.
+   - **Order of checks:** a trace without the checkpoint is still `NOT_SUSPENDED`.
+   - **Regressions:** substituted budget, criteria and DAW-session settings are each refused with no FL call, import or append, and the recorded request then still continues.
+
+**Mutation probes.** Two new, both caught: recording the answer before establishing it, and dropping the recorded-request check. All earlier sets are still caught.

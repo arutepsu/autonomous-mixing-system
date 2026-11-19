@@ -22,6 +22,16 @@ from autonomous_mixing.core.records.run_trace import (
     TraceNotAppended,
 )
 
+# Increment 3 (amendment A2): one exclusive-ownership authority per run ID in this process, shared by every journal
+# instance of that run, so a caller cannot bypass exclusion by constructing another instance. NON_DURABLE.
+_REGISTRY_LOCK = threading.Lock()
+_RUN_LOCKS: dict[RunId, threading.Lock] = {}
+
+
+def _run_lock(run_id: RunId) -> threading.Lock:
+    with _REGISTRY_LOCK:
+        return _RUN_LOCKS.setdefault(run_id, threading.Lock())
+
 
 class InMemoryRunJournal:
     """Store consistent trace and acceptance prefixes for one controlled run.
@@ -42,6 +52,16 @@ class InMemoryRunJournal:
     @property
     def run_id(self) -> RunId:
         return self._acceptance.run_id
+
+    def try_acquire_exclusive(self) -> bool:
+        """Take this run's exclusive ownership without blocking (``RunExclusion``); False if already held."""
+        return _run_lock(self.run_id).acquire(blocking=False)
+
+    def release_exclusive(self) -> None:
+        lock = _run_lock(self.run_id)
+        if not lock.locked():
+            raise ValueError("the run's exclusive ownership is not held")
+        lock.release()
 
     @property
     def initial(self) -> AcceptedReference:

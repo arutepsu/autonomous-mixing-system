@@ -17,7 +17,7 @@ from autonomous_mixing.core.records.diagnosis import DiagnosisReport
 from autonomous_mixing.core.records.feedback import DecisionFeedback
 from autonomous_mixing.core.records.identifiers import ArtifactId, AttemptId, DecisionCallId, ExecutionId, Revision
 from autonomous_mixing.core.records.integrity import ArtifactRootBinding
-from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of
+from autonomous_mixing.core.records.invariants import require_finite, require_instance, require_text, require_tuple_of
 from autonomous_mixing.core.records.project import ProjectState
 from autonomous_mixing.core.records.rendering import RenderPlan
 from autonomous_mixing.core.records.run_trace import RunTraceEvent
@@ -34,6 +34,7 @@ _PENDING_EFFECT_REASONS = frozenset({
     TerminationReason.DAW_COMMAND_UNRESOLVED,
     TerminationReason.DAW_CONVERSION_BLOCKED,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+    TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN,  # Increment 3 (A1): set immediately before a DAW commit
 })  # fmt: skip
 
 
@@ -60,6 +61,10 @@ class RuntimeProgress:
     observations: tuple[StateEvidence, ...]
     diagnosed: tuple[Revision, DiagnosisReport] | None
     pending_effect: TerminationReason | None = None  # ADR-036 review fix; trailing, so offline progress is unchanged
+    # Increment 3 (C2): controller time before the current clock segment, and that segment's first reading. A
+    # resumed run starts a new segment, so the operator pause is never charged. Offline runs keep one segment.
+    elapsed_before: float = 0.0
+    segment_start: ClockReading | None = None
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -96,6 +101,10 @@ class RuntimeProgress:
                 raise ValueError("RuntimeProgress.diagnosed must be a revision/report pair")
             require_instance(self.diagnosed[0], Revision, "RuntimeProgress.diagnosed revision")
             require_instance(self.diagnosed[1], DiagnosisReport, "RuntimeProgress.diagnosed report")
+        if require_finite(self.elapsed_before, "RuntimeProgress.elapsed_before") < 0:
+            raise ValueError("RuntimeProgress.elapsed_before must be non-negative")
+        if self.segment_start is not None:
+            require_instance(self.segment_start, ClockReading, "RuntimeProgress.segment_start")
         if self.pending_effect is not None and self.pending_effect not in _PENDING_EFFECT_REASONS:
             raise ValueError("RuntimeProgress.pending_effect must name a DAW effect that is not recovered")
 

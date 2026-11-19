@@ -17,6 +17,7 @@ the selected state's DAW parameter state.
 
 from datetime import datetime
 
+from autonomous_mixing.core.records.acceptance import AcceptanceEvent
 from autonomous_mixing.core.records.actions import (
     ExecutionReceipt,
     ExecutionStatus,
@@ -35,6 +36,7 @@ from autonomous_mixing.core.records.project import (
     ProjectSnapshot,
     ProjectState,
 )
+from autonomous_mixing.core.verification.assessment import assess_verification
 
 
 def _check_context(previous: ProjectState, verified: DawImportVerified, apply: DawApplyRequest) -> None:
@@ -141,3 +143,22 @@ def derive_daw_candidate_state(
         for track in previous.daw.tracks
     )
     return ProjectState(snapshot, processing, audio, DawParameterState(previous.project_id, revision, tracks))
+
+
+def validate_daw_acceptance_event(event: AcceptanceEvent, verified: DawImportVerified, apply: DawApplyRequest) -> None:
+    """The DAW counterpart of ``validate_acceptance_event``: the candidate and verdict follow from the evidence.
+
+    Re-derives the receipt and the candidate from the expected state, the verified import and the journaled apply, with
+    the candidate's own checkpoint ID and capture time, and recomputes the verification. All must equal the recorded
+    ones exactly; otherwise ``ValueError``. The offline validator refuses DAW states and is not used for them.
+    """
+    require_instance(event, AcceptanceEvent, "event")
+    previous, candidate = event.expected.state, event.assessment.assessed.state
+    if event.execution != daw_execution_receipt(previous, verified, apply):
+        raise ValueError("the acceptance event's receipt does not follow from the verified import")
+    derived = derive_daw_candidate_state(previous, verified, apply, candidate.audio.checkpoint_id,
+                                         candidate.snapshot.captured_at)  # fmt: skip
+    if derived != candidate:
+        raise ValueError(f"assessed candidate {candidate.revision} does not follow from the verified import")
+    if assess_verification(event.assessment) != event.verification:
+        raise ValueError("the recorded verification differs from the recomputed result")

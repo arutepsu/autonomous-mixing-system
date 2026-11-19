@@ -62,7 +62,7 @@ from autonomous_mixing.core.records.actions import (
     daw_rollback_evidence_problem,
     validate_rollback_references,
 )
-from autonomous_mixing.core.records.admission import PreflightCode, PreflightRejected, TrackGainPermission
+from autonomous_mixing.core.records.admission import PreflightCode, PreflightRejected, StemBinding, TrackGainPermission
 from autonomous_mixing.core.records.artifacts import ArtifactKind
 from autonomous_mixing.core.records.budgets import (
     BudgetBlock,
@@ -107,6 +107,7 @@ from autonomous_mixing.core.records.identifiers import (
     TrackId,
     VersionRef,
 )
+from autonomous_mixing.core.records.integrity import ArtifactRootBinding
 from autonomous_mixing.core.records.project import ArtifactCheckpoint, DawParameterState, DawTrackParameter
 from autonomous_mixing.core.records.rendering import ExecutionWorkspace
 from autonomous_mixing.core.records.run import RunState
@@ -547,10 +548,14 @@ def test_daw_dispatch_intents_and_observations_are_typed():
 WRITE = DawWriteConfirmed("apply_root_0001", BASE, READING, READING.normalized, READING.db - BASE.db, False)
 
 
+STEMS = tuple(StemBinding(track, ArtifactId(aid)) for track, aid in ((T1, "s1"), (T2, "s2"), (T3, "s3")))
+ROOTS = tuple(ArtifactRootBinding(ArtifactId(aid), "inputs") for aid in ("s1", "s2", "s3", "m1"))
+
+
 def checkpoint(**changes):
     base = DawCorrectionSuspended(RunId("run-1"), DecisionCallId("call-1"), decision(), AttemptId("at-1"), daw_state(),
                                   plan(), AcceptedReference(daw_state(), 0), frozenset({"token-1"}), (), (), APPLY,
-                                  WRITE, awaiting(), UTC)  # fmt: skip
+                                  WRITE, awaiting(), UTC, STEMS, ArtifactId("m1"), ROOTS)  # fmt: skip
     return replace(base, **changes)
 
 
@@ -580,6 +585,10 @@ def test_a_suspension_checkpoint_binds_the_confirmed_write_its_anchor_and_the_aw
         {"plan": plan(timeline=DawExportTimeline(0.5, 44100, 8))},
         {"plan": plan(format=DawExportFormat("WAV", "PCM_16"))},
         {"plan": plan(render_spec=VersionRef("fl-export", "2"))},
+        # Increment 3 (C1): the selection fields must select the before state's current audio
+        {"stems": (StemBinding(T1, ArtifactId("m1")),)},
+        {"mix_id": ArtifactId("s1")},
+        {"roots": ROOTS[:3]},
     ],
 )
 def test_suspension_checkpoint_invariants(changes):

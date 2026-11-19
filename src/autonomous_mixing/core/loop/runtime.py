@@ -63,12 +63,15 @@ def checkpoint(
         return (progress, (TerminationReason.RUNTIME_CONTRACT_FAILED, "the run clock's monotonic reading decreased"))
     progress = replace(progress, last=reading)
     on_progress(progress)
-    progress = replace(
-        progress,
-        usage=replace(progress.usage, elapsed_seconds=reading.monotonic_seconds - progress.first.monotonic_seconds),
-    )
+    progress = replace(progress, usage=replace(progress.usage, elapsed_seconds=elapsed_at(progress, reading)))
     on_progress(progress)
     return (progress, None)
+
+
+def elapsed_at(progress: RuntimeProgress, reading: ClockReading) -> float:
+    """Controller time at ``reading``: earlier segments plus this segment (Increment 3, C2; the pause is excluded)."""
+    start = progress.segment_start or progress.first
+    return progress.elapsed_before + (reading.monotonic_seconds - start.monotonic_seconds)
 
 
 def fresh(

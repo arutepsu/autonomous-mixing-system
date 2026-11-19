@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
@@ -69,7 +70,7 @@ from autonomous_mixing.core.records.daw_export import (
     daw_file_name_key,
 )
 from autonomous_mixing.core.records.invariants import require_instance
-from autonomous_mixing.core.records.project import ProjectState
+from autonomous_mixing.core.records.project import ArtifactCheckpoint, ProjectState
 
 _Code = DawImportRejectionCode
 _INTEGRITY_CODES = {
@@ -136,27 +137,56 @@ class FileExportHandoff:
 
     ``state`` is the before state of the export: its audio membership must equal each request's before checkpoint.
     The caller owns the inventory's completeness (as for rendering workspaces); nothing here deletes or cleans up.
+
+    Coordinator Increment 3: instead of one fixed ``state`` and ``protected_locations``, a driver may supply
+    ``inventory``, a lookup from a before checkpoint to that state and its protected locations (``None`` if unknown).
+    A run that accepts a candidate and exports again then prepares against the accepted state. The lookup is driver
+    wiring; this adapter still requires the returned state's audio to equal the request's before checkpoint.
     """
 
     def __init__(
         self,
         *,
         root: WorkspaceRoot,
-        state: ProjectState,
-        protected_locations: tuple[ResolvedArtifactLocation, ...],
         limits: AudioReadLimits,
+        state: ProjectState | None = None,
+        protected_locations: tuple[ResolvedArtifactLocation, ...] | None = None,
+        inventory: Callable[[ArtifactCheckpoint], tuple[ProjectState, tuple[ResolvedArtifactLocation, ...]] | None]
+        | None = None,
     ):
         require_instance(root, WorkspaceRoot, "root")
-        require_instance(state, ProjectState, "state")
         require_instance(limits, AudioReadLimits, "limits")
+        if (inventory is None) == (state is None):
+            raise ValueError("supply either a fixed state with its protected locations, or an inventory lookup")
+        if state is not None:
+            require_instance(state, ProjectState, "state")
+            self._check_protected(protected_locations)
+            fixed = (state, protected_locations)
+            inventory = lambda checkpoint: fixed if checkpoint == state.audio else None  # noqa: E731
+        elif not callable(inventory) or protected_locations is not None:
+            raise ValueError("inventory must be callable and comes without separate protected_locations")
+        self._root, self._inventory, self._limits = root, inventory, limits
+
+    @staticmethod
+    def _check_protected(protected_locations) -> None:
         if not isinstance(protected_locations, tuple) or not all(
             isinstance(item, ResolvedArtifactLocation) for item in protected_locations
         ):
             raise ValueError("protected_locations must be a tuple of ResolvedArtifactLocation")
-        self._root, self._state, self._protected, self._limits = root, state, protected_locations, limits
 
-    def _allocation_request(self, request: DawExportRequest) -> WorkspaceAllocationRequest:
-        return WorkspaceAllocationRequest(request.workspace, self._root, self._state, self._protected)
+    def _context(self, request: DawExportRequest):
+        """The before state and protected locations for ``request``, or None when the inventory does not know it."""
+        found = self._inventory(request.before_checkpoint)
+        if found is None:
+            return None
+        state, protected = found
+        require_instance(state, ProjectState, "inventory state")
+        self._check_protected(protected)
+        return (state, protected) if state.audio == request.before_checkpoint else None
+
+    def _allocation_request(self, request: DawExportRequest, context) -> WorkspaceAllocationRequest:
+        state, protected = context
+        return WorkspaceAllocationRequest(request.workspace, self._root, state, protected)
 
     # --- preparation -----------------------------------------------------------------------------------------------
 
@@ -166,11 +196,12 @@ class FileExportHandoff:
         def failure(code, message):
             return DawExportPreparationFailure(request.export_id, code, message)
 
-        if self._state.audio != request.before_checkpoint:
+        context = self._context(request)
+        if context is None:
             return failure(DawExportPreparationCode.REQUEST_STATE_MISMATCH,
-                           "the configured state's audio is not the request's before checkpoint")  # fmt: skip
+                           "no configured state has the request's before checkpoint")  # fmt: skip
         try:
-            allocated = allocate_workspace(self._allocation_request(request))
+            allocated = allocate_workspace(self._allocation_request(request, context))
         except WorkspaceAllocationError as error:
             code = (
                 DawExportPreparationCode.WORKSPACE_OVERLAPS_PROTECTED
@@ -216,9 +247,10 @@ class FileExportHandoff:
     def _import(self, request: DawImportRequest) -> DawFilesVerified:
         awaiting, manifest = request.awaiting, request.manifest
         export = awaiting.request
-        if self._state.audio != export.before_checkpoint:
-            raise _Rejected(_Code.REQUEST_MISMATCH, "the configured state is not the request's before state")
-        directory = self._check_workspace(awaiting)
+        context = self._context(export)
+        if context is None:
+            raise _Rejected(_Code.REQUEST_MISMATCH, "no configured state has the request's before checkpoint")
+        directory = self._check_workspace(awaiting, context)
         request_status = self._check_request_file(awaiting, directory / DAW_EXPORT_REQUEST_FILE)
         listed = self._check_manifest(awaiting, manifest)
         self._check_listing(export, directory)
@@ -236,8 +268,8 @@ class FileExportHandoff:
             raise _Rejected(_Code.WORKSPACE_CHANGED, "the workspace changed during the import")
         return DawFilesVerified(request, evidence)
 
-    def _check_workspace(self, awaiting: DawExportAwaiting) -> Path:
-        allocated = AllocatedWorkspace(self._allocation_request(awaiting.request), awaiting.resolved_root,
+    def _check_workspace(self, awaiting: DawExportAwaiting, context) -> Path:
+        allocated = AllocatedWorkspace(self._allocation_request(awaiting.request, context), awaiting.resolved_root,
                                        awaiting.workspace_directory)  # fmt: skip
         try:
             validate_allocated_workspace(allocated)

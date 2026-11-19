@@ -319,7 +319,8 @@ def execute_daw(
         checkpoint = DawCorrectionSuspended(progress.request.run_id, ctx.call_id, ctx.decision, ctx.attempt_id, state,
                                             plan, progress.accepted, progress.tokens, progress.history,
                                             progress.observations, request, written, prepared,
-                                            progress.last.utc)  # fmt: skip
+                                            progress.last.utc, progress.stems, progress.mix_id,
+                                            progress.roots)  # fmt: skip
     except ValueError as error:
         return after_write(progress, f"the suspension checkpoint is inconsistent ({error})")
     progress, stop = record(progress, checkpoint, **rec)

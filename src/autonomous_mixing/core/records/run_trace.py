@@ -37,7 +37,13 @@ from autonomous_mixing.core.records.daw_control import (
     DawWriteRefused,
     DawWriteUncertain,
 )
-from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended, DawPlanReady, DawStateQuery
+from autonomous_mixing.core.records.daw_correction import (
+    DawContinuationFinished,
+    DawContinuationStarted,
+    DawCorrectionSuspended,
+    DawPlanReady,
+    DawStateQuery,
+)
 from autonomous_mixing.core.records.daw_export import (
     DawContinuitySnapshot,
     DawExportAwaiting,
@@ -46,6 +52,7 @@ from autonomous_mixing.core.records.daw_export import (
     DawFilesVerified,
     DawImportRejected,
     DawImportRequest,
+    DawImportVerified,
     DawStateAnchor,
 )
 from autonomous_mixing.core.records.daw_recovery import (
@@ -379,6 +386,11 @@ RunTracePayload = (
     | DawApplyPermitted
     | DawNoWrite
     | DawApplyRejected
+    # Increment 3 (ADR-037): the continuation, its assessment and its completion evidence
+    | DawContinuationStarted
+    | DawImportVerified
+    | DawImportRejected
+    | DawContinuationFinished
 )
 
 
@@ -401,8 +413,10 @@ class RunTraceEvent:
         payload = self.payload
         run_id = None
         if isinstance(
-            payload, (RunRequest, DecisionFeedback, CorrectionAttempt, AcceptanceEvent, DawCorrectionSuspended)
-        ):
+            payload,
+            (RunRequest, DecisionFeedback, CorrectionAttempt, AcceptanceEvent, DawCorrectionSuspended,
+             DawContinuationStarted, DawContinuationFinished),
+        ):  # fmt: skip
             run_id = payload.run_id
         elif isinstance(payload, AcceptanceCommitted):
             run_id = payload.event.run_id

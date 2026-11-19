@@ -514,3 +514,24 @@ def test_the_requested_format_is_exact(setup):
     setup.prepare()
     setup.export(**{"bass.wav": {"subtype": "FLOAT"}})
     assert code_of(setup.import_files()) is Code.ENCODING
+
+
+# --- Increment 3: the state inventory -------------------------------------------------------------------------
+
+
+def test_an_inventory_state_that_is_not_the_requests_before_state_is_refused(setup):
+    other = ArtifactCheckpoint(CheckpointId("c2"), CHECKPOINT.project_id, CHECKPOINT.revision, CHECKPOINT.artifacts)
+    protected = tuple(resolve_artifact_location(a, root=str(setup.inputs)) for a in (S1, S2, S3, M1))
+    lying = FileExportHandoff(root=WorkspaceRoot(ROOT_KEY, str(setup.exports)), limits=LIMITS,
+                              inventory=lambda checkpoint: (state(other), protected))  # fmt: skip
+    result = lying.prepare(setup.request)
+    assert isinstance(result, DawExportPreparationFailure)
+    assert result.code is DawExportPreparationCode.REQUEST_STATE_MISMATCH and list(setup.exports.iterdir()) == []
+
+
+def test_the_handoff_takes_either_a_fixed_state_or_an_inventory(setup):
+    with pytest.raises(ValueError):
+        FileExportHandoff(root=WorkspaceRoot(ROOT_KEY, str(setup.exports)), limits=LIMITS)
+    with pytest.raises(ValueError):
+        FileExportHandoff(root=WorkspaceRoot(ROOT_KEY, str(setup.exports)), limits=LIMITS, state=state(),
+                          protected_locations=(), inventory=lambda checkpoint: None)  # fmt: skip

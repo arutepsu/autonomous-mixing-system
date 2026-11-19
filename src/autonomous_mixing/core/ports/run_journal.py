@@ -32,6 +32,19 @@ class RunJournal(AcceptanceJournal, Protocol):
     def snapshot(self) -> PortResult[RunJournalSnapshot]: ...
 
 
+class RunExclusion(Protocol):
+    """One shared exclusive-ownership authority per run (Increment 3, amendment A2).
+
+    The implementation owns the authority, keyed by run: callers cannot bypass it by supplying another lock
+    instance. ``try_acquire_exclusive`` never blocks; ``release_exclusive`` without ownership raises ``ValueError``.
+    A durable journal supplies a cross-process authority (Increment 5); the in-memory one is per process.
+    """
+
+    def try_acquire_exclusive(self) -> bool: ...
+
+    def release_exclusive(self) -> None: ...
+
+
 def validate_trace_append_response(event: RunTraceEvent, response: TraceAppendResult) -> None:
     require_instance(event, RunTraceEvent, "event")
     require_instance(response, (TraceAppended, TraceNotAppended, TraceAppendUnknown), "response")

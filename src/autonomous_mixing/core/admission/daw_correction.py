@@ -4,7 +4,9 @@ Pure. It reruns admission, checks the logical workspace and the new candidate id
 ``DawCorrectionPlan`` whose export outputs replace exactly the affected set of the target: the target's current stem,
 one current stem per declared dependent, and the single current master mix containing the target. A group containing
 the target, or a second mix containing it, is refused (ADR-035, G5). Each output is declared with the replaced
-artifact's channel count; an export with another count is refused at import (``DIMENSIONS``). File names are derived
+artifact's native channel count, and every replaced artifact must itself be an export with the session's render spec,
+rate, timeline start and frame count (``INCOMPATIBLE_AUDIO`` otherwise; Increment 3). An export with other dimensions
+is refused at import (``DIMENSIONS``). Nothing is folded down, resampled or requantized. File names are derived
 from output order only (``01-stem.wav`` ... ``NN-master.wav``), so arbitrary track identifiers never reach a file
 name. Passing permits no write: the capability gate still decides against a fresh inspection.
 """
@@ -80,6 +82,18 @@ def preflight_daw_correction(
         return reject(PreflightCode.UNSUPPORTED_DEPENDENCY, "no current master mix contains the target")
     # A group of the target, or a second mix containing it, is refused by the plan's coverage rule below.
     replaced = (*stems, mixes[0])
+    # Increment 3: native export channels are kept and nothing is converted, so every replaced artifact must itself
+    # be a native export with the session's settings; before, initial and candidate stay like-for-like.
+    timeline = session.export_timeline
+    for old in replaced:
+        if (old.render_spec, old.sample_rate_hz, old.timeline_start_seconds, old.frame_count) != (
+            session.render_spec,
+            timeline.sample_rate_hz,
+            timeline.start_seconds,
+            timeline.frame_count,
+        ):
+            return reject(PreflightCode.INCOMPATIBLE_AUDIO,
+                          f"{old.artifact_id} is not a native export with the session's export settings")  # fmt: skip
     outputs = tuple(
         DawExportOutput(new_id, old.artifact_id, old.kind, old.source_track_ids, old.channel_count,
                         f"{index:02d}-{'master' if old.kind is ArtifactKind.MIX else 'stem'}.wav")

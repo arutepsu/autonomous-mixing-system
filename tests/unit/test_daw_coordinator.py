@@ -25,7 +25,17 @@ from test_coordinator import (
     propose,
 )
 from test_fl_runtime_recovery_controller import DeviceTransport, World, live_curve
-from test_run_recording_contracts import P1, RATE, REQUIRED, SECONDS, STATE, T1, _configuration, _run_request
+from test_run_recording_contracts import (
+    P1,
+    RATE,
+    RENDER_REF,
+    REQUIRED,
+    SECONDS,
+    STATE,
+    T1,
+    _configuration,
+    _run_request,
+)
 
 import autonomous_mixing.core.loop.daw_execution as daw_execution
 from autonomous_mixing.adapters.audio_io.limits import AudioReadLimits
@@ -45,7 +55,7 @@ from autonomous_mixing.core.records.daw_control import DawApplyRejected, DawGate
 from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended, DawPlanReady, DawSessionConfig
 from autonomous_mixing.core.records.daw_export import DawExportFormat, DawExportTimeline
 from autonomous_mixing.core.records.feedback import ActionFeedback, ActionFeedbackDisposition, DecisionFeedback
-from autonomous_mixing.core.records.identifiers import Revision, VersionRef
+from autonomous_mixing.core.records.identifiers import Revision
 from autonomous_mixing.core.records.project import DawParameterState, DawTrackParameter
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode
 from autonomous_mixing.core.records.run import FinalProjectState
@@ -57,9 +67,16 @@ APPLY = make_request()
 BINDING, PROFILE = APPLY.resolution.state.binding, APPLY.profile
 DAW_STATE = replace(STATE, daw=DawParameterState(P1, Revision("r1"), (DawTrackParameter(BINDING, 2.0,
                                                                                          BINDING.baseline_fader),)))  # fmt: skip
-SESSION = DawSessionConfig(BINDING, PROFILE, TrackGainPermission(T1, -6.0, 0.0), routing(dependents=()),
-                           DawExportFormat("WAV", "PCM_24"), DawExportTimeline(0.0, RATE, RATE * SECONDS),
-                           VersionRef("fl-export", "1"), "daw-exports")  # fmt: skip
+SESSION = DawSessionConfig(
+    BINDING,
+    PROFILE,
+    TrackGainPermission(T1, -6.0, 0.0),
+    routing(dependents=()),
+    DawExportFormat("WAV", "PCM_24"),
+    DawExportTimeline(0.0, RATE, RATE * SECONDS),
+    RENDER_REF,
+    "daw-exports",
+)  # fmt: skip  (Increment 3: the baselines' own render spec)
 OK_CUT = 0.0  # application gain 0.0 dB: a 2 dB cut from the confirmed 2.0 dB, inside the calibrated window
 
 

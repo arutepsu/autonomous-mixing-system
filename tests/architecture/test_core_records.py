@@ -42,9 +42,11 @@ ALLOWED_RECORD_IMPORTS = {
         "daw_control",
         "daw_recovery",
     },
-    "daw_correction": {  # coordinator-integration Increment 1 (ADR-035)
+    "daw_correction": {  # coordinator-integration Increment 1 (ADR-035); integrity and artifacts: Increment 3
         "acceptance",
         "admission",
+        "artifacts",
+        "integrity",
         "daw_binding",
         "daw_control",
         "daw_export",
@@ -263,6 +265,11 @@ INVENTORY = {
         "DawStateQuery",
         "DawCorrectionSuspended",
         "DawPlanReady",  # coordinator Increment 2 (ADR-036)
+        "DawContinuationStarted",  # coordinator Increment 3 (ADR-037)
+        "DawContinuationDisposition",
+        "DawContinuationFinished",
+        "DawContinuationRefusalCode",
+        "DawContinuationRefused",
     ),
     "daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
         "DawCommandKind",

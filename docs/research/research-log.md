@@ -1861,3 +1861,29 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Regressions:** three, written first, all failing before the fix: an exception while recording a confirmed, an off-target and a refused reply.
   - **Mutation probes:** five marker probes, all caught, and all earlier sets still caught.
 - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 3: continuation to acceptance (Claude Code)
+- **Source.** The owner approved Increment 3 with amendment A, plus two constraints: accepted authority is selected before promotion, and one shared lock authority per run. **ADR-037** (Proposed) records it.
+- **Implemented:** `resume_daw` takes the run's exclusive ownership, then admits or refuses duplicates using explicit completion evidence.
+  - **The continuation:** coherent snapshots before and after the verified import; assessment; the DAW receipt and candidate; one candidate analysis with the real level analyzer on native stereo; the `ATTEMPT` verification; DAW acceptance.
+  - **Acceptance:** the authority is unknown during the commit; a committed or found reference is selected before promotion; confirmed-absent is never a restoration.
+  - **Unaccepted candidates** stop with "recovery not attempted": an `UNCERTAIN` DAW-scope receipt, `UNKNOWN` final state, nothing restored or cleared.
+  - **Pause:** recorded and never charged (clock segments).
+  - **Channels:** native export channels with exact baseline equality; the mono masking profile unchanged.
+- **Contract found during implementation:** the export handoff was bound to one before state; it now takes a driver-supplied state inventory.
+- **Evidence.**
+  - **Tests:** 27 continuation tests and 2 handoff tests, using real adapters on a fake FL host and synthetic WAVs.
+  - **Mutation probes:** 14 new, all caught; one survived first and was fixed. Earlier sets are still caught.
+  - None of this is live FL evidence.
+- **Locked checks.** Focused suites with warnings as errors, 1,871 passed; full suite 6,208 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 3: review fixes (Claude Code)
+- **Findings (Codex) and fixes, with regressions written first that failed before the fix:**
+  1. **A found acceptance was established only after its observation was recorded.** An append exception then reported unknown authority while the journal held the acceptance. The answer is now validated and established, or its absent marker set, before recording.
+  2. **`resume_daw` compared only the run ID and initial state with the journal.** A changed budget reached the commit. Admission now requires exact equality with the recorded `RunRequest` (`REQUEST_MISMATCH`) before any append or dispatch.
+- **ADR-037** (Proposed) is revised in place.
+- **Checks.**
+  - **Mutation probes:** two new, both caught; all earlier sets still caught.
+  - **Locked checks:** `uv run --locked pytest -q -W error` on the focused DAW, coordinator, loop, run-record and architecture suites, 1,876 passed. The full suite: 6,213 passed, 4 skipped. `ruff check .` and `ruff format --check src tests` clean, CLI help runs, `uv lock --check` and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.

@@ -40,6 +40,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [034](0034-bounded-operator-assisted-fl-studio-integration.md) | Bounded, operator-assisted FL Studio runtime integration (D15) | 2026-11-18 | Proposed; supersedes in part ADR-009 |
 | [035](0035-coordinator-daw-execution-path.md) | Coordinator DAW execution path: contracts (Increment 1) | 2026-11-19 | Proposed |
 | [036](0036-coordinator-daw-write-path-to-suspension.md) | Coordinator DAW write path up to the export suspension (Increment 2) | 2026-11-19 | Proposed |
+| [037](0037-coordinator-daw-continuation.md) | Coordinator DAW continuation: import, verification and acceptance (Increment 3) | 2026-11-19 | Proposed |
 
 ## Template
 

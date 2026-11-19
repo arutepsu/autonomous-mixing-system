@@ -11,6 +11,7 @@ from functools import partial
 
 from autonomous_mixing.core.loop.completion import finalize
 from autonomous_mixing.core.loop.correction import render
+from autonomous_mixing.core.loop.daw_continuation import admit_continuation, continue_daw
 from autonomous_mixing.core.loop.daw_execution import execute_daw
 from autonomous_mixing.core.loop.decision_round import decision_round
 from autonomous_mixing.core.loop.observation import (
@@ -34,6 +35,14 @@ from autonomous_mixing.core.records.acceptance import AcceptedReference
 from autonomous_mixing.core.records.budgets import BudgetUsage
 from autonomous_mixing.core.records.coordinator_progress import PreparedCorrection, RuntimeProgress, Stop
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading, RunRequest
+from autonomous_mixing.core.records.daw_correction import (
+    DawContinuationDisposition,
+    DawContinuationFinished,
+    DawContinuationRefusalCode,
+    DawContinuationRefused,
+    DawContinuationStarted,
+)
+from autonomous_mixing.core.records.daw_export import DawExportManifest
 from autonomous_mixing.core.records.identifiers import VerificationResultId
 from autonomous_mixing.core.records.integrity import IntegrityStatus
 from autonomous_mixing.core.records.invariants import require_instance
@@ -148,6 +157,22 @@ def ordinary(
                 )
         case _:
             raise ValueError(f"an INITIAL verification cannot take route {route.name}")
+    return _rounds(progress, clock=clock, decision_maker=decision_maker, diagnosis_source=diagnosis_source,
+                   identities=identities, journal=journal, execute=execute, on_progress=on_progress)  # fmt: skip
+
+
+def _rounds(
+    progress: RuntimeProgress,
+    *,
+    clock: RunClock,
+    decision_maker: DecisionMaker,
+    diagnosis_source: DiagnosisSource,
+    identities: IdentitySource,
+    journal: RunJournal,
+    execute: Callable,
+    on_progress: Callable[[RuntimeProgress], None],
+) -> tuple[RuntimeProgress, Stop | RunTraceEvent]:
+    """Decision rounds until a stop or a suspension; shared by a fresh run and a continuation (Increment 3)."""
     while True:
         progress, result = decision_round(
             progress,
@@ -162,7 +187,6 @@ def ordinary(
             progress, result = execute(progress, result, on_progress=on_progress)
         if result:
             return (progress, result)
-    return (progress, None)
 
 
 def run(
@@ -275,6 +299,17 @@ def _run(
         observations=(),
         diagnosed=None,
     )
+    step = partial(ordinary, analyzer=analyzer, clock=clock, decision_maker=decision_maker,
+                   diagnosis_source=diagnosis_source, identities=identities, integrity_inspector=integrity_inspector,
+                   journal=journal, execute=execute)  # fmt: skip
+    return _complete(progress, step, clock=clock, identities=identities, journal=journal)
+
+
+def _complete(
+    progress: RuntimeProgress, step: Callable, *, clock: RunClock, identities: IdentitySource, journal: RunJournal
+) -> RunReport | RunSuspended:
+    """Run ``step(progress, on_progress=...)`` and finish it: a suspension, a terminal report, or, for an unexpected
+    exception, one best-effort phase-aware terminal recording before the original exception propagates."""
     latest = progress
 
     def remember(progress: RuntimeProgress) -> None:
@@ -286,18 +321,7 @@ def _run(
         latest = progress
 
     try:
-        progress, stop = ordinary(
-            progress,
-            analyzer=analyzer,
-            clock=clock,
-            decision_maker=decision_maker,
-            diagnosis_source=diagnosis_source,
-            identities=identities,
-            integrity_inspector=integrity_inspector,
-            journal=journal,
-            execute=execute,
-            on_progress=remember,
-        )
+        progress, stop = step(progress, on_progress=remember)
     except Exception as error:
         # Phase-aware (review fix 2026-11-19): once a DAW write may have taken effect, the pending reason is kept; the
         # original exception still propagates, nothing is restored and no journal state is cleared.
@@ -343,3 +367,119 @@ def _suspended(progress: RuntimeProgress, checkpoint: RunTraceEvent, journal: Ru
         except ValueError:
             pass
     return RunSuspended(progress.request, snapshot, checkpoint)
+
+
+def resume_daw(
+    suspended: RunSuspended,
+    manifest: DawExportManifest,
+    *,
+    analyzer: AudioAnalyzer,
+    diagnosis_source: DiagnosisSource,
+    decision_maker: DecisionMaker,
+    integrity_inspector: StateIntegrityInspector,
+    journal: RunJournal,
+    clock: RunClock,
+    identities: IdentitySource,
+    daw_controller: DawParameterController,
+    recovery_controller: DawRecoveryController,
+    export_handoff: DawExportHandoff,
+) -> RunReport | RunSuspended | DawContinuationRefused:
+    """Continue a suspended DAW run in-process with the operator's manifest (Increment 3, amended; ADR-037).
+
+    The journal's per-run exclusive ownership (``RunExclusion``) is taken before the trace is read and held through
+    admission, execution, any next suspension and finalization. Admission (``admit_continuation``) refuses a
+    duplicate, conflicting, interrupted or foreign continuation without any effect. The rebuilt run starts a new clock
+    segment, so the operator pause is never charged; its wall-clock length is recorded in ``DawContinuationStarted``.
+    """
+    require_instance(suspended, RunSuspended, "suspended")
+    require_instance(manifest, DawExportManifest, "manifest")
+    request, checkpoint_event = suspended.request, suspended.checkpoint_event
+    checkpoint_record = checkpoint_event.payload
+    if not journal.try_acquire_exclusive():
+        return DawContinuationRefused(request.run_id, checkpoint_record.awaiting.request.export_id,
+                                      DawContinuationRefusalCode.CONTINUATION_IN_PROGRESS,
+                                      "another continuation of this run holds its exclusive ownership", None)  # fmt: skip
+    try:
+        opened = journal.snapshot()
+        if not isinstance(opened, Success) or not isinstance(opened.value, RunJournalSnapshot):
+            raise ValueError("the journal could not provide this run's trace")
+        snapshot = opened.value
+        initial = AcceptedReference(request.initial_state, 0)
+        validate_run_journal_snapshot(request.run_id, initial, snapshot)
+        refusal = admit_continuation(snapshot, request, checkpoint_event, manifest)
+        if refusal is not None:
+            return refusal
+        if snapshot.accepted != checkpoint_record.accepted:
+            raise ValueError("the journal's acceptance chain differs from the checkpoint's accepted reference")
+        reading = clock.read()
+        if not isinstance(reading, ClockReading):
+            raise ValueError("the continuation clock's first reading is not a ClockReading")
+        tokens = checkpoint_record.tokens | {e.event_id.value for e in snapshot.events}
+        tokens |= {c.event.acceptance_id.value for c in snapshot.acceptances}
+        progress = RuntimeProgress(
+            request=request, initial=initial,
+            first=ClockReading(0.0, snapshot.events[0].created_at, False), last=reading,
+            usage=checkpoint_event.usage, known=snapshot.events, unacknowledged=(), commits=snapshot.acceptances,
+            recording_ok=True, accepted=checkpoint_record.accepted, authority_known=True, verified=None,
+            restored_last=False, tokens=frozenset(tokens), history=checkpoint_record.history,
+            stems=checkpoint_record.stems, mix_id=checkpoint_record.mix_id, roots=checkpoint_record.roots,
+            observations=checkpoint_record.observations, diagnosed=None,
+            pending_effect=TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+            elapsed_before=checkpoint_event.usage.elapsed_seconds, segment_start=reading,
+        )  # fmt: skip
+        execute = partial(execute_daw, clock=clock, identities=identities, journal=journal,
+                          daw_controller=daw_controller, recovery_controller=recovery_controller,
+                          export_handoff=export_handoff)  # fmt: skip
+        step = partial(_resumed, checkpoint_event=checkpoint_event, manifest=manifest, analyzer=analyzer, clock=clock,
+                       decision_maker=decision_maker, diagnosis_source=diagnosis_source, identities=identities,
+                       integrity_inspector=integrity_inspector, journal=journal,
+                       recovery_controller=recovery_controller, export_handoff=export_handoff,
+                       execute=execute)  # fmt: skip
+        return _complete(progress, step, clock=clock, identities=identities, journal=journal)
+    finally:
+        journal.release_exclusive()
+
+
+def _resumed(
+    progress: RuntimeProgress,
+    *,
+    checkpoint_event: RunTraceEvent,
+    manifest: DawExportManifest,
+    analyzer: AudioAnalyzer,
+    clock: RunClock,
+    decision_maker: DecisionMaker,
+    diagnosis_source: DiagnosisSource,
+    identities: IdentitySource,
+    integrity_inspector: StateIntegrityInspector,
+    journal: RunJournal,
+    recovery_controller: DawRecoveryController,
+    export_handoff: DawExportHandoff,
+    execute: Callable,
+    on_progress: Callable[[RuntimeProgress], None],
+) -> tuple[RuntimeProgress, Stop | RunTraceEvent]:
+    """The continuation body: start record, continuation, completion evidence, then further decision rounds."""
+    checkpoint_record = checkpoint_event.payload
+    export_id = checkpoint_record.awaiting.request.export_id
+    rec = dict(identities=identities, journal=journal, on_progress=on_progress)
+    started = DawContinuationStarted(progress.request.run_id, checkpoint_event.event_id, export_id, manifest,
+                                     checkpoint_record.paused_at_utc, progress.last.utc)  # fmt: skip
+    progress, stop = record(progress, started, **rec)
+    if stop:
+        return (progress, (TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+                           f"the continuation could not be recorded ({stop[1]}); the fader is not restored"))  # fmt: skip
+    started_id = progress.known[-1].event_id
+    progress, result = continue_daw(
+        progress, checkpoint_record, manifest, analyzer=analyzer, clock=clock, identities=identities,
+        integrity_inspector=integrity_inspector, journal=journal, recovery_controller=recovery_controller,
+        export_handoff=export_handoff, on_progress=on_progress,
+    )  # fmt: skip
+    accepted = progress.authority_known and progress.accepted.sequence > checkpoint_record.accepted.sequence
+    disposition = DawContinuationDisposition.ACCEPTED if accepted else DawContinuationDisposition.ENDED
+    finished = DawContinuationFinished(progress.request.run_id, started_id, export_id, disposition)
+    progress, marker_stop = record(progress, finished, **rec)
+    if result:
+        return (progress, result)
+    if marker_stop:
+        return (progress, marker_stop)
+    return _rounds(progress, clock=clock, decision_maker=decision_maker, diagnosis_source=diagnosis_source,
+                   identities=identities, journal=journal, execute=execute, on_progress=on_progress)  # fmt: skip
