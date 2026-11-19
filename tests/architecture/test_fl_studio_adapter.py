@@ -22,15 +22,19 @@ EDGES = {
     # recovery plan 2026-11-18: serialization and journal gain the recovery and budget records (exact additions)
     "serialization": {
         f"{CORE}.records.budgets",
-        f"{CORE}.records.daw",
+        f"{CORE}.records.daw_binding",
         f"{CORE}.records.daw_control",
         f"{CORE}.records.daw_recovery",
         f"{CORE}.records.identifiers",  # export plan 2026-11-18: journaled binding, profile and execution loaders
+        # review fix 2026-11-19: the exact journaled apply request is rebuilt for export anchors
+        f"{CORE}.records.actions",
+        f"{CORE}.records.admission",
+        f"{CORE}.records.daw",
     },
     "journal": {
         f"{BASE}.serialization",
         f"{CORE}.records.budgets",
-        f"{CORE}.records.daw",
+        f"{CORE}.records.daw_binding",
         f"{CORE}.records.daw_control",
         f"{CORE}.records.daw_recovery",
         f"{CORE}.records.identifiers",
@@ -41,7 +45,7 @@ EDGES = {
     | {
         f"{CORE}.ports.daw",
         f"{CORE}.ports.daw_recovery",
-        f"{CORE}.records.daw",
+        f"{CORE}.records.daw_binding",
         f"{CORE}.records.daw_control",
         f"{CORE}.records.daw_export",  # export plan 2026-11-18: state anchors and continuity snapshots
         f"{CORE}.records.daw_recovery",

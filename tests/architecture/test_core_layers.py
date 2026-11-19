@@ -37,6 +37,11 @@ BEHAVIOR_INVENTORY = {
     "admission.daw": ("resolve_daw_gain", "daw_gain_bounds", "gate_daw_apply", "gate_daw_restore"),  # 2026-11-18
     "admission.daw_export": ("assess_daw_import",),  # export handoff plan, 2026-11-18 (revision 3)
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
+    "loop.daw_transitions": (  # coordinator-integration Increment 1 (ADR-035)
+        "daw_execution_receipt",
+        "validate_daw_execution",
+        "derive_daw_candidate_state",
+    ),
     "loop.completion": ("finalize",),
     "loop.correction": ("render", "verify_candidate"),
     "loop.decision_round": ("decision_round", "evaluate_decision", "act"),

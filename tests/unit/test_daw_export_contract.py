@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import pytest
 from daw_export_support import (
+    APPLY,
     BINDING,
     CHECKPOINT,
     PROFILE,
@@ -22,11 +23,12 @@ from daw_export_support import (
     routing,
     snapshot,
 )
+from fl_runtime_support import make_request
 
 from autonomous_mixing.core.admission.daw_export import assess_daw_import
 from autonomous_mixing.core.records.actions import ExecutionReceipt
 from autonomous_mixing.core.records.artifacts import ArtifactKind
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import DawBuild
 from autonomous_mixing.core.records.daw_export import (
     DawAlignmentStatus,
@@ -75,8 +77,28 @@ def test_a_confirmed_write_anchor_is_the_latest_reservation():
 
 def test_a_resolution_anchor_is_the_latest_resolution_with_no_reservation_after_it():
     resolved = anchor(basis=DawStateBasis.RESOLVED, source_seq=4, reservation_watermark=2, resolution_watermark=4,
-                      ledger_watermark=5)  # fmt: skip
+                      ledger_watermark=5, apply=None)  # fmt: skip
     assert resolved.basis is DawStateBasis.RESOLVED
+
+
+def test_a_confirmed_write_anchor_carries_exactly_its_journaled_apply_request():
+    assert anchor().apply == APPLY and anchor().apply.command_id == anchor().source_id
+    for changes in (
+        {"apply": None},  # a confirmed write always carries its request
+        {"apply": make_request("apply_other_0001")},  # another command
+        {"apply": replace(APPLY, execution_id=ExecutionId("e2"))},
+        {"binding": replace(BINDING, baseline_gain_db=2.5)},  # the apply was resolved under another binding
+        {"basis": DawStateBasis.CONFIRMED_RESTORE, "source_seq": 1},  # only a write anchor carries an apply
+        {
+            "basis": DawStateBasis.RESOLVED,
+            "source_seq": 2,
+            "reservation_watermark": 1,
+            "resolution_watermark": 2,
+            "ledger_watermark": 2,
+        },  # fmt: skip
+    ):
+        with pytest.raises(ValueError):
+            anchor(**changes)
 
 
 @pytest.mark.parametrize(
@@ -126,7 +148,7 @@ def test_a_complete_request_derives_its_project_and_names_the_replaced_members()
     [
         {"execution_id": ExecutionId("e2")},
         {"workspace": ExecutionWorkspace(ExecutionId("e2"), "exports", "export_ws_0001")},
-        {"anchor": anchor(execution_id=ExecutionId("e2"))},
+        {"anchor": anchor(execution_id=ExecutionId("e2"), apply=replace(APPLY, execution_id=ExecutionId("e2")))},
         {"candidate_revision": Revision("r1")},
     ],
 )
@@ -170,7 +192,10 @@ def test_a_profile_with_the_same_reference_but_other_settings_is_refused(profile
 def test_a_request_matching_a_changed_anchor_is_still_tied_to_its_checkpoint_project():
     other = replace(BINDING, project_id=ProjectId("p2"))
     with pytest.raises(ValueError, match="another project"):
-        export_request(binding=other, anchor=anchor(binding=other))
+        # a resolution anchor carries no apply request, so only the request's own project check can refuse it
+        resolved = anchor(binding=other, basis=DawStateBasis.RESOLVED, source_seq=2, reservation_watermark=1,
+                          resolution_watermark=2, ledger_watermark=2, apply=None)  # fmt: skip
+        export_request(binding=other, anchor=resolved)
 
 
 # --- replacement and coverage ---------------------------------------------------------------------------------------------

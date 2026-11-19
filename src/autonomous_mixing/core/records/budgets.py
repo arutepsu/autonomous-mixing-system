@@ -15,6 +15,8 @@ class BudgetLimits:
     max_render_calls: int
     max_recovery_operations: int
     max_elapsed_seconds: float
+    # ADR-035: DAW fader writes (an offline run configures none, and none are then permitted).
+    max_daw_writes: int = 0
 
     def __post_init__(self) -> None:
         require_count(self.max_decision_calls, "BudgetLimits.max_decision_calls", minimum=0)
@@ -23,6 +25,7 @@ class BudgetLimits:
         require_count(self.max_recovery_operations, "BudgetLimits.max_recovery_operations", minimum=0)
         if require_finite(self.max_elapsed_seconds, "BudgetLimits.max_elapsed_seconds") <= 0:
             raise ValueError("BudgetLimits.max_elapsed_seconds must be strictly positive")
+        require_count(self.max_daw_writes, "BudgetLimits.max_daw_writes", minimum=0)
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,7 @@ class BudgetUsage:
     render_calls: int
     recovery_operations: int
     elapsed_seconds: float
+    daw_writes: int = 0  # ADR-035
 
     def __post_init__(self) -> None:
         require_count(self.decision_calls, "BudgetUsage.decision_calls", minimum=0)
@@ -42,6 +46,7 @@ class BudgetUsage:
         require_count(self.recovery_operations, "BudgetUsage.recovery_operations", minimum=0)
         if require_finite(self.elapsed_seconds, "BudgetUsage.elapsed_seconds") < 0:
             raise ValueError("BudgetUsage.elapsed_seconds must be non-negative")
+        require_count(self.daw_writes, "BudgetUsage.daw_writes", minimum=0)
 
 
 class BudgetOperation(Enum):
@@ -51,6 +56,7 @@ class BudgetOperation(Enum):
     ATTEMPT = "attempt"
     RENDER_CALL = "render_call"
     RECOVERY_OPERATION = "recovery_operation"
+    DAW_WRITE = "daw_write"  # ADR-035: one calibrated fader write
 
 
 class BudgetBlockReason(Enum):
@@ -61,6 +67,7 @@ class BudgetBlockReason(Enum):
     ATTEMPT_LIMIT = "attempt_limit"
     RENDER_CALL_LIMIT = "render_call_limit"
     RECOVERY_CAPACITY_LIMIT = "recovery_capacity_limit"
+    DAW_WRITE_LIMIT = "daw_write_limit"  # ADR-035
 
 
 _PERMITTED_BLOCK_REASONS = {
@@ -77,6 +84,14 @@ _PERMITTED_BLOCK_REASONS = {
     ),
     BudgetOperation.RECOVERY_OPERATION: frozenset(
         {BudgetBlockReason.ELAPSED_TIME_LIMIT, BudgetBlockReason.RECOVERY_CAPACITY_LIMIT}
+    ),
+    # A DAW write, like a render, needs an unused recovery slot: its effect may need an exact restoration.
+    BudgetOperation.DAW_WRITE: frozenset(
+        {
+            BudgetBlockReason.ELAPSED_TIME_LIMIT,
+            BudgetBlockReason.DAW_WRITE_LIMIT,
+            BudgetBlockReason.RECOVERY_CAPACITY_LIMIT,
+        }
     ),
 }
 

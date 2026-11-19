@@ -12,7 +12,7 @@ from fl_runtime_support import make_request
 from autonomous_mixing.adapters.fl_studio.journal import JournalError, SqliteCommandJournal
 from autonomous_mixing.adapters.fl_studio.profile import make_apply_command
 from autonomous_mixing.adapters.fl_studio.serialization import load_outcome, outcome_json, request_json
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
     DawRefusalCode,
     DawUncertainReason,

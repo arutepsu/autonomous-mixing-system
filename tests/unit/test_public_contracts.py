@@ -314,6 +314,7 @@ def test_execution_signatures_match_the_baseline():
         "MISSING_GAIN_STATE",
         "INCOMPATIBLE_AUDIO",
         "UNSUPPORTED_DEPENDENCY",
+        "DAW_CONTROLLED_STATE",  # ADR-035
     ]
 
 
@@ -405,7 +406,8 @@ def test_daw_control_contract_signatures_unions_and_codes():
     )
     from autonomous_mixing.core.records.admission import TrackGainPermission
     from autonomous_mixing.core.records.capabilities import GainBounds
-    from autonomous_mixing.core.records.daw import DawFaderReading, DawGainResolution, DawTrackState
+    from autonomous_mixing.core.records.daw import DawGainResolution, DawTrackState
+    from autonomous_mixing.core.records.daw_binding import DawFaderReading
     from autonomous_mixing.core.records.daw_control import (
         DawApplyOutcome,
         DawApplyPermitted,
@@ -498,7 +500,7 @@ def test_daw_recovery_contract_signatures_unions_and_codes():
     """Addition (recovery and reconciliation plan, 2026-11-18): the recovery port, gate and outcome shapes."""
     from autonomous_mixing.core.admission.daw import gate_daw_restore
     from autonomous_mixing.core.ports.daw_recovery import DawRecoveryController
-    from autonomous_mixing.core.records.daw import DawTrackBinding
+    from autonomous_mixing.core.records.daw_binding import DawTrackBinding
     from autonomous_mixing.core.records.daw_control import DawControlProfile, DawInspection
     from autonomous_mixing.core.records.daw_recovery import (
         DawControlState,

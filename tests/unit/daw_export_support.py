@@ -12,7 +12,7 @@ import soundfile as sf
 from fl_runtime_support import make_request
 
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import DawInspection, DawInspectRequest
 from autonomous_mixing.core.records.daw_export import (
     DawContinuitySnapshot,
@@ -81,7 +81,7 @@ def state(checkpoint=CHECKPOINT):
 
 def anchor(**changes):
     base = DawStateAnchor("apply_root_0001", DawStateBasis.CONFIRMED_WRITE, 1, ExecutionId("e1"), BINDING, PROFILE,
-                          READING, 1, 0, 1)  # fmt: skip
+                          READING, 1, 0, 1, APPLY)  # fmt: skip
     return replace(base, **changes)
 
 

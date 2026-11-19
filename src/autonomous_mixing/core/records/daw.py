@@ -1,54 +1,19 @@
-"""DAW parameter coordinates; no fixed-input audio processing or execution authority."""
+"""DAW parameter coordinates; no fixed-input audio processing or execution authority.
+
+``DawFaderReading`` and ``DawTrackBinding`` live in ``core.records.daw_binding`` (Increment 1 of the
+coordinator-integration plan), so ``ProjectState`` can hold DAW parameter state without an import cycle.
+"""
 
 from dataclasses import dataclass
 
 from autonomous_mixing.core.records.actions import Action
-from autonomous_mixing.core.records.identifiers import ProjectId, Revision, TrackId, VersionRef
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
+from autonomous_mixing.core.records.identifiers import Revision
 from autonomous_mixing.core.records.invariants import (
     require_finite,
     require_finite_result,
     require_instance,
-    require_text,
 )
-
-
-@dataclass(frozen=True)
-class DawFaderReading:
-    """Reported parameter values, not evidence of exported audio or calibrated scope."""
-
-    normalized: float
-    db: float
-
-    def __post_init__(self) -> None:
-        require_finite(self.normalized, "DawFaderReading.normalized")
-        require_finite(self.db, "DawFaderReading.db")
-        if not 0 <= self.normalized <= 1:
-            raise ValueError("DawFaderReading.normalized must be between 0 and 1 inclusive")
-
-
-@dataclass(frozen=True)
-class DawTrackBinding:
-    """Versioned coordinate baseline and declared insert identity; no open-file authentication."""
-
-    reference: VersionRef
-    project_id: ProjectId
-    track_id: TrackId
-    project_title: str
-    insert_index: int
-    insert_name: str
-    baseline_gain_db: float
-    baseline_fader: DawFaderReading
-
-    def __post_init__(self) -> None:
-        require_instance(self.reference, VersionRef, "DawTrackBinding.reference")
-        require_instance(self.project_id, ProjectId, "DawTrackBinding.project_id")
-        require_instance(self.track_id, TrackId, "DawTrackBinding.track_id")
-        require_text(self.project_title, "DawTrackBinding.project_title")
-        require_text(self.insert_name, "DawTrackBinding.insert_name")
-        if type(self.insert_index) is not int or self.insert_index < 1:
-            raise ValueError("DawTrackBinding.insert_index must be a built-in int of at least 1")
-        require_finite(self.baseline_gain_db, "DawTrackBinding.baseline_gain_db")
-        require_instance(self.baseline_fader, DawFaderReading, "DawTrackBinding.baseline_fader")
 
 
 @dataclass(frozen=True)

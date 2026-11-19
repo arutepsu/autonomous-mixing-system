@@ -19,7 +19,7 @@ from fl_recovery_support import (
 
 from autonomous_mixing.adapters.fl_studio.journal import JournalError, JournalRefusal, SqliteCommandJournal
 from autonomous_mixing.adapters.fl_studio.serialization import grant_json, restore_request_json
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import DawRefusalCode, DawUncertainReason
 from autonomous_mixing.core.records.daw_recovery import (
     DawCommandKind,

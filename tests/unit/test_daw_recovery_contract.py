@@ -16,7 +16,7 @@ from autonomous_mixing.core.ports.daw_recovery import (
     validate_daw_restore_outcome,
 )
 from autonomous_mixing.core.records.budgets import BudgetGrant, BudgetOperation, BudgetUsage
-from autonomous_mixing.core.records.daw import DawFaderReading, DawTrackBinding
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import (
     DawBuild,
     DawControlProfile,

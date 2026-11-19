@@ -14,6 +14,7 @@ from autonomous_mixing.adapters.fl_studio.serialization import (
     _dumps,
     _plain,
     grant_json,
+    load_apply_request,
     load_binding,
     load_execution_id,
     load_profile,
@@ -29,7 +30,7 @@ from autonomous_mixing.core.ports.daw_recovery import (
     validate_daw_restore_outcome,
     validate_daw_state_anchor,
 )
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
     DawApplyOutcome,
     DawApplyRequest,
@@ -711,6 +712,7 @@ class FlStudioParameterController:
             source_id, DawStateBasis(data["basis"]), data["source_seq"], load_execution_id(data["execution_id"]),
             load_binding(data["binding"]), load_profile(data["profile"]), DawFaderReading(**data["reading"]),
             data["reservation_watermark"], data["resolution_watermark"], data["ledger_watermark"],
+            None if data["apply_json"] is None else load_apply_request(data["apply_json"]),
         )  # fmt: skip
 
     def state_anchor(self, source_id: str) -> PortResult[DawStateAnchor]:

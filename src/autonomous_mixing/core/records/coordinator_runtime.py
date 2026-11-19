@@ -20,6 +20,7 @@ from autonomous_mixing.core.records.admission import ActionAdmissionPolicy, Stem
 from autonomous_mixing.core.records.analysis import AnalysisRequest
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
 from autonomous_mixing.core.records.capabilities import RendererCapabilities
+from autonomous_mixing.core.records.daw_correction import DawSessionConfig
 from autonomous_mixing.core.records.identifiers import ArtifactId, RunId, VersionRef
 from autonomous_mixing.core.records.integrity import (
     ArtifactRootBinding,
@@ -255,6 +256,8 @@ class RunRequest:
     root_bindings: tuple[ArtifactRootBinding, ...]
     output_root_key: str
     retry_policy: DecisionRetryPolicy
+    # ADR-035: the optional operator-attended DAW session; None keeps the offline run exactly as before.
+    daw_session: DawSessionConfig | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.run_id, RunId, "RunRequest.run_id")
@@ -299,6 +302,11 @@ class RunRequest:
             raise ValueError(f"policy names project {self.policy.project_id}, not {state.project_id}")
         self._validate_recipe_bindings()
         StateIntegrityRequest(state, self.root_bindings)  # current audio and fixed inputs, exactly once each
+        if self.daw_session is not None:
+            require_instance(self.daw_session, DawSessionConfig, "RunRequest.daw_session")
+            self.daw_session.validate_against(state)
+        elif state.daw is not None:
+            raise ValueError("an initial state with DAW parameter state needs a DAW session")
         validate_condition_measurements(self.configuration.criteria, self.measurements)
         self._validate_analysis_jobs()
 

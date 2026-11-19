@@ -6,12 +6,8 @@ import pytest
 
 from autonomous_mixing.core.admission.daw import resolve_daw_gain
 from autonomous_mixing.core.records.actions import Action, SetTrackGain
-from autonomous_mixing.core.records.daw import (
-    DawFaderReading,
-    DawGainResolution,
-    DawTrackBinding,
-    DawTrackState,
-)
+from autonomous_mixing.core.records.daw import DawGainResolution, DawTrackState
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.identifiers import ActionId, ProjectId, Revision, TrackId, VersionRef
 
 

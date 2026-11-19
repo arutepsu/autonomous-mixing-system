@@ -4,12 +4,17 @@ import json
 from dataclasses import asdict
 from enum import Enum
 
+from autonomous_mixing.core.records.actions import Action, SetTrackGain
+from autonomous_mixing.core.records.admission import AdmittedAction
 from autonomous_mixing.core.records.budgets import BudgetGrant, BudgetOperation, BudgetUsage
-from autonomous_mixing.core.records.daw import DawFaderReading, DawTrackBinding
+from autonomous_mixing.core.records.daw import DawGainResolution, DawTrackState
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import (
     DawApplyRequest,
     DawBuild,
     DawControlProfile,
+    DawInspection,
+    DawInspectRequest,
     DawRange,
     DawRefusalCode,
     DawUncertainReason,
@@ -25,7 +30,7 @@ from autonomous_mixing.core.records.daw_recovery import (
     DawRestoreRequest,
     DawRestoreUncertain,
 )
-from autonomous_mixing.core.records.identifiers import ExecutionId, ProjectId, TrackId, VersionRef
+from autonomous_mixing.core.records.identifiers import ActionId, ExecutionId, ProjectId, Revision, TrackId, VersionRef
 
 _KINDS = {
     "confirmed": DawWriteConfirmed,
@@ -171,3 +176,44 @@ def load_execution_id(data) -> ExecutionId:
     except TypeError as error:
         raise ValueError("invalid journaled execution ID") from error
     return _round_trip(record, data, "execution ID")
+
+
+def load_apply_request(text: str) -> DawApplyRequest:
+    """The exact journaled ``DawApplyRequest``: rebuilt from its stored text, which it must serialize back to exactly.
+
+    Review fix 2026-11-19: an export anchor carries this record, so request identity is exact agreement with what was
+    journaled before dispatch, never a tolerance on the achieved result.
+    """
+    try:
+        data = _loads(text)
+        if not isinstance(data, dict) or set(data) != {"v", "request"} or data["v"] != 1:
+            raise ValueError("unknown apply request schema")
+        fields = data["request"]
+
+        def action(value):
+            operation = value["operation"]
+            return Action(ActionId(**value["action_id"]), ProjectId(**value["project_id"]),
+                          Revision(**value["expected_revision"]),
+                          SetTrackGain(TrackId(**operation["track_id"]), operation["value_db"]))  # fmt: skip
+
+        admitted = AdmittedAction(action(fields["admitted"]["action"]),
+                                  VersionRef(**fields["admitted"]["policy_reference"]))  # fmt: skip
+        resolution, state = fields["resolution"], fields["resolution"]["state"]
+        track_state = DawTrackState(load_binding(state["binding"]), Revision(**state["revision"]),
+                                    state["selected_gain_db"], DawFaderReading(**state["confirmed_fader"]))  # fmt: skip
+        gain = DawGainResolution(action(resolution["action"]), track_state,
+                                 DawFaderReading(**resolution["observed_fader"]), resolution["target_fader_db"],
+                                 resolution["delta_db"])  # fmt: skip
+        seen = fields["inspection"]
+        inspection = DawInspection(
+            DawInspectRequest(load_binding(seen["request"]["binding"]), load_profile(seen["request"]["profile"])),
+            DawBuild(**seen["build"]), seen["project_title"], seen["insert_index"], seen["insert_name"],
+            None if seen["fader"] is None else DawFaderReading(**seen["fader"]),
+        )  # fmt: skip
+        record = DawApplyRequest(ExecutionId(**fields["execution_id"]), fields["command_id"], admitted, gain,
+                                 load_profile(fields["profile"]), inspection, fields["requested_change_db"])  # fmt: skip
+    except (TypeError, KeyError, ValueError) as error:
+        raise ValueError("invalid journaled apply request") from error
+    if request_json(record) != text:
+        raise ValueError("journaled apply request does not serialize back to its stored text")
+    return record

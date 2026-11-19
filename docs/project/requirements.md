@@ -17,9 +17,10 @@ Research questions (RQ1–RQ4) and hypotheses (H1–H3) are defined in [`project
 - **Inputs:** a *project* of aligned WAV stems (any number of tracks, each with an identifier and a declared role); project metadata (data split, variant); producer intent; analysis and experiment configuration. Hidden evaluation data (original reference audio and defect-injection ground truth) is stored separately and is not a runtime input (SR-10).
 - **Outputs:** measurements; problem candidates; proposed, validated and executed corrections; corrected individual stems and the combined mix (rendered without modifying source audio); per-run records; aggregated evaluation results, which may join run records with hidden evaluation data after execution (SR-10).
 - **External service:** the Claude API, used only by the AI agent to propose decisions (ADR-001, ADR-004).
-- **Operator:** the researcher, via the CLI.
+- **Optional DAW:** FL Studio, operator-attended, through its MIDI scripting API for calibrated fader writes and reads (FR-19, FR-20; D15 decided 2026-11-18, ADR-034 Proposed).
+- **Operator:** the researcher, via the CLI. In the optional DAW path the operator also confirms the project copy and routing, and saves and exports in FL Studio.
 - **Problem families:** P1 masking, P2 resonance/buildup, P3 stereo/phase are research targets; the target and contingency scope is defined in `project-scope.md`.
-- **Excluded:** model training; real-time or plugin operation; GUI; FL Studio `.flp` manipulation; comprehensive automatic mixing or mastering; guaranteed perceptual superiority; multiple agents.
+- **Excluded:** model training; real-time or plugin operation; GUI; FL Studio `.flp` manipulation; unattended DAW operation and automated DAW saving or exporting; comprehensive automatic mixing or mastering; guaranteed perceptual superiority; multiple agents.
 
 ## 3. Functional requirements
 
@@ -43,7 +44,10 @@ Research questions (RQ1–RQ4) and hypotheses (H1–H3) are defined in [`project
 | FR-17 | Render corrected individual stems and the combined mix for assessment and listening without modifying source audio. | must | Rendering is deterministic; source hashes are unchanged. | SR-04, QR-01 | Planned |
 | FR-18 | Read project metadata and propagate the runtime-visible part (split, variant identifier, producer intent) into run records. Defect-injection parameters and other hidden evaluation data are kept out of runtime inputs and run records; they are linked to run records only by project and variant identifiers for post-run research evaluation (SR-10). | should | Runtime-visible metadata appears in every run record; hidden evaluation data fields are absent from run records. | SR-02, SR-07, SR-10 | Planned |
 
-FR-14 (direct FL Studio `.flp` integration) is withdrawn as a requirement and listed under exclusions; the ID is not reused.
+| FR-19 | Optionally apply an admitted absolute gain action to an owner-confirmed, calibrated FL Studio mixer insert through the parameter-control adapter, with a stable command ID. Report pre-write refusal, confirmed, off-target and uncertain outcomes separately. Recover failed or uncertain writes only by authorized exact-target fader restoration and explicit resolution, preserving unresolved commands and conversion blocks. Never treat a parameter change as candidate audio, and never claim a fader restoration as complete project rollback. A resolution may clear uncertainty but never establishes verified rollback, which requires retained-audio integrity and recorded, exact equality of both fader readings to the saved target. | should | Tests against the real adapter on a simulated host cover each outcome, stable-ID replay, recovery, preserved blocks and the separate rollback claims, including a resolution on evidence within tolerance that must not yield verified rollback; live trials are separately authorized and recorded. | D15, ADR-034, RQ4 | Planned: contracts and the FL adapter exist unintegrated (ADR-030 to 032; tests `tests/unit/test_daw_*`, `tests/unit/test_fl_runtime_*`); no coordinator integration. |
+| FR-20 | After a confirmed DAW change, pause the run awaiting the operator's manual export, and resume only through an explicit continuation. The continuation verifies the exported files (hash, encoding, declared dimensions, exact coverage of every affected stem and the master) and observed DAW-state continuity immediately before and after that verification. Only verified exports form a candidate for analysis, verification and acceptance. Saving and exporting stay manual. | should | Tests: a pending export is never candidate-ready; a duplicate continuation replays its recorded result; a restart during the pause resumes without reapplying the write; a rejected import leads to recovery. | D15, ADR-034, RQ4, QR-01 | Planned: the export handoff and verified import exist unintegrated (ADR-033; tests `tests/unit/test_daw_export_*`, `tests/unit/test_fl_runtime_state_anchor.py`); no suspension, continuation or durable run journal. |
+
+FR-14 (direct FL Studio `.flp` integration) is withdrawn as a requirement and listed under exclusions; the ID is not reused. FR-19 and FR-20 (2026-11-18) do not revive it: they cover scripting-API fader control and manual exports, not `.flp` manipulation.
 
 ## 4. Non-functional requirements
 
@@ -91,7 +95,7 @@ QR-06 is moved to SR-08; the ID is not reused.
 | RQ1 | FR-01–FR-05, FR-13, SR-07 |
 | RQ2 | FR-06, FR-08, FR-11, FR-13, SR-05 |
 | RQ3 / H2 | FR-09, FR-15, FR-16, SR-01, SR-05 |
-| RQ4 / H3 | FR-07, FR-09–FR-12, QR-04, SR-06, SR-09, OP-01, OP-04 |
+| RQ4 / H3 | FR-07, FR-09–FR-12, FR-19, FR-20, QR-04, SR-06, SR-09, OP-01, OP-04 |
 | H1 | SR-01–SR-04, FR-17 |
 | Main RQ (producer intent) | FR-11, SR-09 |
 | Essential constraints | QR-01–QR-03, QR-07, SR-02, SR-08, SR-10, OP-02, OP-03, OP-05 |
@@ -109,6 +113,7 @@ Status 2026-10-15: not met under the v1.0 wording. Criterion 1 requires project 
 
 ## Change history
 
+- **v1.2 (2026-11-18):** owner decision D15, ADR-034 (Proposed). New FR-19 (optional calibrated FL Studio fader control with separate outcomes and exact-target recovery) and FR-20 (manual export pause and verified continuation), both Planned. The system context gains the optional DAW and the operator's DAW steps. The exclusions gain unattended DAW operation and automated DAW saving or exporting. `.flp` manipulation stays excluded and FR-14 withdrawn. No other requirement changed.
 - **v1.1 (2026-10-15):** owner instruction, ADR-010. New SR-10 (hidden-reference boundary). FR-18 no longer propagates defect-injection parameters into run records; FR-12 records runtime-visible inputs only; system-context inputs and outputs reworded; SR-10 added to the traceability table. No other requirement changed.
 - **v1.0 (2026-10-15):** consolidated and approved. Rewritten to be technology-neutral: FR-01, FR-02, FR-04, FR-05, FR-08, FR-13 (multitrack input, open resampling/alignment policy, uncertainty without assumed calibration, action types deferred, per-family depth). Refined: FR-06 to FR-12. Provenance content of the old FR-12 moved to QR-03. FR-14 withdrawn (exclusion); QR-06 → SR-08. New: FR-15 to FR-18, QR-07, QR-08, SR-01 to SR-09, OP-01 to OP-05. Removed the unsupported "tested" claim for WAVEX/RF64 and replaced status notes with evidence-based M0 status.
 - **v1 (2026-10-14):** initial unapproved draft.
@@ -128,6 +133,6 @@ Status 2026-10-15: not met under the v1.0 wording. Criterion 1 requires project 
 | D10 | Whether a listening assessment is conducted, and at what scale | SR-07 |
 | D11 | Representation of detection uncertainty (after the M1 literature review) | FR-05 |
 | D13 | Disposition of `scripts/generate_test_audio.py` and local synthetic files | Housekeeping |
-| D15 | Whether to adopt operator-attended live parameter control of one calibrated FL Studio insert (scripting API, fader-only outcomes) as an optional capability with a new functional requirement. Proposal in [ADR-030](../decisions/0030-daw-parameter-control-boundary.md); `.flp` manipulation stays excluded and FR-14 withdrawn. Proposed 2026-11-18; no requirement, scope or status changed. | Scope, exclusions, ADR-030 |
+| D15 | Whether to adopt operator-attended live parameter control of one calibrated FL Studio insert (scripting API, fader-only outcomes) as an optional capability with a new functional requirement. Proposal in [ADR-030](../decisions/0030-daw-parameter-control-boundary.md); `.flp` manipulation stays excluded and FR-14 withdrawn. Proposed 2026-11-18. **Decided 2026-11-18 (owner):** adopted for bounded, operator-assisted runtime integration, initially limited to gain changes and verified manual exports, with explicit DAW parameter state inside `ProjectState` (Option A), and with fader restoration distinguished from complete project rollback. Recorded in [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md) (Proposed); FR-19 and FR-20 added. This supersedes the earlier "no requirement, scope or status changed". | Scope, exclusions, ADR-030, ADR-034 |
 
 Resolved on 2026-10-15: D1 thesis title ("…Using an AI Agent"); D12 defect-injection policy (ADR-008); D14 approval recording (status line above plus a research-log entry). D2 and D4 are partly resolved: P1 is the end-to-end contingency minimum, and both individual stems and the combined mix must be assessable.

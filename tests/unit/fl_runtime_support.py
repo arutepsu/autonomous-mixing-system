@@ -4,7 +4,8 @@ from autonomous_mixing.adapters.fl_studio.profile import calibrated_profile
 from autonomous_mixing.core.admission.daw import gate_daw_apply
 from autonomous_mixing.core.records.actions import Action, SetTrackGain
 from autonomous_mixing.core.records.admission import AdmittedAction
-from autonomous_mixing.core.records.daw import DawFaderReading, DawTrackBinding, DawTrackState
+from autonomous_mixing.core.records.daw import DawTrackState
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import DawInspection, DawInspectRequest
 from autonomous_mixing.core.records.identifiers import ActionId, ExecutionId, ProjectId, Revision, TrackId, VersionRef
 

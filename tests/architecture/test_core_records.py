@@ -28,20 +28,36 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
-    "daw": {"identifiers", "invariants", "actions"},
-    "daw_control": {"identifiers", "invariants", "daw", "admission"},  # DAW control contract, 2026-11-18
-    "daw_recovery": {"identifiers", "invariants", "daw", "daw_control", "budgets"},  # recovery plan, 2026-11-18
+    "daw_binding": {"identifiers", "invariants"},  # coordinator-integration Increment 1 (ADR-035)
+    "daw": {"identifiers", "invariants", "actions", "daw_binding"},
+    "daw_control": {"identifiers", "invariants", "daw", "daw_binding", "admission"},  # DAW control contract, 2026-11-18
+    "daw_recovery": {"identifiers", "invariants", "daw_binding", "daw_control", "budgets"},  # recovery plan, 2026-11-18
     "daw_export": {  # export handoff plan, 2026-11-18 (revision 3)
         "identifiers",
         "invariants",
         "artifacts",
         "project",
         "rendering",
-        "daw",
+        "daw_binding",
         "daw_control",
         "daw_recovery",
     },
+    "daw_correction": {  # coordinator-integration Increment 1 (ADR-035)
+        "acceptance",
+        "admission",
+        "daw_binding",
+        "daw_control",
+        "daw_export",
+        "decision",
+        "feedback",
+        "identifiers",
+        "invariants",
+        "project",
+        "rendering",
+        "verification_evidence",
+    },
     "coordinator_progress": {
+        "daw_correction",  # ADR-035: the DAW correction plan
         "verification_evidence",
         "identifiers",
         "invariants",
@@ -64,11 +80,11 @@ ALLOWED_RECORD_IMPORTS = {
     "identifiers": {"invariants"},
     "invariants": set(),
     "artifacts": {"identifiers", "invariants"},
-    "project": {"identifiers", "invariants", "artifacts"},
+    "project": {"identifiers", "invariants", "artifacts", "daw_binding"},
     "mix": {"identifiers", "invariants"},
     "context": {"identifiers", "invariants", "project"},
     "observation": {"identifiers", "invariants", "artifacts", "project"},
-    "actions": {"identifiers", "invariants", "artifacts", "project"},
+    "actions": {"identifiers", "invariants", "artifacts", "project", "daw_binding"},
     "budgets": {"identifiers", "invariants"},
     "results": {"identifiers", "invariants"},
     "decision": {
@@ -111,6 +127,7 @@ ALLOWED_RECORD_IMPORTS = {
     "reconciliation": {"acceptance", "invariants"},  # acceptance-reconciliation plan, 2026-11-09
     # Coordinator-runtime-contracts plan, 2026-11-09 (no reverse edges into this module).
     "coordinator_runtime": {
+        "daw_correction",  # ADR-035: the optional DAW session
         "actions",
         "admission",
         "artifacts",
@@ -145,6 +162,10 @@ ALLOWED_RECORD_IMPORTS = {
     },
     "termination": set(),
     "run_trace": {
+        "daw_control",  # ADR-035: DAW-path operation records
+        "daw_correction",
+        "daw_export",
+        "daw_recovery",
         "acceptance",
         "actions",
         "admission",
@@ -166,12 +187,21 @@ ALLOWED_RECORD_IMPORTS = {
         "verification",
         "verification_assessment",
     },
-    "run_report": {"acceptance", "coordinator_runtime", "invariants", "run", "run_trace", "termination"},
+    "run_report": {
+        "acceptance",
+        "coordinator_runtime",
+        "daw_correction",
+        "invariants",
+        "run",
+        "run_trace",
+        "termination",
+    },
 }
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
-    "daw": ("DawFaderReading", "DawTrackBinding", "DawTrackState", "DawGainResolution"),
+    "daw_binding": ("DawFaderReading", "DawTrackBinding"),  # moved from daw (ADR-035)
+    "daw": ("DawTrackState", "DawGainResolution"),
     "daw_control": (  # DAW control contract, 2026-11-18
         "DawBuild",
         "DawRange",
@@ -224,6 +254,14 @@ INVENTORY = {
         "DawAlignmentStatus",
         "DawImportVerified",
         "DawImportRejected",
+        "daw_export_coverage_problem",  # shared with DawCorrectionPlan (ADR-035)
+    ),
+    "daw_correction": (
+        "daw_apply_export_problem",  # review fix 2026-11-19
+        "DawSessionConfig",
+        "DawCorrectionPlan",
+        "DawStateQuery",
+        "DawCorrectionSuspended",
     ),
     "daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
         "DawCommandKind",
@@ -296,6 +334,8 @@ INVENTORY = {
         "ArtifactCheckpoint",
         "TrackGainState",
         "ProjectProcessingState",
+        "DawTrackParameter",  # ADR-034 Option A, ADR-035
+        "DawParameterState",
         "ProjectState",
     ),
     "mix": (
@@ -330,6 +370,10 @@ INVENTORY = {
         "validate_receipt_against_checkpoint",
         "derive_candidate_checkpoint",
         "RollbackStatus",
+        "RollbackScope",  # ADR-035: fader restoration versus complete project rollback
+        "DawRollbackEvidenceKind",
+        "DawRollbackFaderEvidence",
+        "daw_rollback_evidence_problem",
         "RollbackReceipt",
         "validate_rollback_references",
     ),
@@ -505,7 +549,7 @@ INVENTORY = {
         "TraceAppendUnknown",
         "TraceAppendResult",
     ),
-    "run_report": ("RunReport",),
+    "run_report": ("RunReport", "RunSuspended"),
 }
 
 MUTABLE_TYPES = {"list", "dict", "set", "bytearray", "List", "Dict", "Set", "MutableMapping", "MutableSequence"}

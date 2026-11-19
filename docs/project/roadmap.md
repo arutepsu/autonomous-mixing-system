@@ -20,7 +20,7 @@
 1. Working kick/bass autonomous loop with independent validation and baselines.
 2. Reliable evaluation and thesis writing.
 3. Resonance/buildup (P2) and stereo/phase (P3) as planned research targets; P1 end-to-end is the contingency minimum, not a decision to drop P2/P3 (see `../research/project-scope.md`).
-4. DAW integration and UI are optional.
+4. UI is optional. Bounded, operator-assisted FL Studio integration (gain changes and verified manual exports) was adopted on 2026-11-18 as an optional path (D15, [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md), Proposed). It is planned in the increments of the [coordinator-integration plan](../superpowers/plans/2026-11-18-daw-coordinator-integration.md), not implemented in the coordinator, and does not displace priorities 1–3. This supersedes "DAW integration and UI are optional".
 
 ## Current status
 M0 starter runs descriptive analysis; formal scientific detector and Claude adapter are pending. No features may be reported complete without evidence.

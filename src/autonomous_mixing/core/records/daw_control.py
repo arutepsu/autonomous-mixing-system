@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from autonomous_mixing.core.records.admission import AdmittedAction
-from autonomous_mixing.core.records.daw import DawFaderReading, DawGainResolution, DawTrackBinding, DawTrackState
+from autonomous_mixing.core.records.daw import DawGainResolution, DawTrackState
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.identifiers import ExecutionId, VersionRef
 from autonomous_mixing.core.records.invariants import require_finite, require_instance, require_text
 

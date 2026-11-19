@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from autonomous_mixing.core.records.budgets import BudgetGrant, BudgetOperation
-from autonomous_mixing.core.records.daw import DawFaderReading, DawTrackBinding
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import (
     DawControlProfile,
     DawInspection,

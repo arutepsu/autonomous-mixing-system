@@ -98,6 +98,7 @@ class RunState(Enum):
     PREPARING_EXECUTION = "preparing_execution"
     EXECUTING = "executing"
     RECONCILING = "reconciling"
+    AWAITING_OPERATOR_EXPORT = "awaiting_operator_export"  # ADR-035: a confirmed DAW write awaits a manual export
     ANALYZING_RESULT = "analyzing_result"
     VALIDATING = "validating"
     RESTORING = "restoring"
@@ -125,6 +126,7 @@ _REASON_OUTCOMES = {
     TerminationReason.RENDER_CALL_LIMIT: RunOutcome.LIMIT_REACHED,
     TerminationReason.RECOVERY_CAPACITY_LIMIT: RunOutcome.LIMIT_REACHED,
     TerminationReason.ELAPSED_TIME_LIMIT: RunOutcome.LIMIT_REACHED,
+    TerminationReason.DAW_WRITE_LIMIT: RunOutcome.LIMIT_REACHED,  # ADR-035
     TerminationReason.USER_CANCELLED: RunOutcome.CANCELLED,
     **{
         reason: RunOutcome.FAILED
@@ -137,6 +139,11 @@ _REASON_OUTCOMES = {
             TerminationReason.INVALID_DECISION_RESPONSE,
             TerminationReason.DECISION_RETRIES_EXHAUSTED,
             TerminationReason.EXECUTION_PREPARATION_FAILED,
+            # ADR-035: the DAW execution path
+            TerminationReason.DAW_COMMAND_UNRESOLVED,
+            TerminationReason.DAW_CONVERSION_BLOCKED,
+            TerminationReason.DAW_CONTINUITY_FAILED,
+            TerminationReason.EXPORT_IMPORT_REJECTED,
             TerminationReason.RENDER_FAILED,
             TerminationReason.INVALID_RENDER_RESPONSE,
             TerminationReason.CANDIDATE_ANALYSIS_FAILED,

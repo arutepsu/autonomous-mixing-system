@@ -304,13 +304,17 @@ RUN_REQUEST = _run_request()
         (RenderPreparationFailure, ["issue", "created_workspace"]),
         (RunRequest, ["run_id", "initial_state", "configuration", "policy", "renderer_capabilities", "processing_spec",
                       "recipe", "stem_bindings", "mix_artifact_id", "measurements", "analysis_definitions",
-                      "alignment", "root_bindings", "output_root_key", "retry_policy"]),
+                      "alignment", "root_bindings", "output_root_key", "retry_policy", "daw_session"]),
     ],
 )  # fmt: skip
 def test_record_fields_are_exact_required_and_frozen(record, fields):
     assert [f.name for f in dataclasses.fields(record)] == fields
+    # ADR-035: the one optional field is RunRequest.daw_session, trailing and None by default (offline runs).
+    optional = {"daw_session"} if record is RunRequest else set()
     assert all(f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
-               for f in dataclasses.fields(record))  # fmt: skip
+               for f in dataclasses.fields(record) if f.name not in optional)  # fmt: skip
+    if optional:
+        assert dataclasses.fields(record)[-1].default is None
     assert record.__dataclass_params__.frozen
 
 

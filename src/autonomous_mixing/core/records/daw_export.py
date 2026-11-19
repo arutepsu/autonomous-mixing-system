@@ -27,8 +27,13 @@ from datetime import datetime
 from enum import Enum
 
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
-from autonomous_mixing.core.records.daw import DawFaderReading, DawTrackBinding
-from autonomous_mixing.core.records.daw_control import DawControlProfile, DawInspection, DawInspectRequest
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
+from autonomous_mixing.core.records.daw_control import (
+    DawApplyRequest,
+    DawControlProfile,
+    DawInspection,
+    DawInspectRequest,
+)
 from autonomous_mixing.core.records.daw_recovery import DawControlState
 from autonomous_mixing.core.records.identifiers import ArtifactId, ExecutionId, ProjectId, Revision, TrackId, VersionRef
 from autonomous_mixing.core.records.invariants import (
@@ -137,6 +142,9 @@ class DawStateAnchor:
     reservation_watermark: int
     resolution_watermark: int
     ledger_watermark: int
+    # Review fix 2026-11-19: the exact journaled apply request of a CONFIRMED_WRITE source, rebuilt from its stored
+    # text; None for restoration and resolution sources. Request identity is exact agreement with it, never a tolerance.
+    apply: DawApplyRequest | None
 
     def __post_init__(self) -> None:
         _require_id(self.source_id, "DawStateAnchor.source_id")
@@ -158,6 +166,16 @@ class DawStateAnchor:
                 raise ValueError("a resolution anchor must be the latest resolution, with no reservation after it")
         elif reserved != self.source_seq or resolved >= self.source_seq:
             raise ValueError("a confirmed-command anchor must be the latest reservation, with no resolution after it")
+        if self.basis is not DawStateBasis.CONFIRMED_WRITE:
+            if self.apply is not None:
+                raise ValueError("only a confirmed-write anchor carries an apply request")
+            return
+        require_instance(self.apply, DawApplyRequest, "DawStateAnchor.apply")
+        apply = self.apply
+        if (apply.command_id, apply.execution_id) != (self.source_id, self.execution_id):
+            raise ValueError("DawStateAnchor apply request answers another command or execution")
+        if (apply.resolution.state.binding, apply.profile) != (self.binding, self.profile):
+            raise ValueError("DawStateAnchor apply request used another binding or profile")
 
 
 @dataclass(frozen=True)
@@ -368,41 +386,65 @@ class DawExportRequest:
             raise ValueError("DawExportRequest.candidate_revision must be new to the before checkpoint")
 
     def _check_outputs(self) -> None:
-        if self.routing.status is not DawDependencyStatus.DECLARED:
-            raise RoutingUnknownError("DawExportRequest routing dependencies must be declared, not unknown")
-        target = self.binding.track_id
-        if target in self.routing.dependent_track_ids:
-            raise ValueError("DawExportRequest routing lists the bound track as its own dependent")
-        ids = [output.artifact_id for output in self.outputs]
-        replaced = [output.replaces for output in self.outputs]
-        keys = [daw_file_name_key(output.file_name) for output in self.outputs]
-        if len(set(ids)) != len(ids) or len(set(replaced)) != len(replaced):
-            raise ValueError("DawExportRequest output IDs and replaced IDs must each be distinct")
-        if set(ids) & self.before_checkpoint.artifact_ids:
-            raise ValueError("DawExportRequest output IDs must be new to the before checkpoint")
-        if len(set(keys)) != len(keys):
-            raise ValueError("DawExportRequest output file names collide after normalization and case folding")
-        stems, mixes = [], 0
-        for output in self.outputs:
-            before = self.before_checkpoint.artifact_for(output.replaces)
-            if before is None:
-                raise ValueError(f"DawExportOutput {output.artifact_id} replaces a non-member {output.replaces}")
-            if (before.kind, before.source_track_ids) != (output.kind, output.source_track_ids):
-                raise ValueError(
-                    f"DawExportOutput {output.artifact_id} differs in kind or tracks from what it replaces"
-                )
-            if output.kind is ArtifactKind.STEM:
-                if len(output.source_track_ids) != 1:
-                    raise ValueError("a stem output has exactly one source track")
-                stems.append(output.source_track_ids[0])
-            elif output.kind is ArtifactKind.MIX:
-                mixes += 1
-            else:
-                raise ValueError(f"DawExportOutput {output.artifact_id} is outside the affected set")
-        if mixes != 1:
-            raise ValueError("DawExportRequest must export exactly one master mix")
-        if sorted(stems, key=str) != sorted([target, *self.routing.dependent_track_ids], key=str):
-            raise ValueError("DawExportRequest stems must be exactly the target track and the declared dependents")
+        problem = daw_export_coverage_problem(self.before_checkpoint, self.binding.track_id, self.routing, self.outputs)
+        if problem is not None:
+            raise ValueError(f"DawExportRequest {problem}")
+
+
+def daw_export_coverage_problem(
+    before_checkpoint: ArtifactCheckpoint,
+    target: TrackId,
+    routing: DawRoutingDeclaration,
+    outputs: tuple[DawExportOutput, ...],
+) -> str | None:
+    """Why ``outputs`` do not exactly cover and explicitly replace the affected set of ``target``, or None.
+
+    Shared by ``DawExportRequest`` and the coordinator's ``DawCorrectionPlan`` so both decide identically. Unknown
+    routing raises ``RoutingUnknownError``. Each output replaces one distinct before member of the same kind and
+    source tracks; the stems are exactly the target and the declared dependents; exactly one master mix. Every before
+    member whose sources include the target must be replaced, and a group containing the target is unsupported
+    (ADR-035, G5): this slice exports stems and the master only.
+    """
+    if routing.status is not DawDependencyStatus.DECLARED:
+        raise RoutingUnknownError("routing dependencies must be declared, not unknown")
+    if target in routing.dependent_track_ids:
+        return "routing lists the bound track as its own dependent"
+    ids = [output.artifact_id for output in outputs]
+    replaced = [output.replaces for output in outputs]
+    keys = [daw_file_name_key(output.file_name) for output in outputs]
+    if len(set(ids)) != len(ids) or len(set(replaced)) != len(replaced):
+        return "output IDs and replaced IDs must each be distinct"
+    if set(ids) & before_checkpoint.artifact_ids:
+        return "output IDs must be new to the before checkpoint"
+    if len(set(keys)) != len(keys):
+        return "output file names collide after normalization and case folding"
+    stems, mixes = [], 0
+    for output in outputs:
+        before = before_checkpoint.artifact_for(output.replaces)
+        if before is None:
+            return f"output {output.artifact_id} replaces a non-member {output.replaces}"
+        if (before.kind, before.source_track_ids) != (output.kind, output.source_track_ids):
+            return f"output {output.artifact_id} differs in kind or tracks from what it replaces"
+        if output.kind is ArtifactKind.STEM:
+            if len(output.source_track_ids) != 1:
+                return "a stem output has exactly one source track"
+            stems.append(output.source_track_ids[0])
+        elif output.kind is ArtifactKind.MIX:
+            mixes += 1
+        else:
+            return f"output {output.artifact_id} is outside the affected set"
+    if mixes != 1:
+        return "must export exactly one master mix"
+    if sorted(stems, key=str) != sorted([target, *routing.dependent_track_ids], key=str):
+        return "stems must be exactly the target track and the declared dependents"
+    for member in before_checkpoint.artifacts:
+        if target not in member.source_track_ids:
+            continue
+        if member.kind is ArtifactKind.GROUP:
+            return f"before member {member.artifact_id} is a group containing the target; groups are unsupported"
+        if member.artifact_id not in replaced:
+            return f"before member {member.artifact_id} contains the target but is not replaced"
+    return None
 
 
 def daw_export_artifact(request: DawExportRequest, output: DawExportOutput, content_hash: str) -> AudioArtifact:

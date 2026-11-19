@@ -28,7 +28,8 @@ from autonomous_mixing.core.records.actions import (
 )
 from autonomous_mixing.core.records.admission import AdmittedAction, TrackGainPermission
 from autonomous_mixing.core.records.capabilities import GainBounds
-from autonomous_mixing.core.records.daw import DawFaderReading, DawGainResolution, DawTrackBinding, DawTrackState
+from autonomous_mixing.core.records.daw import DawGainResolution, DawTrackState
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import (
     DawApplyPermitted,
     DawApplyRejected,

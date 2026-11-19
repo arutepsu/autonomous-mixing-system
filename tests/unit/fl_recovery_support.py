@@ -11,7 +11,7 @@ from autonomous_mixing.adapters.fl_studio.profile import make_apply_command
 from autonomous_mixing.adapters.fl_studio.serialization import grant_json, request_json, restore_request_json
 from autonomous_mixing.core.admission.daw import gate_daw_restore
 from autonomous_mixing.core.records.budgets import BudgetGrant, BudgetOperation, BudgetUsage
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
     DawInspection,
     DawInspectRequest,

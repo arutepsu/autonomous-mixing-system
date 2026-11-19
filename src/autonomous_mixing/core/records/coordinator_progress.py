@@ -11,6 +11,7 @@ from autonomous_mixing.core.records.actions import Action, ExecutionReceipt
 from autonomous_mixing.core.records.admission import StemBinding
 from autonomous_mixing.core.records.budgets import BudgetUsage
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading, RunRequest
+from autonomous_mixing.core.records.daw_correction import DawCorrectionPlan
 from autonomous_mixing.core.records.decision import Decision, ProposeAction
 from autonomous_mixing.core.records.diagnosis import DiagnosisReport
 from autonomous_mixing.core.records.feedback import DecisionFeedback
@@ -94,7 +95,7 @@ class PreparedCorrection:
     before: ProjectState
     decision: Decision
     attempt_id: AttemptId
-    plan: RenderPlan
+    plan: RenderPlan | DawCorrectionPlan  # ADR-035: the offline render or the DAW correction
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -102,7 +103,7 @@ class PreparedCorrection:
             ("before", ProjectState),
             ("decision", Decision),
             ("attempt_id", AttemptId),
-            ("plan", RenderPlan),
+            ("plan", (RenderPlan, DawCorrectionPlan)),
         ):
             require_instance(getattr(self, name), cls, f"PreparedCorrection.{name}")
         if not isinstance(self.decision.outcome, ProposeAction):
@@ -116,6 +117,8 @@ class PreparedCorrection:
             self.plan.requested_gain_db,
         ):
             raise ValueError("PreparedCorrection action differs from its render operation")
+        if isinstance(self.plan, DawCorrectionPlan):
+            self.plan.validate_against(self.before)
 
     @property
     def action(self) -> Action:
@@ -127,6 +130,8 @@ class PreparedCorrection:
 
     @property
     def candidate_revision(self) -> Revision:
+        if isinstance(self.plan, DawCorrectionPlan):
+            return self.plan.candidate_revision
         return self.plan.candidate.revision
 
 

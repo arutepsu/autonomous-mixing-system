@@ -149,6 +149,20 @@ Proposed by [ADR-033](../decisions/0033-daw-export-handoff-and-verified-import.m
 - No file check is race-free.
 - Saving and exporting stay manual. No coordinator integration, receipt, analysis conversion or live trial exists. `Renderer` and `RunRenderer` are unchanged.
 
+### Coordinator DAW execution path: contracts (`core.records.daw_correction`, `core.records.daw_binding`, `core.loop.daw_transitions`; implemented 2026-11-19, not integrated)
+
+Proposed by [ADR-035](../decisions/0035-coordinator-daw-execution-path.md), within the scope of [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md). [Plan](../superpowers/plans/2026-11-18-daw-coordinator-integration.md): Increment 1 of revision 3.
+
+- **State and plan:**
+  - `ProjectState.daw` holds explicit DAW parameter state (Option A), separate from `TrackGainState`; the offline path refuses it.
+  - `PreparedCorrection.plan` is `RenderPlan | DawCorrectionPlan`.
+  - `RunRequest.daw_session` is optional.
+- **Receipt:** only a verified import yields a DAW receipt. Its supersession is exactly the import's replacements, and groups of the target are refused.
+- **Rollback:**
+  - VERIFIED selected-state rollback needs retained-audio integrity plus exact, correctly ordered fader evidence bound to the same fader and saved target. A resolution never counts.
+  - No DAW receipt can claim complete project rollback.
+- **Run records:** suspension records, trace kinds, the `DAW_WRITE` budget and termination reasons exist. No loop stage uses them yet.
+
 ### Budget gate (`core.loop.budgets`; implemented 2026-11-04, not integrated)
 Implements Task 1 of `docs/superpowers/plans/2026-11-04-control-loop-budget-gate-plan.md` (attempt contract, sections 25–26 and 29). `core.records.budgets` adds `BudgetOperation` (decision call, attempt, render call, recovery operation), `BudgetBlockReason` (elapsed time, decision-call, attempt, render-call and recovery-capacity limits), the frozen outcomes `BudgetGrant(operation, usage_after_charge)` and `BudgetBlock(operation, reason, usage)` and the union `BudgetAssessment`; a block rejects a reason unrelated to its operation. `BudgetLimits` and `BudgetUsage` are unchanged. `check_budget(operation, *, limits, usage, elapsed_seconds)` takes a caller-supplied elapsed checkpoint (finite, non-negative, not earlier than recorded usage, else `ValueError`) and returns, in this order: an elapsed-time block at or above the limit; a block when the operation's own count has reached its limit (count limits are inclusive); for a render, a recovery-capacity block when no recovery slot is unused; otherwise a grant whose usage increments only that operation's counter. Recovery is not blocked by exhausted decision, attempt or render counters. Recorded overruns are kept, not clamped; integer counts stay exact. Evidence: `tests/unit/test_loop_budgets.py`.
 

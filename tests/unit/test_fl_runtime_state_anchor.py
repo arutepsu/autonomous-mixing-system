@@ -12,7 +12,7 @@ from fl_runtime_support import make_request
 from test_fl_runtime_recovery_controller import ROOT, World
 
 from autonomous_mixing.adapters.fl_studio.journal import SqliteCommandJournal
-from autonomous_mixing.adapters.fl_studio.serialization import request_json
+from autonomous_mixing.adapters.fl_studio.serialization import load_apply_request, request_json
 from autonomous_mixing.core.ports.daw_recovery import validate_daw_continuity_snapshot, validate_daw_state_anchor
 from autonomous_mixing.core.records.daw_control import DawRefusalCode, DawWriteConfirmed, DawWriteRefused
 from autonomous_mixing.core.records.daw_export import DawStateBasis, daw_continuity_rejection
@@ -57,6 +57,7 @@ def test_a_confirmed_apply_anchors_its_after_reading_with_the_complete_journaled
     assert (anchor.basis, anchor.source_seq, anchor.reading) == (DawStateBasis.CONFIRMED_WRITE, 1, applied.after)
     assert anchor.binding == request.resolution.state.binding and anchor.profile == request.profile
     assert anchor.execution_id == ExecutionId("e1")
+    assert anchor.apply == request  # the exact journaled apply request, rebuilt from its stored text
     assert (anchor.reservation_watermark, anchor.resolution_watermark, anchor.ledger_watermark) == (1, 0, 1)
 
 
@@ -67,6 +68,7 @@ def test_a_confirmed_rollback_anchors_the_restoration_and_supersedes_the_apply(j
     assert isinstance(restored, DawRestoreConfirmed)
     anchor = anchor_of(world, "restore_cmd_0001").value
     assert anchor.basis is DawStateBasis.CONFIRMED_RESTORE and anchor.reading == restored.after == applied.before
+    assert anchor.apply is None
     assert anchor.source_seq == anchor.reservation_watermark == 2 and anchor.ledger_watermark == 3  # + its charge
     superseded = anchor_of(world, ROOT)
     assert isinstance(superseded, PortFailure) and superseded.code is PortFailureCode.INVALID_INPUT
@@ -84,6 +86,7 @@ def test_a_resolution_anchors_the_resolved_reading_with_the_roots_binding_and_pr
     assert isinstance(recorded, DawResolutionRecorded)
     anchor = anchor_of(world, "resolve_0001").value
     assert anchor.basis is DawStateBasis.RESOLVED and anchor.reading == recorded.resolved_reading == restored.after
+    assert anchor.apply is None
     assert anchor.source_seq == anchor.resolution_watermark == recorded.ledger_seq
     assert anchor.binding == make_request(ROOT).resolution.state.binding and anchor.profile == make_request().profile
     assert isinstance(anchor_of(world, "restore_cmd_0001"), PortFailure)  # superseded by the resolution
@@ -217,3 +220,17 @@ def test_a_moved_fader_is_snapshotted_as_observed_and_rejected_by_the_continuity
     result = snapshot_of(world, ROOT)
     assert isinstance(result, Success) and result.value.inspection.fader != anchor.reading
     assert daw_continuity_rejection(anchor, result.value) is not None
+
+
+# --- the exact journaled apply request (review fix 2026-11-19) ---------------------------------------------------------
+
+
+def test_the_journaled_apply_request_is_rebuilt_exactly_or_refused():
+    request = make_request(ROOT)
+    text = request_json(request)
+    assert load_apply_request(text) == request
+    reordered = json.dumps(json.loads(text), separators=(", ", ": "), sort_keys=True)  # equal content, other bytes
+    with pytest.raises(ValueError):
+        load_apply_request(reordered)
+    with pytest.raises(ValueError):
+        load_apply_request(text.replace('"value_db":1.0', '"value_db":0.99'))  # a different stored request

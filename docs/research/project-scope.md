@@ -36,11 +36,13 @@ Superseded: v1 labeled P2 and P3 as "extension".
 - Claude API proposes structured actions through a validated tool interface.
 - Original audio remains unchanged; each action is reversible.
 - No new foundation-model training, comprehensive automatic mixing/mastering, general genre classification, guaranteed perceptual superiority, or mandatory FL Studio project integration.
+- Optional, operator-assisted FL Studio runtime path (D15 decided 2026-11-18; [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md), Proposed). It covers gain changes on calibrated mixer inserts and verified manual exports only. Excluded: `.flp` manipulation, unattended operation, automated saving or exporting. The offline WAV path stays primary; the DAW path is not mandatory for the core experiment.
 
 ## Study genres
 House/techno, trap/phonk/wave, and drum & bass; genre comparisons are exploratory unless data supports them.
 
 ## Open questions
+- Whether results from the optional DAW path enter the main evaluation, and under which comparison conditions (ADR-034).
 - Which published perceptual masking or multitrack-interaction methodology is feasible?
 - How will defect labels and acceptance criteria be established independently?
 - What is the smallest effective benchmark given creation/annotation time?

@@ -1,9 +1,14 @@
-"""Project tracks, snapshots, artifact checkpoints, gain processing state and composite project state."""
+"""Project tracks, snapshots, artifact checkpoints, gain processing state, DAW parameter state and composite state.
+
+``DawParameterState`` (ADR-034 Option A; ADR-035) is the explicit DAW parameter state of DAW-controlled tracks. It is
+separate from ``TrackGainState`` (fixed-input gain, ADR-019), which the DAW path never writes.
+"""
 
 from dataclasses import dataclass
 from datetime import datetime
 
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.identifiers import ArtifactId, CheckpointId, ProjectId, Revision, TrackId
 from autonomous_mixing.core.records.invariants import (
     require_finite,
@@ -174,6 +179,57 @@ class ProjectProcessingState:
 
 
 @dataclass(frozen=True)
+class DawTrackParameter:
+    """Selected application gain and confirmed fader readings of one DAW-controlled track.
+
+    Not a ``TrackGainState``: there is no fixed input and no processing claim. ``confirmed_fader`` is the last
+    confirmed reading of the bound insert (a parameter reading, never audio evidence); ``selected_gain_db`` is the
+    application coordinate it represents under the binding's baseline mapping.
+    """
+
+    binding: DawTrackBinding
+    selected_gain_db: float
+    confirmed_fader: DawFaderReading
+
+    def __post_init__(self) -> None:
+        require_instance(self.binding, DawTrackBinding, "DawTrackParameter.binding")
+        require_finite(self.selected_gain_db, "DawTrackParameter.selected_gain_db")
+        require_instance(self.confirmed_fader, DawFaderReading, "DawTrackParameter.confirmed_fader")
+
+    @property
+    def track_id(self) -> TrackId:
+        return self.binding.track_id
+
+
+@dataclass(frozen=True)
+class DawParameterState:
+    """DAW parameter state of one project state: one entry per DAW-controlled track, each with its complete binding."""
+
+    project_id: ProjectId
+    revision: Revision
+    tracks: tuple[DawTrackParameter, ...]
+
+    def __post_init__(self) -> None:
+        require_instance(self.project_id, ProjectId, "DawParameterState.project_id")
+        require_instance(self.revision, Revision, "DawParameterState.revision")
+        require_tuple_of(self.tracks, DawTrackParameter, "DawParameterState.tracks", nonempty=True, distinct=False)
+        ids = [track.track_id for track in self.tracks]
+        if len(set(ids)) != len(ids):
+            raise ValueError("DawParameterState.tracks must name each track once")
+        for track in self.tracks:
+            if track.binding.project_id != self.project_id:
+                raise ValueError(f"DAW binding of track {track.track_id} belongs to another project")
+
+    def track(self, track_id: TrackId) -> DawTrackParameter | None:
+        return next((track for track in self.tracks if track.track_id == track_id), None)
+
+    def validate_against(self, snapshot: ProjectSnapshot) -> None:
+        if (self.project_id, self.revision) != (snapshot.project_id, snapshot.revision):
+            raise ValueError("DAW parameter state does not match the snapshot's project and revision")
+        snapshot.require_known_tracks(tuple(track.track_id for track in self.tracks), "DAW parameter state")
+
+
+@dataclass(frozen=True)
 class ProjectState:
     """One consistent project state; it may describe a candidate or an accepted state.
 
@@ -188,6 +244,8 @@ class ProjectState:
     snapshot: ProjectSnapshot
     processing: ProjectProcessingState
     audio: ArtifactCheckpoint
+    # ADR-035: a trailing optional field, so every offline state and constructor stays exactly as before.
+    daw: DawParameterState | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.snapshot, ProjectSnapshot, "ProjectState.snapshot")
@@ -195,6 +253,9 @@ class ProjectState:
         require_instance(self.audio, ArtifactCheckpoint, "ProjectState.audio")
         self.processing.validate_against(self.snapshot)
         self.audio.validate_against(self.snapshot)
+        if self.daw is not None:
+            require_instance(self.daw, DawParameterState, "ProjectState.daw")
+            self.daw.validate_against(self.snapshot)
         for gain in self.processing.track_gains:
             member = self.audio.artifact_for(gain.input_artifact.artifact_id)
             if member is not None and member != gain.input_artifact:

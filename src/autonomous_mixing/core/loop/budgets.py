@@ -57,6 +57,8 @@ def check_budget(
             count, limit, reason = usage.attempts, limits.max_attempts, BudgetBlockReason.ATTEMPT_LIMIT
         case BudgetOperation.RENDER_CALL:
             count, limit, reason = usage.render_calls, limits.max_render_calls, BudgetBlockReason.RENDER_CALL_LIMIT
+        case BudgetOperation.DAW_WRITE:
+            count, limit, reason = usage.daw_writes, limits.max_daw_writes, BudgetBlockReason.DAW_WRITE_LIMIT
         case BudgetOperation.RECOVERY_OPERATION:
             count, limit = usage.recovery_operations, limits.max_recovery_operations
             reason = BudgetBlockReason.RECOVERY_CAPACITY_LIMIT
@@ -65,7 +67,10 @@ def check_budget(
 
     if count >= limit:
         return BudgetBlock(operation, reason, observed)
-    if operation is BudgetOperation.RENDER_CALL and usage.recovery_operations >= limits.max_recovery_operations:
+    if (
+        operation in (BudgetOperation.RENDER_CALL, BudgetOperation.DAW_WRITE)
+        and usage.recovery_operations >= limits.max_recovery_operations
+    ):
         return BudgetBlock(operation, BudgetBlockReason.RECOVERY_CAPACITY_LIMIT, observed)
 
     match operation:
@@ -75,6 +80,8 @@ def check_budget(
             charged = replace(observed, attempts=count + 1)
         case BudgetOperation.RENDER_CALL:
             charged = replace(observed, render_calls=count + 1)
+        case BudgetOperation.DAW_WRITE:
+            charged = replace(observed, daw_writes=count + 1)
         case BudgetOperation.RECOVERY_OPERATION:
             charged = replace(observed, recovery_operations=count + 1)
         case _:

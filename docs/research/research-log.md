@@ -1745,3 +1745,81 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - Four new mutation probes, all caught. One survived at first and was caught after a fail-fast assertion was added. All 22 probes of the slice are caught.
 - **Kept.** The conservative anchor rule: any later reservation supersedes an anchor. The owner accepted it for this slice.
 - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-18 — D15 decided: bounded, operator-assisted FL Studio integration (Claude Code)
+- **Owner decision.** D15 is adopted for bounded, operator-assisted FL Studio runtime integration, initially limited to gain changes and verified manual exports.
+  - **Option A:** explicit DAW parameter state inside `ProjectState`, separate from `TrackGainState`.
+  - **Rollback claims:** fader restoration is distinguished from complete project rollback.
+  - **Authorization:** scope documentation only. No implementation, installation or live calls.
+- **Recorded:**
+  - **ADR-034** (Proposed) supersedes in part the FL Studio scheduling clause of ADR-009, whose file is unchanged. ADR-001, ADR-004 and ADR-010 are unchanged, and ADR-030 to 033 stay Proposed.
+  - **`requirements.md` v1.2:** FR-19 and FR-20, both Planned; the system context and exclusions updated; D15 marked decided.
+  - **Scope and roadmap:** the project-scope core boundaries, and roadmap priority 4.
+  - **The coordinator-integration plan:** Increment 0 completed as documentation; G4 and G6 resolved by the decision.
+- **Rollback claims, kept apart:**
+  - fader restoration proves one fader's readings;
+  - selected-state rollback: retained accepted audio plus the fader restored exactly;
+  - complete project rollback (routing, plugins, automation, saved file, fresh exports) is never claimed.
+- **Open.** Whether DAW-path results enter the main evaluation and under which comparison conditions.
+
+## 2026-11-19 — Resolution is not rollback (owner amendment; Claude Code)
+- **Amendment.** A resolution may clear uncertainty, but must not establish verified selected-state rollback. That rollback requires:
+  - retained-audio integrity;
+  - exact equality of both fader readings to the saved target, supported by recorded evidence.
+- **Defect it closes.** Revision 2 of the coordinator-integration plan let a `NOT_APPLIED` resolution count toward VERIFIED rollback. It also labelled an `AT_RECORDED_START` attempt "not executed", although such a finding matches only within tolerance. Both are withdrawn.
+- **Evidence now accepted:** `EXACT_RESTORE` (a journaled `DawRestoreConfirmed` to the saved target) or `EXACT_OBSERVATION` (a recorded reading exactly equal in both coordinates, after the lineage's last reservation).
+- **Regression specified, written first in Increments 1 and 4:**
+  - a reconciliation matches within tolerance but differs from the exact target;
+  - the resolution succeeds;
+  - verified rollback is refused when the exact restoration is unavailable, and granted in the control case after an exact restoration.
+
+  Record-level ulp cases and three mutation probes accompany it.
+- **Updated:** ADR-034 (Proposed, revised in place with a note), FR-19 text and verification, and plan revision 3. Documentation only: no code, installation or live calls.
+
+## 2026-11-19 — Coordinator DAW path, Increment 1: contracts (Claude Code)
+- **Source.** The owner approved plan revision 3 and Increment 1, tests-first, with one condition: exact-reading evidence is bound to the same fader and saved target, and ordered after the latest relevant write reservation. **ADR-035** (Proposed) records the contracts.
+- **Implemented (records and pure rules; no loop behaviour):**
+  - **State:** Option A DAW parameter state in `ProjectState`, refused by the offline preflight and the offline derivation.
+  - **Correction:** `DawCorrectionPlan` beside `RenderPlan`, and `RunRequest.daw_session`.
+  - **Receipt and candidate:** the DAW receipt and candidate derivation (`core.loop.daw_transitions`). Supersession is exactly the import's replacements, and groups of the target are refused.
+  - **Rollback:** a rollback scope with typed fader evidence.
+  - **Run records:** the suspension checkpoint and `RunSuspended`, six trace kinds, the `DAW_WRITE` budget (which needs a free recovery slot), five termination reasons, and `RunState.AWAITING_OPERATOR_EXPORT`.
+  - **Module move:** `DawFaderReading` and `DawTrackBinding` move to `core.records.daw_binding`, to avoid an import cycle.
+- **Rollback rule.**
+  - **Exact fader evidence:** verified selected-state rollback needs retained-audio integrity plus exact fader evidence (`EXACT_RESTORE` or `EXACT_OBSERVATION`). That evidence must be bound to the complete binding and to the saved target, and must follow the latest write reservation by ledger position.
+  - **Resolution:** a resolution is refused as evidence.
+  - **Project rollback:** no receipt can claim complete project rollback for a DAW-controlled state.
+- **Evidence.**
+  - **New tests:** 59, including the owner's four regressions (resolution only, one-ULP mismatch, exact reading, failed integrity).
+  - **Mutation probes:** 20, all caught.
+  - **Pins updated explicitly** for the added enum members and trailing fields.
+  - **Suite:** 6,138 passed, 4 skipped.
+- **Consequence noted.** FL restoration identities now include `daw_writes: 0`. No runtime FL journal has been persisted, and an older one would fail safe with a conflict.
+- **Not done.** No coordinator integration, installation or live calls. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 1: review fixes (Claude Code)
+- **Source.** Codex review of Increment 1 found two P2 defects, both reproduced with synthetic records. Codex independently ran 315 contract and architecture tests.
+- **Findings and fixes, with regressions written first:**
+  1. **The DAW candidate could record a gain other than the executed action's.** A substituted −99 dB action on the same track produced a receipt, and the candidate recorded −99 dB.
+     - The receipt and candidate derivation now take the journaled `DawApplyRequest`.
+     - `daw_apply_export_problem` binds it to the export's anchor, execution, binding, profile, before state, track and resolved target.
+     - The apply must have been resolved from the selected state.
+     - The suspension checkpoint now carries the apply request.
+  2. **The suspension checkpoint ignored the timeline, format and render spec.** They are now compared, with one regression per field.
+- **ADR-035** (Proposed) is revised in place to state both rules.
+- **Checks.**
+  - **Mutation probes:** nine new, all caught; one survived at first and was caught after an added regression. The 20 original probes are all still caught.
+  - **Contract tests:** 71.
+  - **Locked checks:** focused suites with warnings as errors, 1,592 passed; full suite 6,150 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 1: exact apply identity (Claude Code)
+- **Source.** Codex's re-review found one remaining P2: `daw_apply_export_problem` identified the apply request through the success tolerance. A substitute with the same command ID and 0.99 dB instead of 1.00 dB was accepted. Codex independently ran 327 tests.
+- **Fix, with regressions written first:**
+  - the journal-backed `DawStateAnchor` now carries the exact journaled `DawApplyRequest` of a confirmed write;
+  - the FL adapter rebuilds it from the stored text and requires an exact re-serialization;
+  - identity is exact agreement, and the success-tolerance check stays separate;
+  - the redundant command and execution comparisons were removed as implied by the anchor and request invariants.
+- **ADR-035** (Proposed) is revised in place.
+- **Checks.** 33 mutation probes, all caught; one new probe survived at first and was caught after an added regression. Locked: focused suites with warnings as errors, 1,596 passed; full suite 6,154 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.

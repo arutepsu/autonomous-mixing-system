@@ -22,7 +22,7 @@ from pathlib import Path
 
 from autonomous_mixing.adapters.fl_studio.serialization import load_grant, load_outcome, outcome_json
 from autonomous_mixing.core.records.budgets import BudgetOperation
-from autonomous_mixing.core.records.daw import DawFaderReading
+from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
     DawApplyOutcome,
     DawWriteConfirmed,
@@ -484,10 +484,12 @@ class SqliteCommandJournal:
                     request = row.request["request"]
                     basis, binding = "confirmed_write", request["resolution"]["state"]["binding"]
                     profile, execution = request["profile"], request["execution_id"]
+                    apply_json = row.request_json  # the exact stored request text (review fix 2026-11-19)
                 else:
                     request = row.request["restore"]
                     basis, binding, profile = "confirmed_restore", request["binding"], request["profile"]
                     execution = request["authorization"]["execution_id"]
+                    apply_json = None
                 seq, reading = row.reserved_seq, _plain_reading(row.outcome.after)
                 current = reserved == seq and resolved < seq
             else:
@@ -499,11 +501,12 @@ class SqliteCommandJournal:
                 basis, binding = "resolved", request["resolution"]["state"]["binding"]
                 profile, execution, reading = request["profile"], request["execution_id"], record["reading"]
                 current = resolved == seq and reserved < seq
+                apply_json = None
             if not current:
                 raise JournalRefusal("superseded", "a later reservation or resolution supersedes the source")
             return {"basis": basis, "source_seq": seq, "execution_id": execution, "binding": binding,
                     "profile": profile, "reading": reading, "reservation_watermark": reserved,
-                    "resolution_watermark": resolved, "ledger_watermark": top}  # fmt: skip
+                    "resolution_watermark": resolved, "ledger_watermark": top, "apply_json": apply_json}  # fmt: skip
 
     def ledger_entry(self, kind: str, entry_id: str):
         """(seq, subject, record) of one ledger entry, or None."""
