@@ -36,6 +36,8 @@ ALLOWED_PACKAGES = {
 BEHAVIOR_INVENTORY = {
     "admission.daw": ("resolve_daw_gain", "daw_gain_bounds", "gate_daw_apply", "gate_daw_restore"),  # 2026-11-18
     "admission.daw_export": ("assess_daw_import",),  # export handoff plan, 2026-11-18 (revision 3)
+    "admission.daw_correction": ("preflight_daw_correction",),  # coordinator Increment 2 (ADR-036)
+    "loop.daw_execution": ("daw_track_state", "daw_capabilities", "prepare_daw", "execute_daw"),  # ADR-036
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
     "loop.daw_transitions": (  # coordinator-integration Increment 1 (ADR-035)
         "daw_execution_receipt",
@@ -107,7 +109,7 @@ BEHAVIOR_INVENTORY = {
     "loop.budgets": ("check_budget",),
     "loop.verification_routing": ("route_verification",),
     "loop.acceptance": ("validate_acceptance_event",),
-    "loop.coordinator": ("run",),  # controlled-coordinator composition plan, 2026-11-09
+    "loop.coordinator": ("run", "run_daw"),  # controlled-coordinator composition plan, 2026-11-09; run_daw: ADR-036
     "loop.reconciliation": ("reconcile_acceptance",),
 }
 

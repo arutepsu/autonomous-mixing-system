@@ -25,6 +25,8 @@ _HIGH_PRIORITY_RECORDING_REASONS = (
     TerminationReason.RESTORATION_FAILED,
     TerminationReason.RESTORATION_UNCERTAIN,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+    TerminationReason.DAW_COMMAND_UNRESOLVED,  # ADR-036
+    TerminationReason.DAW_CONVERSION_BLOCKED,
 )
 
 
@@ -115,7 +117,7 @@ class RunReport:
 
     def _validate_usage(self) -> None:
         before, after = self.terminal_event.usage, self.final_run.usage
-        for field in ("decision_calls", "attempts", "render_calls", "recovery_operations"):
+        for field in ("decision_calls", "attempts", "render_calls", "recovery_operations", "daw_writes"):
             if getattr(before, field) != getattr(after, field):
                 raise ValueError("operation counts cannot change during terminal recording")
         if after.elapsed_seconds < before.elapsed_seconds:

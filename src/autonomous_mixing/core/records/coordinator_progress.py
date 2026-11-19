@@ -28,6 +28,14 @@ from autonomous_mixing.core.records.verification_evidence import StateEvidence
 
 Stop = tuple[TerminationReason, str]
 
+# Review fix 2026-11-19 (ADR-036): the terminal reason an unexpected exception must keep once a DAW write may have
+# taken effect. ``None`` means nothing is pending (an unexpected error is then a runtime contract failure).
+_PENDING_EFFECT_REASONS = frozenset({
+    TerminationReason.DAW_COMMAND_UNRESOLVED,
+    TerminationReason.DAW_CONVERSION_BLOCKED,
+    TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+})  # fmt: skip
+
 
 @dataclass(frozen=True)
 class RuntimeProgress:
@@ -51,6 +59,7 @@ class RuntimeProgress:
     roots: tuple[ArtifactRootBinding, ...]
     observations: tuple[StateEvidence, ...]
     diagnosed: tuple[Revision, DiagnosisReport] | None
+    pending_effect: TerminationReason | None = None  # ADR-036 review fix; trailing, so offline progress is unchanged
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -87,6 +96,8 @@ class RuntimeProgress:
                 raise ValueError("RuntimeProgress.diagnosed must be a revision/report pair")
             require_instance(self.diagnosed[0], Revision, "RuntimeProgress.diagnosed revision")
             require_instance(self.diagnosed[1], DiagnosisReport, "RuntimeProgress.diagnosed report")
+        if self.pending_effect is not None and self.pending_effect not in _PENDING_EFFECT_REASONS:
+            raise ValueError("RuntimeProgress.pending_effect must name a DAW effect that is not recovered")
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,8 @@
 > **Status: revision 2, for owner review (2026-11-18).**
 > - **Increment 0 is done as documentation:** the owner decided D15, and ADR-034 is proposed.
 > - **Increment 1 is implemented** (owner approval 2026-11-19; ADR-035 proposed; uncommitted; see "Increment 1 outcome").
-> - **Increments 2–6 are not implemented and not yet authorized.** Each needs its own approval, and then runs tests-first and stays uncommitted for owner and Codex review.
+> - **Increment 2 is implemented** (owner approval 2026-11-19; ADR-036 proposed; uncommitted; see "Increment 2 outcome").
+> - **Increments 3–6 are not implemented and not yet authorized.** Each needs its own approval, and then runs tests-first and stays uncommitted for owner and Codex review.
 > - **Never in scope here:** installation, live FL Studio calls, and automated saving or exporting.
 
 **Revision 3 (2026-11-19, owner amendment):**
@@ -401,3 +402,105 @@ The checkpoint-action probe first survived and was caught after the decision-act
 **Mutation probes.** Six new, all caught. One, for the anchor's binding and profile, first survived and was caught after the binding regression was added. With the 20 and 7 earlier probes, 33 are caught in all.
 
 **Anchor field.** `apply` is a required trailing field, so every anchor names it explicitly.
+
+## Increment 2 design note (2026-11-19, written before implementation)
+
+**Interim termination while Increment 4 recovery routing is absent.** Every outcome below that leaves the fader moved, or possibly moved, ends the run at once. Each of them:
+- writes no restoration, reconciliation or resolution;
+- builds no `RollbackReceipt`;
+- clears nothing in the FL journal, so an unresolved command and a conversion block remain and keep blocking every later write through `control_state` and `gate_daw_apply`;
+- leaves the run's verified reference cleared, so the final state is `UNKNOWN` and never `UNCHANGED` or `RESTORED_TO_LAST_ACCEPTED`. No rollback is claimed;
+- records `ActionFeedback` as `UNRESOLVED` at the execution stage, with `ExecutionStatus.UNCERTAIN` (no candidate exists, and the project state relative to the selected state is not established) and no rollback status.
+
+| Outcome | Terminal reason | FL journal afterwards |
+| --- | --- | --- |
+| `DawWriteOffTarget` | `DAW_CONVERSION_BLOCKED` | known write; the conversion is blocked permanently |
+| `DawWriteUncertain`, or a write response that fails validation | `DAW_COMMAND_UNRESOLVED` | the command stays unresolved |
+| Confirmed write, then the anchor query fails or disagrees, the export request cannot be built, `prepare` fails, the checkpoint cannot be recorded, or the run is cancelled or out of time | `REQUIRED_RECOVERY_NOT_PERFORMED` (the original cause in the explanation) | confirmed write; the fader is away from the selected state until an operator restores it |
+
+**Reasons survive a lost terminal append.** `DAW_COMMAND_UNRESOLVED` and `DAW_CONVERSION_BLOCKED` join `REQUIRED_RECOVERY_NOT_PERFORMED` among the reasons that `finalize` and `RunReport` preserve when the terminal event is not acknowledged.
+
+**Nothing written means nothing to recover:**
+- **Gate rejection:** recorded as `REJECTED` at the preflight stage; the loop continues.
+- **`DawNoWrite`:** recorded as `NOT_EXECUTED` at the preflight stage; the loop continues.
+- **`DawWriteRefused`, a pre-write refusal (ADR-030):** recorded as `FAILED` at the execution stage with `NOT_STARTED`. The verified reference is re-established and the loop continues.
+- **Inspection or control state unavailable before the write:** `NOT_EXECUTED`, and the run terminates with `EXECUTION_PREPARATION_FAILED`.
+
+**API.**
+- **`run_daw(...)`** returns `RunReport | RunSuspended`. It takes the DAW parameter and recovery controllers and the export handoff in place of the offline renderer.
+- **`run(...)`** refuses a request with a DAW session.
+- **Offline behaviour** is otherwise byte-identical.
+
+## Increment 2 outcome (2026-11-19, tests-first; uncommitted for review)
+
+Implemented as designed in the note above, recorded in [ADR-036](../../decisions/0036-coordinator-daw-write-path-to-suspension.md) (Proposed).
+
+**Code:**
+- `run_daw` (with `run` refusing DAW requests);
+- `core.loop.daw_execution`: `daw_track_state`, `daw_capabilities`, `prepare_daw`, `execute_daw`;
+- `core.admission.daw_correction.preflight_daw_correction`;
+- the `DawPlanReady` record and the trace payloads for the control state and the gate verdict;
+- the preserved DAW reasons in `finalize` and `RunReport`.
+
+**Deviations:**
+- `ordinary` takes the execution step as a `functools.partial`, because the coordinator structure test forbids nested closures.
+- Outputs are declared with the replaced artifact's channel count, an open question below.
+- A group of the target is refused by the plan's shared coverage rule, not by a second check in the preflight.
+
+**Tests:** 15 in `tests/unit/test_daw_coordinator.py`:
+- **Confirmed write:** suspension with no receipt, analysis, render or acceptance; one stable command ID from plan to FL journal.
+- **Capability window:** `[-1.0, 0.0]` dB for the confirmed 2 dB with policy `[-6, 0]`.
+- **Nothing written:** pre-write refusal, gate rejection with the unresolved command preserved, no-write, the exhausted `DAW_WRITE` budget, and the DAW-preflight refusal of a group of the target.
+- **Off-target:** the conversion is blocked, nothing is restored, no further action follows.
+- **Uncertain:** the command stays unresolved, nothing is restored.
+- **After a confirmed write:** preparation failure, anchor failure, and an anchor that disagrees (refused before any export); the unresolved reason surviving a lost terminal append.
+- **Entry points:** each refuses the other's requests.
+
+**Mutation probes:** 11, each reverted byte-identically and caught. Two first survived:
+- **The anchor-reading check.** It is now pinned by "refused before any export".
+- **A duplicate group check in the preflight.** It was removed as redundant with the coverage rule.
+
+A defensive no-master check is unreachable through a valid `RunRequest` and was not probed.
+
+**Open question:** whether exports may declare another channel count than the artifacts they replace (for example stereo exports replacing mono baselines). Currently they must match, and a mismatch is refused at import.
+
+### Increment 2 review fix (2026-11-19)
+
+**Finding.** Codex reproduced the defect on a simulated host. After a confirmed write, export preparation raised `OSError`, and the terminal record said `RUNTIME_CONTRACT_FAILED`, losing `REQUIRED_RECOVERY_NOT_PERFORMED`. The final state was correctly `UNKNOWN`.
+
+**Fix: phase-aware exception handling.**
+- `RuntimeProgress.pending_effect` names the reason an unexpected exception must keep:
+  - `DAW_COMMAND_UNRESOLVED` from just before the apply, since it may have dispatched;
+  - `DAW_CONVERSION_BLOCKED` after an off-target write;
+  - `REQUIRED_RECOVERY_NOT_PERFORMED` after a confirmed write;
+  - cleared after a pre-write refusal.
+- `_run`'s best-effort terminal recording uses it, names the exception, and re-raises the original exception. It restores nothing and clears nothing. Offline behaviour and its explanation are unchanged.
+
+**Regressions, written first:**
+- an exception after the apply dispatched keeps `DAW_COMMAND_UNRESOLVED`, the original exception propagates, and nothing is restored;
+- an `OSError` during preparation after a confirmed write keeps `REQUIRED_RECOVERY_NOT_PERFORMED`, with nothing added to or cleared from the FL journal;
+- an exception before any dispatch stays `RUNTIME_CONTRACT_FAILED` with the state `UNCHANGED`;
+- after a refused write, a later exception is again `RUNTIME_CONTRACT_FAILED`.
+
+**Mutation probes.** Four new, all caught. Two Increment 2 probes were re-anchored to the rewritten lines and are still caught.
+
+**Not covered by a dedicated test:** an exception inside the off-target termination itself (the marker is set to `DAW_CONVERSION_BLOCKED` just before it).
+
+### Increment 2 second review fix (2026-11-19)
+
+**Finding.** The marker was set after `observed()` recorded the apply reply. Codex reproduced a confirmed write whose observation append raised: the terminal reason was `DAW_COMMAND_UNRESOLVED` instead of `REQUIRED_RECOVERY_NOT_PERFORMED`.
+
+**Fix.** Immediately after the reply is validated, and before it is recorded:
+- **Confirmed:** recovery is required.
+- **Off-target:** the conversion is blocked.
+- **Refused:** the marker is cleared and the verified reference re-established.
+- **Uncertain or invalid:** the reply keeps the unresolved marker set before the apply.
+
+**Regressions, written first, all three failing before the fix.** In each, appending the apply observation raises:
+- after a confirmed reply, the reason is `REQUIRED_RECOVERY_NOT_PERFORMED` and the state `UNKNOWN`;
+- after an off-target reply, the reason is `DAW_CONVERSION_BLOCKED` and the block is in the FL journal;
+- after a refused reply, the reason is `RUNTIME_CONTRACT_FAILED` and the state `UNCHANGED`.
+
+**Mutation probes.** The marker probes were re-anchored and one was added for the off-target marker; all five are caught, and so are all earlier sets. A separate ordering probe was dropped, because removing the confirmed-branch marker already covers it.
+
+**Previously untested case, now tested.** The off-target marker noted after the first fix is now pinned by the off-target regression above.

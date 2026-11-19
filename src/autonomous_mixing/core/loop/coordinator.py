@@ -1,10 +1,17 @@
-"""Coordinator responsibilities of the controlled serial coordinator."""
+"""Coordinator responsibilities of the controlled serial coordinator.
+
+``run`` is the offline path (unchanged). ``run_daw`` (coordinator-integration Increment 2, ADR-036) is the
+operator-assisted DAW path: the same observation, decision and admission stages, then ``execute_daw`` in place of
+rendering. It returns ``RunSuspended`` when a confirmed fader write awaits the operator's export.
+"""
 
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 from autonomous_mixing.core.loop.completion import finalize
 from autonomous_mixing.core.loop.correction import render
+from autonomous_mixing.core.loop.daw_execution import execute_daw
 from autonomous_mixing.core.loop.decision_round import decision_round
 from autonomous_mixing.core.loop.observation import (
     _missing_baselines,
@@ -17,6 +24,9 @@ from autonomous_mixing.core.loop.runtime import fresh, identity_failure, record
 from autonomous_mixing.core.loop.verification_routing import route_verification
 from autonomous_mixing.core.ports.analysis import AudioAnalyzer
 from autonomous_mixing.core.ports.coordinator_runtime import DiagnosisSource, IdentitySource, RunClock, RunRenderer
+from autonomous_mixing.core.ports.daw import DawParameterController
+from autonomous_mixing.core.ports.daw_export import DawExportHandoff
+from autonomous_mixing.core.ports.daw_recovery import DawRecoveryController
 from autonomous_mixing.core.ports.decision import DecisionMaker
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
 from autonomous_mixing.core.ports.run_journal import RunJournal, validate_run_journal_snapshot
@@ -28,8 +38,8 @@ from autonomous_mixing.core.records.identifiers import VerificationResultId
 from autonomous_mixing.core.records.integrity import IntegrityStatus
 from autonomous_mixing.core.records.invariants import require_instance
 from autonomous_mixing.core.records.results import Success
-from autonomous_mixing.core.records.run_report import RunReport
-from autonomous_mixing.core.records.run_trace import RunJournalSnapshot
+from autonomous_mixing.core.records.run_report import RunReport, RunSuspended
+from autonomous_mixing.core.records.run_trace import RunJournalSnapshot, RunTraceEvent
 from autonomous_mixing.core.records.termination import TerminationReason
 from autonomous_mixing.core.records.verification import AssessmentMode
 from autonomous_mixing.core.records.verification_assessment import VerificationAssessment
@@ -47,9 +57,10 @@ def ordinary(
     identities: IdentitySource,
     integrity_inspector: StateIntegrityInspector,
     journal: RunJournal,
-    renderer: RunRenderer,
+    execute: Callable,
     on_progress: Callable[[RuntimeProgress], None],
-) -> tuple[RuntimeProgress, Stop]:
+) -> tuple[RuntimeProgress, Stop | RunTraceEvent]:
+    """``execute(progress, prepared, on_progress=...)`` runs one prepared correction: the offline render or the DAW write."""
     progress, stop = record(progress, progress.request, identities=identities, journal=journal, on_progress=on_progress)
     if stop:
         return (progress, stop)
@@ -148,17 +159,7 @@ def ordinary(
             on_progress=on_progress,
         )
         if isinstance(result, PreparedCorrection):
-            progress, result = render(
-                progress,
-                result,
-                analyzer=analyzer,
-                clock=clock,
-                identities=identities,
-                integrity_inspector=integrity_inspector,
-                journal=journal,
-                renderer=renderer,
-                on_progress=on_progress,
-            )
+            progress, result = execute(progress, result, on_progress=on_progress)
         if result:
             return (progress, result)
     return (progress, None)
@@ -182,9 +183,66 @@ def run(
     sequence zero, with an empty trace and acceptance history; this API does not resume runs. A journal
     that cannot confirm that, or a clock whose first reading is invalid, is a caller contract error
     (``ValueError``) raised before any operation. Unexpected collaborator or programming exceptions
-    propagate after one best-effort terminal recording.
+    propagate after one best-effort terminal recording. A request with a DAW session is refused: it uses
+    ``run_daw`` (ADR-036).
     """
     require_instance(request, RunRequest, "request")
+    if request.daw_session is not None:
+        raise ValueError("run() is the offline path; a request with a DAW session uses run_daw()")
+
+    execute = partial(render, analyzer=analyzer, clock=clock, identities=identities,
+                      integrity_inspector=integrity_inspector, journal=journal, renderer=renderer)  # fmt: skip
+
+    return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker,
+                integrity_inspector=integrity_inspector, journal=journal, clock=clock, identities=identities,
+                execute=execute)  # fmt: skip
+
+
+def run_daw(
+    request: RunRequest,
+    *,
+    analyzer: AudioAnalyzer,
+    diagnosis_source: DiagnosisSource,
+    decision_maker: DecisionMaker,
+    integrity_inspector: StateIntegrityInspector,
+    journal: RunJournal,
+    clock: RunClock,
+    identities: IdentitySource,
+    daw_controller: DawParameterController,
+    recovery_controller: DawRecoveryController,
+    export_handoff: DawExportHandoff,
+) -> RunReport | RunSuspended:
+    """One operator-assisted DAW run (ADR-034, ADR-036), up to its first confirmed write's export suspension.
+
+    The same preconditions as ``run``, and the request must carry a DAW session. A confirmed fader write produces no
+    receipt, analysis or acceptance: the run returns ``RunSuspended`` with its checkpoint as the trace's last event.
+    Continuation is a separate, later increment. Off-target, uncertain and post-write failures terminate at once
+    without recovery (interim policy until Increment 4), leaving the FL journal's blocks and the final state UNKNOWN.
+    """
+    require_instance(request, RunRequest, "request")
+    if request.daw_session is None:
+        raise ValueError("run_daw() needs a request with a DAW session")
+
+    execute = partial(execute_daw, clock=clock, identities=identities, journal=journal, daw_controller=daw_controller,
+                      recovery_controller=recovery_controller, export_handoff=export_handoff)  # fmt: skip
+
+    return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker,
+                integrity_inspector=integrity_inspector, journal=journal, clock=clock, identities=identities,
+                execute=execute)  # fmt: skip
+
+
+def _run(
+    request: RunRequest,
+    *,
+    analyzer: AudioAnalyzer,
+    diagnosis_source: DiagnosisSource,
+    decision_maker: DecisionMaker,
+    integrity_inspector: StateIntegrityInspector,
+    journal: RunJournal,
+    clock: RunClock,
+    identities: IdentitySource,
+    execute: Callable,
+) -> RunReport | RunSuspended:
     initial = AcceptedReference(request.initial_state, 0)
     opened = journal.snapshot()
     if not isinstance(opened, Success) or not isinstance(opened.value, RunJournalSnapshot):
@@ -237,15 +295,24 @@ def run(
             identities=identities,
             integrity_inspector=integrity_inspector,
             journal=journal,
-            renderer=renderer,
+            execute=execute,
             on_progress=remember,
         )
-    except Exception:
+    except Exception as error:
+        # Phase-aware (review fix 2026-11-19): once a DAW write may have taken effect, the pending reason is kept; the
+        # original exception still propagates, nothing is restored and no journal state is cleared.
+        reason, explanation = TerminationReason.RUNTIME_CONTRACT_FAILED, "an unexpected error interrupted the run"
+        if latest.pending_effect is not None:
+            reason = latest.pending_effect
+            explanation = (
+                f"an unexpected error ({type(error).__name__}: {error}) interrupted the run after a DAW write may "
+                "have taken effect; the fader is not restored and no journal state is cleared"
+            )
         try:
             finalize(
                 latest,
-                TerminationReason.RUNTIME_CONTRACT_FAILED,
-                "an unexpected error interrupted the run",
+                reason,
+                explanation,
                 clock=clock,
                 identities=identities,
                 journal=journal,
@@ -254,7 +321,25 @@ def run(
         except Exception:
             pass
         raise
+    if isinstance(stop, RunTraceEvent):
+        return _suspended(progress, stop, journal)
     progress, report = finalize(
         progress, *stop, clock=clock, identities=identities, journal=journal, on_progress=remember
     )
     return report
+
+
+def _suspended(progress: RuntimeProgress, checkpoint: RunTraceEvent, journal: RunJournal) -> RunSuspended:
+    """The suspended run: the journal's acknowledged prefix ending with the checkpoint, else the locally known one."""
+    snapshot = RunJournalSnapshot(
+        progress.request.run_id, progress.initial, tuple(progress.known), tuple(progress.commits)
+    )
+    opened = journal.snapshot()
+    if isinstance(opened, Success) and isinstance(opened.value, RunJournalSnapshot):
+        try:
+            validate_run_journal_snapshot(progress.request.run_id, progress.initial, opened.value)
+            if opened.value.events and opened.value.events[-1] == checkpoint:
+                snapshot = opened.value
+        except ValueError:
+            pass
+    return RunSuspended(progress.request, snapshot, checkpoint)

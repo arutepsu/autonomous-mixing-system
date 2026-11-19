@@ -321,3 +321,16 @@ class DawCorrectionSuspended:
             plan.workspace,
         ):
             raise ValueError("DawCorrectionSuspended export request differs from the plan's export")
+
+
+@dataclass(frozen=True)
+class DawPlanReady:
+    """The DAW preflight passed (Increment 2): the plan may proceed to inspection and the capability gate.
+
+    Like ``MetadataReady`` for the offline path, it permits no write by itself: ``gate_daw_apply`` still decides.
+    """
+
+    plan: DawCorrectionPlan
+
+    def __post_init__(self) -> None:
+        require_instance(self.plan, DawCorrectionPlan, "DawPlanReady.plan")

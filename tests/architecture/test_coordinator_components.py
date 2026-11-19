@@ -16,6 +16,7 @@ OWNERS = {
     "acceptance_flow": ("accept", "finish_acceptance"),
     "feedback": ("add_feedback", "copied"),
     "completion": ("finalize",),
+    "daw_execution": ("prepare_daw", "execute_daw"),  # coordinator Increment 2 (ADR-036)
 }
 
 

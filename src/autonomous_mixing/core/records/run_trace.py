@@ -26,15 +26,18 @@ from autonomous_mixing.core.records.coordinator_runtime import (
     RunRequest,
 )
 from autonomous_mixing.core.records.daw_control import (
+    DawApplyPermitted,
+    DawApplyRejected,
     DawApplyRequest,
     DawInspection,
     DawInspectRequest,
+    DawNoWrite,
     DawWriteConfirmed,
     DawWriteOffTarget,
     DawWriteRefused,
     DawWriteUncertain,
 )
-from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended, DawStateQuery
+from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended, DawPlanReady, DawStateQuery
 from autonomous_mixing.core.records.daw_export import (
     DawContinuitySnapshot,
     DawExportAwaiting,
@@ -46,6 +49,7 @@ from autonomous_mixing.core.records.daw_export import (
     DawStateAnchor,
 )
 from autonomous_mixing.core.records.daw_recovery import (
+    DawControlState,
     DawReconcileRequest,
     DawReconciliation,
     DawResolutionRecorded,
@@ -369,6 +373,12 @@ RunTracePayload = (
     | DecisionFeedback
     | TerminalSnapshot
     | DawCorrectionSuspended
+    # Increment 2 (ADR-036): the DAW preflight, the journal control state and the capability-gate verdict
+    | DawPlanReady
+    | DawControlState
+    | DawApplyPermitted
+    | DawNoWrite
+    | DawApplyRejected
 )
 
 

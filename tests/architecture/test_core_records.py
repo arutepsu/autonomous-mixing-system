@@ -262,6 +262,7 @@ INVENTORY = {
         "DawCorrectionPlan",
         "DawStateQuery",
         "DawCorrectionSuspended",
+        "DawPlanReady",  # coordinator Increment 2 (ADR-036)
     ),
     "daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
         "DawCommandKind",

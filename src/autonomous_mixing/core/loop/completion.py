@@ -23,6 +23,9 @@ _PRESERVED_ON_RECORDING_FAILURE = (
     TerminationReason.RESTORATION_FAILED,
     TerminationReason.RESTORATION_UNCERTAIN,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+    # ADR-036: a possibly written DAW command or a blocked conversion must survive a lost terminal append
+    TerminationReason.DAW_COMMAND_UNRESOLVED,
+    TerminationReason.DAW_CONVERSION_BLOCKED,
 )
 
 

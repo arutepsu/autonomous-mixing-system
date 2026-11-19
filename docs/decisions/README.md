@@ -39,6 +39,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [033](0033-daw-export-handoff-and-verified-import.md) | DAW pending-export handoff and verified audio import | 2026-11-18 | Proposed |
 | [034](0034-bounded-operator-assisted-fl-studio-integration.md) | Bounded, operator-assisted FL Studio runtime integration (D15) | 2026-11-18 | Proposed; supersedes in part ADR-009 |
 | [035](0035-coordinator-daw-execution-path.md) | Coordinator DAW execution path: contracts (Increment 1) | 2026-11-19 | Proposed |
+| [036](0036-coordinator-daw-write-path-to-suspension.md) | Coordinator DAW write path up to the export suspension (Increment 2) | 2026-11-19 | Proposed |
 
 ## Template
 

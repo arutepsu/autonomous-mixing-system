@@ -1823,3 +1823,41 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
 - **ADR-035** (Proposed) is revised in place.
 - **Checks.** 33 mutation probes, all caught; one new probe survived at first and was caught after an added regression. Locked: focused suites with warnings as errors, 1,596 passed; full suite 6,154 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
 - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 2: write path to the export suspension (Claude Code)
+- **Source.** The owner approved Increment 2, tests-first, and asked that the interim termination of off-target, uncertain and post-write failures be stated before coding. It is in the plan's "Increment 2 design note", and **ADR-036** (Proposed) records it.
+- **Implemented:** `run_daw` drives the calibrated capability view, admission, the DAW preflight, the journal control state, a fresh inspection, the capability gate, and one stable-ID write.
+  - **Nothing written:** gate rejection, no-write and pre-write refusal are separate outcomes, and the loop continues.
+  - **Confirmed write:** the journal-backed anchor, the export handoff, the complete checkpoint, then `RunSuspended`. There is no receipt, analysis or acceptance.
+  - **Off-target, uncertain and post-write failures:** the run ends at once. There is no recovery and no rollback claim; the FL journal's blocks are preserved, and the final state is `UNKNOWN`.
+- **Evidence.**
+  - **Tests:** 15 coordinator tests, using the real FL adapter against device v2 on a fake host and the real export handoff on temporary files.
+  - **Mutation probes:** 11 new, all caught; two survived first and were fixed. The 33 earlier probes are still caught.
+  - None of this is live FL evidence.
+- **Locked checks.** Focused suites with warnings as errors, 1,796 passed; full suite 6,169 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- **Not done.** No continuation, recovery routing, durable journals, CLI, installation or live calls. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 2: phase-aware exception handling (Claude Code)
+- **Source.** Codex reproduced the defect on a simulated host. After a confirmed write, an `OSError` in export preparation made the terminal record `RUNTIME_CONTRACT_FAILED`, losing `REQUIRED_RECOVERY_NOT_PERFORMED`. Codex independently ran 414 tests.
+- **Fix.**
+  - `RuntimeProgress.pending_effect` tracks the reason an unexpected exception must keep: uncertain from just before the apply, blocked after off-target, recovery-required after confirmation, cleared after a pre-write refusal.
+  - `_run`'s best-effort terminal recording uses it, names the exception, re-raises the original, restores nothing and clears nothing.
+  - Offline behaviour is unchanged.
+  - **ADR-036** (Proposed) is revised in place.
+- **Evidence.**
+  - **Regressions:** four, written first. Two failed before the fix; the two controls passed before and after.
+  - **Mutation probes:** four new, all caught. All earlier probe sets are still caught.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 2: classify the reply before recording it (Claude Code)
+- **Source.** Codex found that the phase marker was set after `observed()`. A confirmed write whose observation append raised was reported as `DAW_COMMAND_UNRESOLVED`.
+- **Fix.** The validated reply is classified before it is recorded:
+  - confirmed: recovery required;
+  - off-target: conversion blocked;
+  - refused: marker cleared and verified reference re-established;
+  - uncertain or invalid: unresolved retained.
+- **ADR-036** (Proposed) is revised in place.
+- **Evidence.**
+  - **Regressions:** three, written first, all failing before the fix: an exception while recording a confirmed, an off-target and a refused reply.
+  - **Mutation probes:** five marker probes, all caught, and all earlier sets still caught.
+- No live calls and no installs. Left uncommitted for review.
