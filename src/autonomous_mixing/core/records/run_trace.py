@@ -101,6 +101,12 @@ from autonomous_mixing.core.records.reconciliation import ReconciliationResult
 from autonomous_mixing.core.records.rendering import RenderedCandidate, RenderFailure
 from autonomous_mixing.core.records.results import PortFailure
 from autonomous_mixing.core.records.run import CorrectionAttempt, FinalProjectState, RunOutcome, RunRecord, RunState
+from autonomous_mixing.core.records.run_restart import (
+    DawLatestAnchorQuery,
+    DawLatestState,
+    DawStartRefused,
+    RunInterrupted,
+)
 from autonomous_mixing.core.records.termination import TerminationReason
 from autonomous_mixing.core.records.verification import VerificationResult
 from autonomous_mixing.core.records.verification_assessment import VerificationAssessment
@@ -136,6 +142,7 @@ StageRequest = (
     | DawResolutionRequest
     | DawStateQuery
     | DawLineageQuery
+    | DawLatestAnchorQuery
     | DawExportRequest
     | DawImportRequest
 )
@@ -150,7 +157,8 @@ _REQUEST_TYPES = {
     OperationKind.DAW_INSPECT: DawInspectRequest,
     OperationKind.DAW_APPLY: DawApplyRequest,
     OperationKind.DAW_RECOVERY: (DawReconcileRequest, DawRestoreRequest, DawResolutionRequest),
-    OperationKind.DAW_STATE: (DawStateQuery, DawLineageQuery),  # lineage queries: Increment 4 (ADR-038)
+    # lineage queries: Increment 4 (ADR-038); the run-start latest-anchor query: Increment 5 (ADR-039)
+    OperationKind.DAW_STATE: (DawStateQuery, DawLineageQuery, DawLatestAnchorQuery),
     OperationKind.EXPORT_PREPARE: DawExportRequest,
     OperationKind.EXPORT_IMPORT: DawImportRequest,
 }
@@ -291,6 +299,7 @@ OperationOutcome = (
     | DawContinuitySnapshot
     | DawRecoveryLineage
     | DawRecoverySnapshot
+    | DawLatestState
     | DawExportAwaiting
     | DawExportPreparationFailure
     | DawFilesVerified
@@ -321,6 +330,7 @@ _RESPONSE_TYPES = {
         DawContinuitySnapshot,
         DawRecoveryLineage,
         DawRecoverySnapshot,
+        DawLatestState,
         PortFailure,
     ),  # fmt: skip
     OperationKind.EXPORT_PREPARE: (DawExportAwaiting, DawExportPreparationFailure),
@@ -423,6 +433,9 @@ RunTracePayload = (
     | DawRestoreNoWrite
     | DawRestoreRejected
     | DawRollbackRecord
+    # Increment 5 (ADR-039): a refused DAW start and the classification of an interrupted stored run
+    | DawStartRefused
+    | RunInterrupted
 )
 
 
@@ -456,7 +469,7 @@ class RunTraceEvent:
             run_id = payload.run.run_id
             if payload.run.usage != self.usage:
                 raise ValueError("terminal event usage differs from the snapshot")
-        elif isinstance(payload, DawRollbackRecord):
+        elif isinstance(payload, (DawRollbackRecord, RunInterrupted)):
             run_id = payload.run_id
         elif isinstance(payload, DispatchIntent):
             if isinstance(payload.request, (Situation, AcceptanceQuery)):
@@ -475,15 +488,24 @@ def _require_usage_progress(current: BudgetUsage, previous: BudgetUsage) -> None
             raise ValueError(f"trace usage decreases in {field}")
 
 
+class StoreDurability(Enum):
+    """What the store that produced a snapshot can survive (ADR-039). Independent of event acknowledgement."""
+
+    NON_DURABLE = "non_durable"  # the in-memory journals: nothing survives the process
+    LOCAL_SQLITE_PROCESS_CRASH = "local_sqlite_process_crash"  # subprocess-crash evidence only; no power-loss claim
+
+
 @dataclass(frozen=True)
 class RunJournalSnapshot:
     run_id: RunId
     initial: AcceptedReference
     events: tuple[RunTraceEvent, ...]
     acceptances: tuple[AcceptanceCommitted, ...]
+    durability: StoreDurability = StoreDurability.NON_DURABLE  # Increment 5 (ADR-039): the producing store's
 
     def __post_init__(self) -> None:
         require_instance(self.run_id, RunId, "RunJournalSnapshot.run_id")
+        require_instance(self.durability, StoreDurability, "RunJournalSnapshot.durability")
         require_instance(self.initial, AcceptedReference, "RunJournalSnapshot.initial")
         require_tuple_of(self.events, RunTraceEvent, "RunJournalSnapshot.events", nonempty=False, distinct=False)
         require_tuple_of(

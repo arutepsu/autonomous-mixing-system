@@ -779,7 +779,6 @@ def test_every_usage_dimension_must_be_nondecreasing(field):
         (OperationObserved, ("intent_id", "operation", "outcome")),
         (TerminalSnapshot, ("run", "authoritative", "verified")),
         (RunTraceEvent, ("event_id", "sequence", "run_id", "created_at", "usage", "payload")),
-        (RunJournalSnapshot, ("run_id", "initial", "events", "acceptances")),
         (TraceAppended, ("event",)),
         (TraceNotAppended, ("event_id", "explanation")),
         (TraceAppendUnknown, ("event_id", "explanation")),
@@ -802,3 +801,17 @@ def test_diagnosis_failed_reason_maps_to_failed():
         if outcome is not RunOutcome.FAILED:
             with pytest.raises(ValueError):
                 make_run(reason, outcome=outcome)
+
+
+def test_a_snapshot_carries_its_store_durability_as_a_trailing_defaulted_field():
+    """Increment 5 (ADR-039): the only defaulted field, so in-memory snapshots keep their existing shape."""
+    from autonomous_mixing.core.records.run_trace import StoreDurability
+
+    fields = dataclasses.fields(RunJournalSnapshot)
+    assert tuple(f.name for f in fields) == ("run_id", "initial", "events", "acceptances", "durability")
+    assert RunJournalSnapshot.__dataclass_params__.frozen
+    assert fields[-1].default is StoreDurability.NON_DURABLE
+    assert all(f.default is dataclasses.MISSING for f in fields[:-1])
+    assert make_snapshot().durability is StoreDurability.NON_DURABLE
+    with pytest.raises(ValueError):
+        dataclasses.replace(make_snapshot(), durability="non_durable")

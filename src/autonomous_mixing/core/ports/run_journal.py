@@ -10,6 +10,7 @@ from autonomous_mixing.core.records.results import PortResult
 from autonomous_mixing.core.records.run_trace import (
     RunJournalSnapshot,
     RunTraceEvent,
+    StoreDurability,
     TraceAppended,
     TraceAppendResult,
     TraceAppendUnknown,
@@ -30,6 +31,10 @@ class RunJournal(AcceptanceJournal, Protocol):
     def append(self, event: RunTraceEvent) -> TraceAppendResult: ...
 
     def snapshot(self) -> PortResult[RunJournalSnapshot]: ...
+
+    @property
+    def store_durability(self) -> StoreDurability:
+        """What this store survives (ADR-039); every snapshot it returns carries the same value."""
 
 
 class RunExclusion(Protocol):
@@ -61,3 +66,13 @@ def validate_run_journal_snapshot(run_id: RunId, initial: AcceptedReference, res
     require_instance(response, RunJournalSnapshot, "response")
     if response.run_id != run_id or response.initial != initial:
         raise ValueError("journal snapshot does not match the configured run and initial reference")
+
+
+def require_snapshot_durability(journal: RunJournal, snapshot: RunJournalSnapshot) -> StoreDurability:
+    """The journal's declared durability; a snapshot carrying another value is a wiring error (ADR-039)."""
+    durability = journal.store_durability
+    require_instance(durability, StoreDurability, "journal.store_durability")
+    require_instance(snapshot, RunJournalSnapshot, "snapshot")
+    if snapshot.durability is not durability:
+        raise ValueError("the snapshot's durability differs from its journal's declaration")
+    return durability

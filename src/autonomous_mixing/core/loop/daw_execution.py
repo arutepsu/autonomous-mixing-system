@@ -23,7 +23,7 @@ import re
 from collections.abc import Callable
 from dataclasses import replace
 
-from autonomous_mixing.core.admission.daw import daw_gain_bounds, gate_daw_apply
+from autonomous_mixing.core.admission.daw import daw_gain_bounds, daw_start_check, gate_daw_apply
 from autonomous_mixing.core.admission.daw_correction import preflight_daw_correction
 from autonomous_mixing.core.loop.daw_recovery import recover_daw, recovery_ids
 from autonomous_mixing.core.loop.feedback import _rejection, add_feedback
@@ -34,6 +34,7 @@ from autonomous_mixing.core.ports.daw_export import DawExportHandoff, validate_d
 from autonomous_mixing.core.ports.daw_recovery import (
     DawRecoveryController,
     validate_daw_control_state,
+    validate_daw_latest_state,
     validate_daw_state_anchor,
 )
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
@@ -61,7 +62,8 @@ from autonomous_mixing.core.records.feedback import ActionFeedback, ActionFeedba
 from autonomous_mixing.core.records.identifiers import ArtifactId, AttemptId, DecisionCallId, ExecutionId, Revision
 from autonomous_mixing.core.records.project import ProjectState
 from autonomous_mixing.core.records.rendering import ExecutionWorkspace
-from autonomous_mixing.core.records.results import Success
+from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, Success
+from autonomous_mixing.core.records.run_restart import DawLatestAnchorQuery
 from autonomous_mixing.core.records.run_trace import OperationKind, RunTraceEvent
 from autonomous_mixing.core.records.termination import TerminationReason
 
@@ -349,3 +351,56 @@ def execute_daw(
     if stop:
         return after_write(progress, f"the suspension checkpoint could not be recorded ({stop[0].value})")
     return (progress, progress.known[-1])
+
+
+def daw_start(
+    progress: RuntimeProgress,
+    *,
+    clock: RunClock,
+    identities: IdentitySource,
+    journal: RunJournal,
+    recovery_controller: DawRecoveryController,
+    on_progress: Callable[[RuntimeProgress], None],
+) -> tuple[RuntimeProgress, Stop | None]:
+    """The run-start check (G14, ADR-039): before any decision, the FL journal must be explained by the configuration.
+
+    Journal-only reads: the control state and the latest state-establishing event. Refused before any effect, and
+    nothing is adopted, restored or resolved.
+    """
+    session = progress.request.daw_session
+    rec = dict(identities=identities, journal=journal, on_progress=on_progress)
+    preparation = TerminationReason.EXECUTION_PREPARATION_FAILED
+    control = recovery_controller.control_state()
+    try:
+        validate_daw_control_state(control)
+    except ValueError as error:
+        return (progress, (preparation, f"invalid DAW control state at the run start: {error}"))
+    if not isinstance(control, Success):
+        return (progress, (preparation, f"the DAW journal state is unavailable at the run start: {control.message}"))
+    progress, stop = record(progress, control.value, **rec)
+    if stop:
+        return (progress, stop)
+    query = DawLatestAnchorQuery(session.binding)
+    progress, (intent_id, _, stop, _) = gate(progress, OperationKind.DAW_STATE, lambda c: query, None, clock=clock,
+                                             **rec)  # fmt: skip
+    if stop:
+        return (progress, stop)
+    latest = recovery_controller.latest_anchor()
+    try:
+        validate_daw_latest_state(latest)
+        outcome = latest.value if isinstance(latest, Success) else latest
+    except ValueError as error:
+        latest, outcome = None, _invalid(latest, error)
+    progress, stop = observed(progress, intent_id, OperationKind.DAW_STATE, outcome, clock=clock, **rec)
+    if stop:
+        return (progress, stop)
+    if isinstance(latest, PortFailure) and latest.code is PortFailureCode.UNAVAILABLE:
+        return (progress, (preparation, f"the latest DAW state is unavailable at the run start: {latest.message}"))
+    track = progress.request.initial_state.daw.track(session.binding.track_id)
+    refused = daw_start_check(control.value, latest.value if isinstance(latest, Success) else None,
+                              binding=session.binding, profile=session.profile,
+                              confirmed=track.confirmed_fader)  # fmt: skip
+    if refused is None:
+        return (progress, None)
+    progress, stop = record(progress, refused, **rec)
+    return (progress, stop or (refused.reason, refused.explanation))

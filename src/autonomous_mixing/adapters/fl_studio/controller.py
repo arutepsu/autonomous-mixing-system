@@ -25,6 +25,7 @@ from autonomous_mixing.adapters.fl_studio.transport import MidiTransport, Transp
 from autonomous_mixing.core.ports.daw import validate_daw_apply_outcome, validate_daw_inspection
 from autonomous_mixing.core.ports.daw_recovery import (
     validate_daw_continuity_snapshot,
+    validate_daw_latest_state,
     validate_daw_reconciliation,
     validate_daw_recovery_lineage,
     validate_daw_recovery_snapshot,
@@ -72,6 +73,7 @@ from autonomous_mixing.core.records.daw_recovery import (
 )
 from autonomous_mixing.core.records.invariants import require_finite, require_instance
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, PortResult, Success
+from autonomous_mixing.core.records.run_restart import DawLatestState
 
 _SOURCE_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _REFUSALS = {
@@ -811,4 +813,19 @@ class FlStudioParameterController:
                 return PortFailure(PortFailureCode.UNAVAILABLE, "the journal changed during the capture", True)
             result = Success(DawRecoverySnapshot(closing, read.value, closing_state))
             validate_daw_recovery_snapshot(root_command_id, result)
+            return result
+
+    # --- the latest state-establishing event (Increment 5, ADR-039: the run-start check) -----------------------------
+
+    def latest_anchor(self) -> PortResult[DawLatestState]:
+        """The latest state-establishing FL event as an anchor (``None`` for none), journal-only; never sends."""
+        with self._lock:
+            try:
+                source, top = self.journal.latest_source()
+                result = Success(DawLatestState(None if source is None else self._anchor(source), top))
+            except JournalRefusal as error:
+                return PortFailure(PortFailureCode.INVALID_INPUT, str(error), False)
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            validate_daw_latest_state(result)
             return result

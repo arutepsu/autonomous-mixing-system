@@ -7,7 +7,11 @@ from dataclasses import replace
 
 from autonomous_mixing.core.loop.runtime import append, elapsed_at, new_event
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
-from autonomous_mixing.core.ports.run_journal import RunJournal, validate_run_journal_snapshot
+from autonomous_mixing.core.ports.run_journal import (
+    RunJournal,
+    require_snapshot_durability,
+    validate_run_journal_snapshot,
+)
 from autonomous_mixing.core.records.coordinator_progress import RuntimeProgress
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading
 from autonomous_mixing.core.records.results import Success
@@ -77,13 +81,12 @@ def finalize(
             validate_run_journal_snapshot(progress.request.run_id, progress.initial, trace.value)
             snapshot = trace.value
         except ValueError:
-            snapshot = RunJournalSnapshot(
-                progress.request.run_id, progress.initial, tuple(progress.known), tuple(progress.commits)
-            )
+            snapshot = RunJournalSnapshot(progress.request.run_id, progress.initial, tuple(progress.known),
+                                          tuple(progress.commits), journal.store_durability)  # fmt: skip
     else:
-        snapshot = RunJournalSnapshot(
-            progress.request.run_id, progress.initial, tuple(progress.known), tuple(progress.commits)
-        )
+        snapshot = RunJournalSnapshot(progress.request.run_id, progress.initial, tuple(progress.known),
+                                      tuple(progress.commits), journal.store_durability)  # fmt: skip
+    require_snapshot_durability(journal, snapshot)
     completion = clock.read()
     clock_valid = (
         isinstance(completion, ClockReading) and completion.monotonic_seconds >= progress.last.monotonic_seconds

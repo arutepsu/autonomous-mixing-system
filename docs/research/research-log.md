@@ -1945,3 +1945,60 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Full suite:** 6,276 passed, 4 skipped.
   - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
 - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path: Increment 5 plan and ADR-039 proposed (Claude Code)
+- **Plan:** the Increment 5 plan is in the coordinator-integration plan, with ADR-039 (Proposed). It is for review, and nothing is implemented.
+- **Storage:** one SQLite file per run for the trace and the acceptance authority. Fingerprinted, append-only rows, written through an allowlisted canonical codec with a mandatory exact round-trip check.
+- **Ownership:** exclusive across processes, by the SQLite `EXCLUSIVE` lock that the operating system releases when the process dies.
+- **Restart:** a recorded suspension is rebuilt and resumed through the unchanged Increment 3 admission. Budgets, elapsed segments, tokens and charges are reconstructed exactly.
+- **Interrupted states:** every other interrupted state is classified (crashes around the write, suspension, continuation, acceptance commit and recovery) and refused for explicit operator recovery.
+- **Orphans:** a new run-start check refuses unexplained FL state, using a new read-only `latest_anchor()`. Nothing is adopted or restored automatically.
+- **Evidence planned:** subprocess crash tests only, with no power-loss claim.
+- **Decisions for review:** E1–E7.
+
+## 2026-11-20 — Coordinator DAW path: Increment 5 plan, amendment A (Claude Code)
+- **Decisions:** the owner accepted E1–E7 and asked for three amendments before implementation. All three are written into the plan and into ADR-039 (Proposed, revised in place with dated notes).
+  1. **Failed-commit cleanup:** `ROLLBACK`, close and verified reopen. No read is ever answered on a connection that had a failed transaction, so an uncommitted acceptance is never reported found. If reopening fails, the instance is unavailable. Tests cover the failure before `COMMIT` takes effect, after success with the acknowledgement lost, and a refused reopen.
+  2. **Classification:** a first-match precedence in which the committed acceptance head is always authoritative and an unrecorded commit comes first. Specific effects come before the generic continuation interruption. New codes cover crashes before the first write intent and between rounds after a continuation. A trace-prefix coverage test pins that no state is unclassified.
+  3. **Durability provenance:** `StoreDurability` travels in `RunJournalSnapshot` into reports and reloaded suspensions. In-memory results keep `"non_durable"`. It is independent of event acknowledgement.
+- **Storage:** network and synced storage stay explicitly unsupported; tests use local temporary storage only.
+- Nothing is implemented.
+
+## 2026-11-20 — Coordinator DAW path, Increment 5: durable run store and restart (Claude Code)
+- **Implemented** tests-first per the approved plan with amendment A and the clarification that a recorded `AcceptanceFound` is trace evidence of acceptance. Recorded in ADR-039 (Proposed, with implementation notes).
+- **What exists now:**
+  - **A per-run SQLite store** for the trace and the acceptance authority:
+    - an exact canonical codec with a mandatory round-trip check;
+    - fingerprints re-checked on every read;
+    - exclusive ownership across processes;
+    - failed commits cleaned up by rollback, close and verified reopen, so an uncommitted acceptance is never reported found.
+  - **Restart:** a recorded suspension resumes after a process restart. Every other interrupted state is classified with the agreed precedence and refused for operator recovery.
+  - **Run start:** a check refuses unexplained FL state before any decision, adopting nothing.
+  - **Durability provenance:** reaches reports and reloaded suspensions, independent of acknowledgement.
+- **Deviations** (named in ADR-039):
+  - the port property is `store_durability`;
+  - the resumable and not-resumable records were folded into `RunSuspended` and `RunInterrupted`;
+  - no new continuation refusal codes.
+- **A budget consequence noted:** after a found acceptance, the next write needs four configured recovery slots.
+- **Checks:**
+  - **Tests:** 50 new (18 subprocess).
+  - **Mutation probes:** 13 new, all caught; the Increment 4 set still caught.
+  - **Focused suites, warnings as errors:** 2,048 passed.
+  - **Full suite:** 6,329 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- Process-crash evidence only; no power-loss claim. No CLI, no installs, no live calls. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path, Increment 5: review fix (Claude Code)
+- **Finding (Codex):** a non-SQLite exception inside a durable write transaction escaped without cleanup, and a later query reported an uncommitted acceptance as found.
+- **Fix:**
+  - every exception after transaction entry, for appends and commits, now triggers the rollback, close and verified reopen;
+  - storage failures stay "unknown";
+  - other exceptions propagate after the cleanup.
+- **Regressions** (written first; the before-commit cases failed before the fix): before `COMMIT` and after a successful `COMMIT` with the acknowledgement lost, for acceptances and trace appends, at store and coordinator level.
+- **ADR-039** (Proposed) is revised in place.
+- **Checks:**
+  - **Mutation probes:** two new, both caught; the Increment 5 set (15) all caught.
+  - **Focused suites, warnings as errors:** 2,055 passed.
+  - **Full suite:** 6,336 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- Left uncommitted for review.

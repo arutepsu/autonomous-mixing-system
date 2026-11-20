@@ -1222,3 +1222,451 @@ Each probe is reverted byte-identically, and every earlier probe set is rerun:
   | CLI help | runs |
   | `uv lock --check` | clean |
   | `git diff --check` | clean |
+
+## Increment 5 plan: durable run and acceptance journals, restart and orphan detection (proposed 2026-11-20; not started)
+
+**Status:** for owner and Codex review. Nothing is implemented. The architecture decisions are proposed in [ADR-039](../../decisions/0039-durable-run-journal-and-restart.md) (Proposed), as G13 asked for.
+
+**Goal.** A suspended DAW run resumes after a process restart, and nothing is written or accepted twice. Every other interrupted state is detected, classified and refused, and left to explicit operator recovery.
+
+**Out of scope:**
+- CLI wiring and the operator-recovery command `daw recover` (Increment 6);
+- installation and live FL Studio calls;
+- schema migration;
+- network file systems;
+- any power-loss durability claim.
+
+### What exists (inspected 2026-11-20)
+
+- **Run journal:** `InMemoryRunJournal` composes `InMemoryAcceptanceJournal`. Both are `NON_DURABLE`, and a fresh instance starts empty.
+- **Exclusion:** `RunExclusion` (`try_acquire_exclusive`, `release_exclusive`) is a per-process registry keyed by run ID.
+- **Port contracts that a durable implementation must keep:**
+  - an exact duplicate append returns its original acknowledgement;
+  - a conflicting ID is refused unchanged;
+  - an unknown acknowledgement leaves storage uncertain;
+  - `snapshot` is one consistent view of the trace and the acceptances;
+  - an exact acceptance resubmission returns its original `AcceptanceCommitted`, even after later commits;
+  - `AcceptanceCommitUnknown` is resolved only by `query`.
+- **`resume_daw(suspended, manifest, ...)`** already rebuilds everything from a `RunJournalSnapshot`:
+  - the progress itself;
+  - tokens: checkpoint tokens, event IDs and acceptance IDs;
+  - usage, from the checkpoint event;
+  - elapsed time: `elapsed_before` plus a new clock segment, with the pause measured from UTC times and never charged.
+
+  It needs a `RunSuspended`, which today exists only in the process that suspended.
+- **Already durable:** the FL journal (SQLite; `journal_mode=DELETE`, `synchronous=EXTRA`, `locking_mode=EXCLUSIVE`). It keeps reservations, outcomes, recovery charges, reconciliations, resolutions and blocks across process crashes. Its exclusivity is released by the operating system when its process dies.
+- **Recording order:** the coordinator records every `DispatchIntent` (`DAW_APPLY`, `DAW_RECOVERY`, `EXPORT_PREPARE`, `EXPORT_IMPORT`, `QUERY_ACCEPTANCE`) before the effect. The FL journal reserves (and charges) before any byte is sent. So an FL command without a recorded run intent never comes from this coordinator.
+
+### Proposed design (ADR-039)
+
+**P1. One SQLite file per run (`SqliteRunJournal`, `adapters.journal`).**
+- **Implements:** `RunJournal` (trace and acceptance) and `RunExclusion`.
+- **Settings:** the FL journal's (`DELETE`, `EXTRA`, `EXCLUSIVE`), verified at open.
+- **Schema v1:**
+  - `metadata`: schema version, run ID, the encoded initial reference;
+  - `events`: sequence primary key, unique event ID, canonical record JSON, SHA-256 fingerprint;
+  - `acceptances`: position primary key, unique acceptance ID, record JSON, fingerprint.
+- **Writes:** rows are only inserted. Every write is one `BEGIN IMMEDIATE` transaction. An event's sequence must be the next one and its payload must pass `RunJournalSnapshot` validation with the existing prefix, checked inside the transaction.
+- **Reads:** every read re-checks each fingerprint and decodes every row through its record constructor, so every record is validated again. Any mismatch is a `JournalError`. `snapshot()` then returns a non-retryable `PortFailure`, never a partial trace.
+- **Opening:** an unknown schema version, another run ID or another initial reference refuses to open.
+
+**P2. Exact serialization (`adapters.journal.record_codec`).**
+- **Canonical JSON with an allowlisted type registry.** The registry is built from the public frozen dataclasses and enums of `core.records`, cross-checked against the architecture inventory. No other type can be encoded or decoded, and nothing is imported by name.
+- **Encoding rules:**
+
+  | Value | Encoded as |
+  | --- | --- |
+  | Record | `{"$t": <qualified name>, field: value, ...}`, with fields in declaration order |
+  | Enum | `{"$e": <qualified name>, "v": value}` |
+  | `bool` | checked before `int` |
+  | `float` | Python's shortest round-trip `repr`; `-0.0` is kept; non-finite values are refused |
+  | `datetime` | timezone-aware only, ISO 8601 with microseconds and offset |
+  | `tuple` | a list |
+  | `frozenset` | `{"$fs": [...]}`, sorted by each item's canonical encoding |
+  | `None`, `str`, `int` | as themselves |
+- **Union fields and generic payloads** (for example `Success[T]`) are typed by their tags.
+- **Write check:** `decode(encode(record)) == record` (exact equality, types included) is required at every append and commit. A record that does not round-trip is refused (`TraceNotAppended` or `AcceptanceNotCommitted`, "not exactly serializable"), so the store can never hold a lossy record.
+- **Decoding** goes through each record's constructor, so every invariant is re-checked on load.
+
+**P3. Acceptance authority in the same file.**
+- **Commit:** one `BEGIN IMMEDIATE` transaction that checks the run, the existing acceptance ID (an exact duplicate returns the original acknowledgement; a different event is `AcceptanceNotCommitted`) and the expected head, then inserts.
+- **Uncertain outcomes:**
+  - an exception after `BEGIN` and before a confirmed `COMMIT` is `AcceptanceCommitUnknown`;
+  - the trace analogue is `TraceAppendUnknown`;
+  - nothing ever reports success without a confirmed `COMMIT`.
+- **Query:** reads committed rows (`AcceptanceFound` or `AcceptanceAbsent`). A store that cannot be read is `AcceptanceAuthorityUnknown`, never "absent".
+- **Snapshot:** one read transaction covers both tables.
+
+**P4. Exclusive ownership across processes.**
+- **Acquiring:** opening the store takes the SQLite `EXCLUSIVE` lock with an immediate write transaction, and the lock is held until close.
+- **Busy store:** a second opener, from any process, gets a typed `RunStoreBusy` without waiting. `resume_daw` maps it to the existing `CONTINUATION_IN_PROGRESS` refusal with no effect.
+- **Inside the owning process:** the non-reentrant `RunExclusion` remains as today.
+- **No leases or lock breaking:** when the owning process dies, the operating system releases the lock. Local storage only; a network share is unsupported (open question).
+
+**P5. Reopening a suspended run.** A pure `load_suspension(snapshot) -> RunSuspended | RunNotResumable` (`core.loop`) rebuilds the `RunSuspended`:
+- the request is the first event's `RunRequest`;
+- the checkpoint is the last event, a `DawCorrectionSuspended`;
+- the trace is the snapshot itself.
+
+Anything else is `RunNotResumable` with the P7 classification. `resume_daw` stays the only continuation entry point, and its admission (Increment 3) runs unchanged on the reloaded trace. The driver (Increment 6) supplies the operator's manifest and rebuilds the adapters from configuration; tests build them directly.
+
+**P6. Reconstruction after restart.**
+- **Budgets:** the checkpoint event's usage, covering decision calls, attempts, render calls, DAW writes and recovery operations.
+- **Elapsed time:** `elapsed_before` is the checkpoint's elapsed time, and a new monotonic segment starts with the new process's first clock reading. The pause, from UTC times, is reported and never charged.
+- **Tokens:** the checkpoint's tokens, plus every event ID, plus every acceptance ID, so a new identity source cannot reuse an earlier identity.
+- **Recovery charges:**
+  - **Run side:** `recovery_operations` comes from the trace.
+  - **FL side:** charges come from the FL journal.
+  - **Check at resume:** every FL `RECOVERY_CHARGED` record whose recovery ID derives from this run's execution tokens (`recovery_ids`) must match a recorded restoration intent with the same grant, or the resume is refused (`ORPHANED_DAW_STATE`).
+  - **Reuse branch:** reusing an already journaled charge (ADR-038) stays unreachable on a resumable path, because a crash during recovery is never resumable (P7).
+- **Exact equality:** the rebuilt `RuntimeProgress` must equal, field for field, the progress that the uninterrupted process would have rebuilt from the same snapshot. A differential test pins this.
+
+**P7. Interrupted states.** A pure `classify_run(snapshot, fl_facts) -> RunResumable | RunInterrupted(code, evidence)` sits in `core.loop`. Its records go in a new `core.records.run_restart`. `fl_facts` holds the FL journal's control state and the recovery lineage of every DAW command that the trace records as dispatched.
+
+| Last durable state | FL journal | Classification | Allowed |
+| --- | --- | --- | --- |
+| `TerminalSnapshot` | any | `FINISHED` | nothing (existing `ALREADY_CONTINUED` or finished report) |
+| last event a `DawCorrectionSuspended` checkpoint; nothing unresolved; the checkpoint apply is the latest reservation | — | `SUSPENDED_RESUMABLE` | **resume** with a manifest |
+| checkpoint, then `DawContinuationStarted` with no completion evidence | any | `CONTINUATION_INTERRUPTED` (existing code) | operator recovery |
+| a `DAW_APPLY` intent with no observation | command absent | `INTERRUPTED_BEFORE_WRITE` (nothing written) | operator recovery (closing only) |
+| same | pending or uncertain | `INTERRUPTED_WRITE_UNRESOLVED` | operator recovery |
+| same | confirmed or off target | `INTERRUPTED_AFTER_WRITE` | operator recovery |
+| a confirmed-write observation, no checkpoint (crash in the anchor, preparation or checkpoint recording) | — | `INTERRUPTED_BEFORE_SUSPENSION` | operator recovery |
+| an `AcceptanceEvent` recorded, the commit in `acceptances`, no `AcceptanceCommitted` in the trace | — | `INTERRUPTED_AFTER_ACCEPTANCE`: the committed state is authoritative and is never restored | operator recovery (closing only) |
+| an `AcceptanceEvent` recorded, no commit | — | `INTERRUPTED_BEFORE_ACCEPTANCE_COMMIT` | operator recovery |
+| a `DAW_RECOVERY` intent with no observation, or recovery steps without a terminal | any | `INTERRUPTED_RECOVERY` | operator recovery |
+| any non-terminal offline run | — | `INTERRUPTED_OFFLINE` | no resumption exists offline |
+
+- **Only `SUSPENDED_RESUMABLE` resumes.** Every other state is refused with its code and evidence: nothing is restored, adopted, resolved, committed or re-dispatched.
+- **Recorded:** the classification goes into the trace as a `RunInterrupted` record, only when the store is owned and the run is non-terminal. It is evidence for Increment 6, not a terminal snapshot.
+- **The resumable case is safe by construction:**
+  - the apply's outcome and the export request are journaled, and the checkpoint is the last event;
+  - the FL journal shows the checkpoint's own write as the latest reservation with nothing unresolved;
+  - the continuation's admission and continuity snapshots then run exactly as in-process;
+  - nothing before the checkpoint is re-executed.
+
+**P8. Orphaned FL commands.** No adoption, no restoration, no resolution.
+- **Run start (G14):** before any decision, `run_daw` checks a pure rule `daw_start_check(control_state, latest_anchor, initial_state)` in `core.admission`:
+  - an unresolved command gives `DAW_COMMAND_UNRESOLVED`;
+  - a blocked conversion of the session gives `DAW_CONVERSION_BLOCKED`;
+  - a latest state-establishing FL event whose anchor reading or binding is not exactly the initial state's confirmed fader, or a latest source that cannot be anchored (an off-target or uncertain write), gives `DAW_CONTINUITY_FAILED` ("unexplained DAW state").
+
+  Each terminates before any effect and lists the command IDs as evidence.
+- **The new port method:** `DawRecoveryController.latest_anchor() -> PortResult[DawStateAnchor | None]`. It returns the latest state-establishing event under the existing anchor rules (refused while anything is unresolved; `None` for an empty journal), so export anchors are unchanged.
+- **At resume:** P6 and P7 detect FL commands or charges that the trace does not explain. Any FL reservation after the checkpoint apply already fails continuity, and Increment 4 withholds recovery after foreign history.
+- **Why no cross-run scan is needed:** the trace records each intent before the FL reservation, so "orphaned" means either FL state that the run's own durable history does not explain, or an FL command whose run was interrupted. Both are decided from this run's store and the FL journal alone.
+
+**P9. Replay and conflict handling, summarized.**
+
+| ID | Rule |
+| --- | --- |
+| Trace event IDs | `UNIQUE` plus a fingerprint. An exact duplicate returns the original acknowledgement, also after restart; a conflict is refused unchanged. |
+| Continuation | `DawContinuationStarted` is admitted once (Increment 3), now durably and across processes (P4). A second process gets `CONTINUATION_IN_PROGRESS`; after completion, `ALREADY_CONTINUED`. |
+| Acceptance IDs | Durable exact-duplicate and conflict semantics (P3). An interrupted commit is never resubmitted blindly: it is an operator-recovery state (P7), resolved by `query`. |
+| Apply command IDs | Never re-dispatched by resumption. The FL journal replays an identical retry and refuses a conflicting one. |
+| Recovery IDs | Derived from the attempt's execution token. Resumption continues the same attempt, so a restoration reserved before a crash makes the run `CONTINUATION_INTERRUPTED` or `INTERRUPTED_RECOVERY`: never a second restoration under the same or another ID. |
+
+### Record, port and adapter changes (each test-pinned)
+
+- **`core.records.run_restart` (new):**
+  - `RunInterruptionCode`;
+  - `RunInterrupted(run_id, code, evidence_event_ids, fl_command_ids, explanation)`;
+  - `RunResumable(suspended: RunSuspended)`;
+  - `RunNotResumable`.
+- **`DawContinuationRefusalCode`:** gains `RUN_INTERRUPTED` and `ORPHANED_DAW_STATE`.
+- **Trace payloads:** `RunInterrupted` is added.
+- **Termination reasons:** unchanged. The run-start check reuses `DAW_COMMAND_UNRESOLVED`, `DAW_CONVERSION_BLOCKED` and `DAW_CONTINUITY_FAILED` (decision E6).
+- **`DawRecoveryController`:** gains `latest_anchor()`, with its validator. The FL journal and controller implement it.
+- **New pure functions:**
+  - `load_suspension` and `classify_run` in `core.loop`;
+  - `daw_start_check` in `core.admission`.
+- **`adapters.journal`:** `sqlite_run.py` (`SqliteRunJournal`, `RunStoreBusy`) and `record_codec.py`. The durability label is `LOCAL_SQLITE_PROCESS_CRASH`, with no power-loss claim.
+- **Unchanged:** `InMemoryRunJournal` stays the offline default, and the offline behaviour is byte-identical.
+
+### Tests (written first)
+
+**Setup:** real FL journal and controller against device script v2, with a fake host whose fader state is persisted to a temporary JSON file so that the "DAW" outlives the crashed process. Also the real export handoff, analyzer and integrity inspector over temporary WAVs, and labelled doubles for decisions and diagnosis.
+
+1. **Codec:**
+   - every public record type in the inventory round-trips exactly, including the real trace payloads from the Increment 2–4 suites;
+   - `-0.0`, microsecond UTC datetimes, frozensets and union fields round-trip;
+   - an unknown tag, a lossy value (a naive datetime, NaN) and a non-allowlisted type are refused;
+   - decoding re-runs `__post_init__`, so a tampered field that breaks an invariant is refused.
+2. **Store:**
+   - exact-duplicate and conflicting appends and commits, before and after reopening;
+   - a sequence gap is refused;
+   - a fingerprint mismatch (the file edited) makes `snapshot` fail and opening refuse;
+   - another run ID or another initial reference is refused;
+   - the settings are verified.
+3. **Uncertain outcomes:**
+   - a commit whose `COMMIT` raises (labelled fault injection) gives `AcceptanceCommitUnknown`, and `query` then decides;
+   - the same for `TraceAppendUnknown`.
+4. **Ownership (subprocess):**
+   - a second process cannot open the store or resume while the first holds it (`CONTINUATION_IN_PROGRESS`, no FL call, no append);
+   - after the first process is killed, the second can open it.
+5. **Restart of a suspended run (subprocess):**
+   - **Main path:** process A runs to `RunSuspended` and exits. Process B reopens, `load_suspension`, resumes with the manifest and accepts. Assert:
+     - exactly one `set_gain_db` across both processes;
+     - one acceptance;
+     - usage and elapsed time continue from the checkpoint, with the pause not charged;
+     - the rebuilt progress equals the in-process rebuild.
+   - **Duplicate:** a third process resuming again gets `ALREADY_CONTINUED`.
+6. **Subprocess crash points (`os._exit` at a labelled hook).** For each point, process B classifies the run and refuses, with no FL call, append or commit beyond the classification record. The FL journal is unchanged.
+   - after the `DAW_APPLY` intent, before the FL reservation: `INTERRUPTED_BEFORE_WRITE`;
+   - after the FL reservation, before the send: `INTERRUPTED_WRITE_UNRESOLVED`;
+   - after the device wrote, before the FL outcome: `INTERRUPTED_WRITE_UNRESOLVED`;
+   - after the FL outcome, before the trace observation: `INTERRUPTED_AFTER_WRITE`;
+   - after export preparation, before the checkpoint: `INTERRUPTED_BEFORE_SUSPENSION`;
+   - after `DawContinuationStarted`: `CONTINUATION_INTERRUPTED`;
+   - after the `AcceptanceEvent` record, before the commit: `INTERRUPTED_BEFORE_ACCEPTANCE_COMMIT`;
+   - after the commit, before `AcceptanceCommitted` is recorded: `INTERRUPTED_AFTER_ACCEPTANCE`, with `query` finding the commit and nothing restored;
+   - after the restoration reservation, before its outcome: `INTERRUPTED_RECOVERY`.
+7. **Run start (G14):**
+   - an orphaned unresolved FL command, a blocked conversion, and an FL anchor that differs from the initial confirmed fader by one ULP each refuse before any decision, with no FL write;
+   - a fresh FL journal and an exactly matching anchor start normally.
+8. **Charges:** an FL recovery charge for this run's recovery ID with no matching trace intent is refused at resume (`ORPHANED_DAW_STATE`).
+9. **Offline and inventories:** the offline suites are unchanged; the architecture inventories cover the new modules, records and port method.
+
+**Mutation probes:**
+- skipping the round-trip check;
+- skipping fingerprint verification;
+- reporting success without a confirmed `COMMIT`;
+- releasing exclusivity at the first transaction;
+- `load_suspension` accepting a checkpoint that is not last;
+- `classify_run` treating a commit without its trace record as absent;
+- the start check comparing within tolerance;
+- the charge check ignoring an unexplained FL charge;
+- resumption re-dispatching a recorded intent.
+
+Each must be caught.
+
+### Decisions for review
+
+- **E1. Storage layout.**
+  - **Recommended:** one SQLite file per run. Ownership and corruption stay per run, and P8 needs no cross-run scan.
+  - **Alternative:** one store for all runs.
+- **E2. Ownership mechanism.**
+  - **Recommended:** the SQLite `EXCLUSIVE` locking mode, held while open and released by the operating system on process death, as for the FL journal.
+  - **Alternative:** a separate operating-system lock file. It adds a second mechanism with the same guarantees.
+- **E3. Codec.**
+  - **Recommended:** one allowlisted, reflective canonical codec with a mandatory round-trip check. About 230 record dataclasses and 60 enums make hand-written serializers error-prone.
+  - **Alternative:** per-record serializers, in the style of the FL adapter.
+- **E4. Which states resume.**
+  - **Recommended:** only `SUSPENDED_RESUMABLE`. Every interrupted state is refused and left to explicit operator recovery (Increment 6), including `INTERRUPTED_BEFORE_WRITE`, where nothing was written.
+  - **Alternative:** let `INTERRUPTED_BEFORE_WRITE` close automatically. That would make the run journal decide the FL outcome on the operator's behalf.
+- **E5. Strictness of the run-start check.**
+  - **Recommended:** exact anchor equality with the initial confirmed fader, consistent with the rollback evidence rule. It refuses benign drift too, failing closed.
+- **E6. Reasons for a refused start.**
+  - **Recommended:** reuse `DAW_COMMAND_UNRESOLVED`, `DAW_CONVERSION_BLOCKED` and `DAW_CONTINUITY_FAILED` instead of adding new reasons.
+- **E7. Schema.**
+  - **Recommended:** schema v1 only, with no migration. An unknown version refuses to open.
+
+### Open questions
+
+- **Q1:** whether network or synced folders (OneDrive and similar) must be refused explicitly at open, or only documented as unsupported.
+- **Q2:** retention and archival of finished run stores.
+- **Q3:** whether `RunInterrupted` should also be written when the store is opened only for inspection, without an intent to resume (Increment 6 interface).
+- **Q4:** a power-loss claim would need storage-level evidence that this project does not have. None is made.
+
+### Increment 5 plan, amendment A (owner review, 2026-11-20; still not started)
+
+**Status.** The owner accepted E1–E7, and three details are amended before implementation. They supersede the corresponding parts of P3, P7 and the test list above. Network and synced storage stay explicitly unsupported in this increment: they are documented and not detected (Q1 closed). Tests use only local temporary storage (`tmp_path`).
+
+#### A1. A failed `COMMIT` never leaks uncommitted rows (amends P3)
+
+**The risk.** In SQLite a connection sees its own uncommitted writes. If `COMMIT` raises while the transaction is still open, a query on the same connection could report the uncommitted acceptance as `AcceptanceFound`.
+
+**The rule.** No read is ever answered on a connection that has had a failed transaction.
+
+**The cleanup.** On any exception from `COMMIT`, or from any statement inside a write transaction:
+1. **Roll back:** issue `ROLLBACK` if `connection.in_transaction`, ignoring its own failure.
+2. **Close** the connection. This releases its `EXCLUSIVE` lock.
+3. **Mark** the instance `needs_reopen` and return `AcceptanceCommitUnknown` (or `TraceAppendUnknown`).
+
+**Reopening.** Every later operation first completes the pending reopen:
+- open a fresh connection;
+- take the `EXCLUSIVE` lock again without waiting;
+- verify the settings and every fingerprint.
+
+On the fresh connection, SQLite's rollback-journal recovery has discarded any transaction that did not commit, so answers come only from committed rows:
+- a commit that took effect is `AcceptanceFound`;
+- a commit that did not is `AcceptanceAbsent`.
+
+**If reopening fails** (the lock was taken by another process, or the file fails verification), the store is unavailable for this instance:
+
+| Operation | Result |
+| --- | --- |
+| `query` | `AcceptanceAuthorityUnknown` |
+| `snapshot` | non-retryable `PortFailure` |
+| `commit` | `AcceptanceNotCommitted`, "store unavailable" (definite: nothing was attempted) |
+| `append` | `TraceNotAppended` |
+
+Nothing is ever reported found, committed or appended from an unverified connection.
+
+**What the coordinator sees.** Nothing changes for it: an unknown commit is still followed by one authority query (Increment 3, A1). If the reopen succeeds, that query is now definitive in-process. Otherwise the run ends `ACCEPTANCE_COMMIT_UNCERTAIN`, and its classification after restart decides (A2).
+
+**Tests**, through a labelled fault seam on the adapter's own `_commit` step, as in the FL journal:
+- **Failure before `COMMIT` takes effect:**
+  - the seam raises before executing `COMMIT`, so the inserted row is visible on the old connection;
+  - assert `AcceptanceCommitUnknown`;
+  - then `query` gives `AcceptanceAbsent` and never `AcceptanceFound`;
+  - `snapshot().acceptances` is unchanged;
+  - an exact resubmission then commits once.
+- **Success with the acknowledgement lost:** the seam executes `COMMIT` and then raises. Assert `AcceptanceCommitUnknown`, then `AcceptanceFound` with the original acknowledgement, and that an exact resubmission returns that acknowledgement without a second row.
+- **Reopen refused:** another process holds the lock after the close. Assert `AcceptanceAuthorityUnknown` and that no read was answered.
+- **The same three cases for trace appends:** `TraceAppendUnknown`, then a snapshot without (or with) the event, and an exact re-append acknowledged once.
+- **Subprocess variants:**
+  - `os._exit` immediately before `COMMIT`: after restart the acceptance is absent;
+  - `os._exit` immediately after `COMMIT`: after restart it is found.
+- **Mutation probes:**
+  - answering `query` on the failed connection without reopening;
+  - skipping the `ROLLBACK`;
+  - skipping fingerprint verification on reopen.
+
+  Each must be caught. The first is caught by the before-`COMMIT` case, which would otherwise report `AcceptanceFound`.
+
+#### A2. Interruption classification: explicit precedence, complete coverage (amends P7)
+
+**Authority first, separately from the code.** Every classification carries `authoritative = snapshot.accepted`, the committed head of the acceptance table, never a value derived from the trace. A committed acceptance therefore stays authoritative whatever the last trace event is. Nothing in any interrupted state restores the state before it.
+
+**Precedence.** `classify_run` takes the first rule that matches. A run belongs to its latest attempt: the events after the latest of its `RunRequest`, last `DawContinuationFinished`, or last terminal attempt feedback.
+
+| # | Condition (first match wins) | Code | Resumable |
+| --- | --- | --- | --- |
+| 0 | empty store, or no `RunRequest` event | `NOT_STARTED` | no (nothing to resume; a new run may start) |
+| 1 | last event is a `TerminalSnapshot` | `FINISHED` | no |
+| 2 | the acceptance table holds a commit whose `AcceptanceCommitted` is not in the trace | `INTERRUPTED_AFTER_ACCEPTANCE` | no; the committed state is authoritative |
+| 3 | no DAW session (an offline run) | `INTERRUPTED_OFFLINE` | no |
+| 4 | the latest attempt has a `DAW_RECOVERY` intent without an observation, or recovery records (`DawRecoveryDecision`, `DawRestoreTarget`, a restore-gate verdict) without the attempt's closing feedback | `INTERRUPTED_RECOVERY` | no |
+| 5 | the latest attempt has an `AcceptanceEvent` with no recorded commit response and no commit in the table | `INTERRUPTED_BEFORE_ACCEPTANCE_COMMIT` | no |
+| 6 | the latest attempt has a `DAW_APPLY` intent without an observation | by FL state: `INTERRUPTED_BEFORE_WRITE` (absent), `INTERRUPTED_WRITE_UNRESOLVED` (pending or uncertain), `INTERRUPTED_AFTER_WRITE` (confirmed or off target) | no |
+| 7 | the latest attempt has an observed write (confirmed or off target) and no checkpoint after it | `INTERRUPTED_BEFORE_SUSPENSION` | no |
+| 8 | a `DawContinuationStarted` with no completion evidence, with none of rows 2 and 4–7 matching (a crash during import, analysis or verification) | `CONTINUATION_INTERRUPTED` | no |
+| 9 | the last event is a `DawCorrectionSuspended` checkpoint | `SUSPENDED_RESUMABLE` if the FL journal shows nothing unresolved and the checkpoint's apply is the latest reservation with no unexplained charge; otherwise `SUSPENDED_DAW_STATE_UNEXPLAINED` (refused as `ORPHANED_DAW_STATE`) | only `SUSPENDED_RESUMABLE` |
+| 10 | a `DawContinuationFinished` (`ACCEPTED` or `ROLLED_BACK`), followed by events and no open write intent, checkpoint or terminal: a crash in a decision round after a continuation, before the next suspension | `INTERRUPTED_BETWEEN_ROUNDS` | no |
+| 11 | a `RunRequest`, and no `DAW_APPLY` intent in the run: a crash before the first write intent (initial analysis, diagnosis or decision) | `INTERRUPTED_BEFORE_FIRST_WRITE` | no |
+| 12 | anything else | `UNCLASSIFIED`, refused as `RUN_INTERRUPTED`. This must never occur; a coverage test pins it. | no |
+
+**Why rows 2, 4, 5, 6 and 7 come before row 8.** A crash after `DawContinuationStarted` that occurs at the acceptance commit, during recovery or at a later write is classified by its specific effect, never as a generic continuation interruption.
+
+**Rows 10 and 11 are safe in the DAW sense** (nothing was written since the last accepted or restored state), but per E4 they are still refused and left to operator recovery.
+
+**Coverage tests:**
+- **Prefix enumeration.** For recorded traces of real runs, every trace prefix is classified, paired with the acceptance-table state at that point:
+  - accepted;
+  - rejected and iterated;
+  - suspended twice;
+  - unknown commit found or absent;
+  - each Increment 4 recovery path.
+
+  At each prefix:
+  - nothing is `UNCLASSIFIED`;
+  - `SUSPENDED_RESUMABLE` occurs exactly at prefixes ending in a checkpoint with consistent FL facts;
+  - `FINISHED` occurs only for the full trace;
+  - every prefix whose acceptance table is ahead of the trace is `INTERRUPTED_AFTER_ACCEPTANCE` with the committed head as authority.
+- **Overlap cases:**
+  - started, then a committed acceptance not yet traced: row 2, not row 8;
+  - started, then a recovery intent open: row 4;
+  - started, then a second write intent open: row 6.
+- **Subprocess crash points** added to test 6:
+  - before the first write intent (during the initial decision): row 11;
+  - after `DawContinuationFinished(ACCEPTED)`, before the next suspension:
+    - during the next decision: row 10;
+    - after the next write intent: row 6;
+    - after the next confirmed write: row 7.
+
+#### A3. Durability provenance in results (amends P1 and P5)
+
+**`StoreDurability`** (new enum in `core.records.run_trace`):
+- `NON_DURABLE = "non_durable"`;
+- `LOCAL_SQLITE_PROCESS_CRASH = "local_sqlite_process_crash"`.
+
+**Carried by the snapshot.**
+- **The field:** `RunJournalSnapshot` gains a trailing field `durability: StoreDurability = NON_DURABLE`, set by the adapter that produced the snapshot.
+- **Through the coordinator:** the coordinator passes snapshots through unchanged, so a `RunReport.trace`, a `RunSuspended.trace` and a reloaded suspension (`load_suspension`) all carry the store's provenance.
+- **The port:** `RunJournal` gains a read-only `durability: StoreDurability`. Both adapters already expose a `durability` string; it becomes the enum.
+- **The check:** the coordinator reads `journal.durability` once at the start of a run or continuation and requires every snapshot to carry the same value. A mismatch is a wiring error (`ValueError`).
+
+**Reported.**
+- **`RunReport.durability`:** returns `self.trace.durability.value`. In-memory results keep exactly `"non_durable"`, so the existing tests stay valid.
+- **`RunSuspended.durability`:** a new property with the same rule.
+
+**Durability is not acknowledgement.**
+- **Store durability** describes the store that produced the snapshot.
+- **Whether every event was acknowledged** stays the separate, existing `RunReport.unacknowledged_events` and `terminal_append`.
+- **Example:** a report from a durable store whose terminal append was refused says `durability == "local_sqlite_process_crash"` with a non-empty `unacknowledged_events`. Neither field is derived from the other.
+
+**Tests:**
+- in-memory reports and suspensions keep `"non_durable"`;
+- durable reports and reloaded suspensions report `"local_sqlite_process_crash"`;
+- a durable run whose terminal append fails keeps the durable label and lists the unacknowledged terminal event;
+- a snapshot whose durability differs from the journal's declaration is refused;
+- mutation probe: deriving durability from acknowledgement completeness.
+
+## Increment 5 outcome (2026-11-20, tests-first; uncommitted for review)
+
+**Implemented as approved,** with amendment A and the owner's clarification that a recorded, validated `AcceptanceFound` counts as trace evidence of acceptance alongside `AcceptanceCommitted`. Recorded in [ADR-039](../../decisions/0039-durable-run-journal-and-restart.md) (Proposed), revised in place with implementation notes.
+
+**What was built:**
+- **The store:** `adapters.journal.record_codec`, an allowlisted exact codec, and `adapters.journal.sqlite_run` (`SqliteRunJournal`, `RunStoreBusy`, `RunStoreError`).
+- **The FL query:** the read-only `latest_anchor()`, in the port, the FL journal and the controller.
+- **The run-start check:** `daw_start_check`, wired into `run_daw` right after the request is recorded.
+- **Restart:** `core.loop.restart`, with `classify_run`, `restart_facts` and `reopen_daw_run`.
+- **Records:** `core.records.run_restart`.
+- **Durability provenance:** `StoreDurability` and `RunJournalSnapshot.durability`.
+- **Docs:** ADR-039 lists the deviations from the plan's naming and records.
+
+**Changes to earlier tests:**
+- **G14:** an unresolved FL command present before a run now refuses its start. The Increment 2 gate-rejection test therefore creates its unresolved command during the decision, and a new test pins the start refusal.
+- **Test doubles** that wrap a journal expose `store_durability`.
+- **The record-shape test** now pins the defaulted durability field separately.
+
+**Evidence:**
+- **Tests:**
+  - codec and store: 16;
+  - in-process restart, classification (prefix coverage over five real scenarios, overlaps), durability, the found-acceptance regression and the start check: 16;
+  - subprocess: 18, covering:
+    - the main path: suspend, resume in another process, a third process finds the run finished, and exactly one fader write overall;
+    - ownership: busy while held, free after the holder is killed;
+    - 13 crash points, including both commit-step variants.
+- **Mutation probes:** 13 new, all caught. The Increment 4 set (21) is all caught.
+- **Locked checks:**
+
+  | Check | Result |
+  | --- | --- |
+  | Focused suites, warnings as errors | 2,048 passed |
+  | Full suite | 6,329 passed, 4 skipped |
+  | `ruff check` | clean |
+  | `ruff format --check` | clean |
+  | CLI help | runs |
+  | `uv lock --check` | clean |
+  | `git diff --check` | clean |
+- **Scope of the evidence:** process-crash only; no power-loss claim. No CLI wiring, installation or live FL calls.
+
+### Increment 5 review fix (2026-11-20)
+
+**Finding (Codex).** The write-transaction handlers in `SqliteRunJournal` caught only `sqlite3.Error`, `_Unverified` and `ValueError`. A `RuntimeError` injected before `COMMIT` escaped with the transaction still open, and a later query on the same connection returned `AcceptanceFound` for the uncommitted row.
+
+**Fix.**
+- **Writes:** in both `append` and `commit`, every exception after transaction entry now triggers the rollback, close and verified reopen. Storage failures are still returned as `TraceAppendUnknown` or `AcceptanceCommitUnknown`. Any other exception propagates after the cleanup, as the port contract requires (unexpected errors propagate).
+- **Reads:** `query` and `snapshot` clean up the same way before propagating.
+
+**Regressions,** written first. The before-commit cases failed before the fix.
+- **Store level:**
+  - an unexpected exception before `COMMIT` and after a successful `COMMIT` with the acknowledgement lost, for acceptance commits and for trace appends. Each propagates, then the store answers absent or found from committed rows only, and an exact resubmission is stored once;
+  - an unexpected exception inside the transaction before the insert leaves no open transaction.
+- **Coordinator level:** the same two cases at the durable commit of a real continuation. The exception propagates, the run ends `ACCEPTANCE_COMMIT_UNCERTAIN`, and the query answers absent or found.
+
+**Checks.**
+- **Mutation probes:** two new ones, removing the cleanup from `commit` or from `append`, both caught. The Increment 5 set (now 15) is all caught.
+- **Locked checks:**
+
+  | Check | Result |
+  | --- | --- |
+  | Focused suites, warnings as errors | 2,055 passed |
+  | Full suite | 6,336 passed, 4 skipped |
+  | `ruff check` | clean |
+  | `ruff format --check` | clean |
+  | CLI help | runs |
+  | `uv lock --check` | clean |
+  | `git diff --check` | clean |

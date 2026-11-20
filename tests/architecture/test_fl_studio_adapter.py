@@ -51,6 +51,7 @@ EDGES = {
         f"{CORE}.records.daw_recovery",
         f"{CORE}.records.invariants",
         f"{CORE}.records.results",
+        f"{CORE}.records.run_restart",  # Increment 5 (ADR-039): the latest state-establishing event
     },
 }
 

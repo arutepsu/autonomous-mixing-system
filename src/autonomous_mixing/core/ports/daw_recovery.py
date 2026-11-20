@@ -23,7 +23,10 @@ uncertain):
   every reservation or resolution outside the lineage after it, the unresolved commands and the watermarks. It
   refuses a refused root (nothing was written) and never changes the journal. Export anchors are unaffected;
 - ``recovery_snapshot`` holds the lock across the lineage and control state read before and after one fresh
-  inspection of the lineage's binding and profile, returning the snapshot only when both reads agree.
+  inspection of the lineage's binding and profile, returning the snapshot only when both reads agree;
+- ``latest_anchor`` (Increment 5, ADR-039) returns the latest state-establishing event (a confirmed write or
+  restoration, or a resolution; refused writes wrote nothing and are skipped) anchored under the unchanged anchor
+  rules, ``None`` for a journal with none; refused while anything is unresolved or when that source cannot be anchored.
 
 Restoring one fader proves only that fader's readings, never routing, plugins, the project or audio.
 """
@@ -52,6 +55,7 @@ from autonomous_mixing.core.records.daw_recovery import (
 )
 from autonomous_mixing.core.records.invariants import require_instance
 from autonomous_mixing.core.records.results import PortFailure, PortResult, Success
+from autonomous_mixing.core.records.run_restart import DawLatestState
 
 
 class DawRecoveryController(Protocol):
@@ -74,6 +78,8 @@ class DawRecoveryController(Protocol):
     def recovery_lineage(self, root_command_id: str) -> PortResult[DawRecoveryLineage]: ...
 
     def recovery_snapshot(self, root_command_id: str) -> PortResult[DawRecoverySnapshot]: ...
+
+    def latest_anchor(self) -> PortResult[DawLatestState]: ...
 
 
 def validate_daw_restore_outcome(request: DawRestoreRequest, outcome: DawRestoreOutcome) -> None:
@@ -166,3 +172,10 @@ def validate_daw_recovery_snapshot(root_command_id: str, result: PortResult[DawR
         raise ValueError("a recovery-snapshot response must be Success(DawRecoverySnapshot) or a PortFailure")
     if result.value.lineage.root_command_id != root_command_id:
         raise ValueError("the recovery snapshot answers another root")
+
+
+def validate_daw_latest_state(result: PortResult[DawLatestState]) -> None:
+    if isinstance(result, PortFailure):
+        return
+    if not isinstance(result, Success) or not isinstance(result.value, DawLatestState):
+        raise ValueError("a latest-anchor response must be Success(DawLatestState) or a PortFailure")

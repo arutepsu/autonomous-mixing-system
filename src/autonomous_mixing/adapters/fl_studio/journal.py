@@ -467,6 +467,26 @@ class SqliteCommandJournal:
         request = root.request["request"]
         return request["resolution"]["state"]["binding"], request["profile"]
 
+    def latest_source(self):
+        """(source ID or None, ledger watermark): the latest state-establishing entry (ADR-039 run-start check).
+
+        Candidates are every reservation whose command was not refused (a refused write wrote nothing) and every
+        resolution; the latest by ledger seq wins. Refused (``JournalRefusal``) while anything is unresolved. The
+        caller anchors the returned source with ``state_anchor``, whose confirmed-only and currency rules apply
+        unchanged (an off-target, uncertain or superseded latest source cannot be anchored).
+        """
+        with self._lock:
+            rows, ledger = self._rows(), self._ledger()
+            if self._unresolved(rows, ledger):
+                raise JournalRefusal("unresolved", "a command is unresolved: no state can be anchored")
+            refused = {row.command_id for row in rows if isinstance(row.outcome, DawWriteRefused)}
+            candidates = [
+                (seq, entry_id) for seq, kind, entry_id, _, _ in ledger
+                if (kind == "RESERVED" and entry_id not in refused) or kind == "RESOLVED"
+            ]  # fmt: skip
+            top = max((seq for seq, *_ in ledger), default=0)
+            return (max(candidates)[1] if candidates else None), top
+
     def state_anchor(self, source_id: str) -> dict:
         """Journal-backed source evidence for an export anchor, from one locked read pass (export plan, revision 3).
 

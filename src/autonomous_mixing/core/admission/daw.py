@@ -44,6 +44,8 @@ from autonomous_mixing.core.records.daw_recovery import (
 )
 from autonomous_mixing.core.records.identifiers import ExecutionId, VersionRef
 from autonomous_mixing.core.records.invariants import require_finite, require_finite_result, require_instance
+from autonomous_mixing.core.records.run_restart import DawLatestState, DawStartRefused
+from autonomous_mixing.core.records.termination import TerminationReason
 
 
 def resolve_daw_gain(
@@ -334,3 +336,42 @@ def daw_recovery_decision(
         raise ValueError("the reconciliation answers another command than the uncertain root")
     return DawRecoveryDecision(entry, root_command_id, daw_recovery_plan_for(reconciliation.finding),
                                reconciliation.reconciliation_id, reconciliation.finding)  # fmt: skip
+
+
+def daw_start_check(
+    control_state: DawControlState,
+    latest: DawLatestState | None,
+    *,
+    binding: DawTrackBinding,
+    profile: DawControlProfile,
+    confirmed: DawFaderReading,
+) -> DawStartRefused | None:
+    """Whether the FL journal is explained by the run's configuration before any decision (G14, ADR-039).
+
+    Refused, adopting and restoring nothing: an unresolved command (``DAW_COMMAND_UNRESOLVED``); the session's blocked
+    conversion (``DAW_CONVERSION_BLOCKED``); a latest state-establishing FL event that cannot be anchored
+    (``latest`` None), or whose anchor is not exactly the configured binding and confirmed fader, both coordinates and
+    signed zeros (``DAW_CONTINUITY_FAILED``). An empty journal is explained.
+    """
+    require_instance(control_state, DawControlState, "control_state")
+    if control_state.unresolved:
+        ids = tuple(item.command_id for item in control_state.unresolved)
+        return DawStartRefused(TerminationReason.DAW_COMMAND_UNRESOLVED, ids,
+                               "unresolved FL commands precede this run: " + ", ".join(ids))  # fmt: skip
+    if profile.conversion in control_state.blocked_conversions:
+        return DawStartRefused(TerminationReason.DAW_CONVERSION_BLOCKED, (),
+                               "the session's fader conversion is blocked")  # fmt: skip
+    if latest is None:
+        return DawStartRefused(TerminationReason.DAW_CONTINUITY_FAILED, (),
+                               "the latest FL event cannot be anchored: the DAW state is unexplained")  # fmt: skip
+    require_instance(latest, DawLatestState, "latest")
+    anchor = latest.anchor
+    if anchor is None:
+        return None
+    exact = all(a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
+                for a, b in ((anchor.reading.normalized, confirmed.normalized), (anchor.reading.db, confirmed.db)))  # fmt: skip
+    if anchor.binding != binding or not exact:
+        return DawStartRefused(TerminationReason.DAW_CONTINUITY_FAILED, (anchor.source_id,),
+                               f"the latest FL state ({anchor.source_id}) is not exactly the configured confirmed "
+                               "fader: the DAW state is unexplained")  # fmt: skip
+    return None

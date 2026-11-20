@@ -227,9 +227,23 @@ def test_a_pre_write_refusal_is_a_failed_attempt_and_the_loop_continues(harness)
     assert OperationKind.EXPORT_PREPARE not in operations(result) and h.world.host.volumes[2] == 0.76
 
 
-def test_a_gate_rejection_writes_nothing_and_the_loop_continues(harness):
+def test_an_unresolved_command_before_the_run_refuses_its_start(harness):
+    """Increment 5 (G14, ADR-039): unexplained FL state refuses the start before any decision or write."""
     h = harness(decisions=(propose(OK_CUT), no_change))
     journal_apply(h.fl_journal, "apply_pending_1", pending=True)  # an unresolved earlier command
+    result = h.run()
+    assert result.final_run.termination_reason is R.DAW_COMMAND_UNRESOLVED
+    assert "apply_pending_1" in result.final_run.termination_explanation
+    assert not h.decider.situations and not h.sent("set_gain_db")
+    assert [c.command_id for c in h.fl_journal.control_state().unresolved] == ["apply_pending_1"]  # preserved
+
+
+def test_a_gate_rejection_writes_nothing_and_the_loop_continues(harness):
+    def decide_after_an_orphan_appears(situation, number):  # an unresolved command appears during the run
+        journal_apply(h.fl_journal, "apply_pending_1", pending=True)
+        return propose(OK_CUT)(situation, number)
+
+    h = harness(decisions=(decide_after_an_orphan_appears, no_change))
     result = h.run()
     assert result.final_run.termination_reason is R.NO_CHANGE_PROPOSED
     rejected = payloads(result, DawApplyRejected)
@@ -534,6 +548,10 @@ class RaisingOnApplyObservation:
 
     def query(self, request):
         return self.inner.query(request)
+
+    @property
+    def store_durability(self):
+        return self.inner.store_durability
 
     def snapshot(self):
         return self.inner.snapshot()

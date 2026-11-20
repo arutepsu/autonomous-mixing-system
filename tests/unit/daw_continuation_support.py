@@ -97,6 +97,10 @@ SESSION = DawSessionConfig(BINDING, PROFILE, TrackGainPermission(T1, -6.0, 0.0),
 ACCEPT, INTERMEDIATE, NO_IMPROVEMENT, SILENT = 0.25, 0.4, 0.5, 0.0  # exported master amplitudes
 
 
+def _digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def write_wav(path, amplitude, *, channels=2, frames=FRAMES):
     path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(path), np.full((frames, channels), amplitude), RATE, subtype="PCM_24", format="WAV")
@@ -111,15 +115,18 @@ def limits(**overrides):
 
 
 class Continuation:
-    def __init__(self, tmp_path, *, decisions, budget=None, journal=None):
+    def __init__(self, tmp_path, *, decisions, budget=None, journal=None, run_journal=None, host=None,
+                 identity_start=0, write_inputs=True):  # fmt: skip
+        """``run_journal`` (a factory of request and initial reference), ``host`` and ``identity_start`` let a test
+        restart a run in another process (Increment 5): a durable store, a persistent fake host, fresh identities."""
         self.tmp = tmp_path
         self.inputs, self.exports = tmp_path / "inputs", tmp_path / "exports"
-        self.exports.mkdir(parents=True)
+        self.exports.mkdir(parents=True, exist_ok=True)
         members = []
         for aid, tracks, kind, amplitude in (("s1", (T1,), ArtifactKind.STEM, 0.3), ("s2", (T2,), ArtifactKind.STEM, 0.3),
                                              ("mix", (T1, T2), ArtifactKind.MIX, 0.5)):  # fmt: skip
             location = f"baseline/{aid}.wav"
-            digest = write_wav(self.inputs / location, amplitude)
+            digest = write_wav(self.inputs / location, amplitude) if write_inputs else _digest(self.inputs / location)
             members.append(AudioArtifact(ArtifactId(aid), P1, Revision("r1"), tracks, kind, location, 0.0, RATE, 2,
                                          FRAMES, digest, FL_EXPORT))  # fmt: skip
         snapshot = ProjectSnapshot(P1, Revision("r1"), UTC, (Track(T1, "bass"), Track(T2, "pad")))
@@ -140,10 +147,13 @@ class Continuation:
             mix_artifact_id=ArtifactId("mix"), daw_session=SESSION,
         )  # fmt: skip
         self.fl_journal = SqliteCommandJournal(tmp_path / "fl.db", session_key="session-1")
-        self.world = World(self.fl_journal)
-        self.real_journal = InMemoryRunJournal(self.request.run_id, AcceptedReference(self.initial, 0))
+        self.world = World(self.fl_journal, host)
+        initial = AcceptedReference(self.initial, 0)
+        self.real_journal = (run_journal(self.request, initial) if run_journal
+                             else InMemoryRunJournal(self.request.run_id, initial))  # fmt: skip
         self.journal = journal(self.real_journal) if journal else self.real_journal
         self.identities = Identities()
+        self.identities.count = identity_start
         self.decider = Decider(*decisions)
         roots = {"inputs": str(self.inputs), "daw-exports": str(self.exports)}
         read = dict(max_file_bytes=1 << 22, max_decoded_bytes=1 << 24)

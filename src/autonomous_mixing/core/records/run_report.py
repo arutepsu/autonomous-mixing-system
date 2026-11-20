@@ -166,7 +166,8 @@ class RunReport:
 
     @property
     def durability(self) -> str:
-        return "non_durable"
+        """The provenance of the store that produced this report's trace (ADR-039), not acknowledgement."""
+        return self.trace.durability.value
 
 
 @dataclass(frozen=True)
@@ -193,3 +194,8 @@ class RunSuspended:
             raise ValueError("RunSuspended checkpoint must be the trace's last event")
         if not isinstance(self.checkpoint_event.payload, DawCorrectionSuspended):
             raise ValueError("RunSuspended checkpoint event must carry a DawCorrectionSuspended payload")
+
+    @property
+    def durability(self) -> str:
+        """The provenance of the store that produced this suspension's trace (ADR-039)."""
+        return self.trace.durability.value

@@ -33,6 +33,15 @@ ALLOWED_RECORD_IMPORTS = {
     "daw_control": {"identifiers", "invariants", "daw", "daw_binding", "admission"},  # DAW control contract, 2026-11-18
     "daw_recovery": {"identifiers", "invariants", "daw_binding", "daw_control", "budgets"},  # recovery plan, 2026-11-18
     "daw_rollback": {"actions", "identifiers", "invariants", "project"},  # coordinator Increment 4 (ADR-038)
+    "run_restart": {  # Increment 5 (ADR-039)
+        "acceptance",
+        "daw_binding",
+        "daw_export",
+        "daw_recovery",
+        "identifiers",
+        "invariants",
+        "termination",
+    },
     "daw_export": {  # export handoff plan, 2026-11-18 (revision 3)
         "identifiers",
         "invariants",
@@ -170,6 +179,7 @@ ALLOWED_RECORD_IMPORTS = {
         "daw_export",
         "daw_recovery",
         "daw_rollback",  # Increment 4 (ADR-038): the standalone DAW rollback record
+        "run_restart",  # Increment 5 (ADR-039): restart classification and the run-start check records
         "acceptance",
         "actions",
         "admission",
@@ -571,8 +581,17 @@ INVENTORY = {
         "TraceNotAppended",
         "TraceAppendUnknown",
         "TraceAppendResult",
+        "StoreDurability",  # Increment 5 (ADR-039)
     ),
     "run_report": ("RunReport", "RunSuspended"),
+    "run_restart": (  # Increment 5 (ADR-039): restart classification and the DAW facts it is decided from
+        "RunInterruptionCode",
+        "RunInterrupted",
+        "DawRestartFacts",
+        "DawLatestAnchorQuery",
+        "DawLatestState",
+        "DawStartRefused",
+    ),
 }
 
 MUTABLE_TYPES = {"list", "dict", "set", "bytearray", "List", "Dict", "Set", "MutableMapping", "MutableSequence"}

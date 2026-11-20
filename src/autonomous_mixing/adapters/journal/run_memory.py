@@ -17,6 +17,7 @@ from autonomous_mixing.core.records.results import PortResult, Success
 from autonomous_mixing.core.records.run_trace import (
     RunJournalSnapshot,
     RunTraceEvent,
+    StoreDurability,
     TraceAppended,
     TraceAppendResult,
     TraceNotAppended,
@@ -80,6 +81,10 @@ class InMemoryRunJournal:
     @property
     def durability(self) -> str:
         return NON_DURABLE
+
+    @property
+    def store_durability(self) -> StoreDurability:
+        return StoreDurability.NON_DURABLE
 
     def append(self, event: RunTraceEvent) -> TraceAppendResult:
         """Append a valid next event or return its original acknowledgement for an exact duplicate."""

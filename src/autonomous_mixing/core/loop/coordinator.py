@@ -12,7 +12,7 @@ from functools import partial
 from autonomous_mixing.core.loop.completion import finalize
 from autonomous_mixing.core.loop.correction import render
 from autonomous_mixing.core.loop.daw_continuation import admit_continuation, continue_daw
-from autonomous_mixing.core.loop.daw_execution import execute_daw
+from autonomous_mixing.core.loop.daw_execution import daw_start, execute_daw
 from autonomous_mixing.core.loop.decision_round import decision_round
 from autonomous_mixing.core.loop.observation import (
     _missing_baselines,
@@ -30,7 +30,11 @@ from autonomous_mixing.core.ports.daw_export import DawExportHandoff
 from autonomous_mixing.core.ports.daw_recovery import DawRecoveryController
 from autonomous_mixing.core.ports.decision import DecisionMaker
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
-from autonomous_mixing.core.ports.run_journal import RunJournal, validate_run_journal_snapshot
+from autonomous_mixing.core.ports.run_journal import (
+    RunJournal,
+    require_snapshot_durability,
+    validate_run_journal_snapshot,
+)
 from autonomous_mixing.core.records.acceptance import AcceptedReference
 from autonomous_mixing.core.records.budgets import BudgetUsage
 from autonomous_mixing.core.records.coordinator_progress import PreparedCorrection, RuntimeProgress, Stop
@@ -68,11 +72,20 @@ def ordinary(
     journal: RunJournal,
     execute: Callable,
     on_progress: Callable[[RuntimeProgress], None],
+    start_check: Callable | None = None,
 ) -> tuple[RuntimeProgress, Stop | RunTraceEvent]:
-    """``execute(progress, prepared, on_progress=...)`` runs one prepared correction: the offline render or the DAW write."""
+    """``execute(progress, prepared, on_progress=...)`` runs one prepared correction: the offline render or the DAW write.
+
+    ``start_check(progress, on_progress=...)`` (the DAW path, ADR-039) runs right after the request is recorded and
+    before anything else; a stop ends the run before any effect.
+    """
     progress, stop = record(progress, progress.request, identities=identities, journal=journal, on_progress=on_progress)
     if stop:
         return (progress, stop)
+    if start_check is not None:
+        progress, stop = start_check(progress, on_progress=on_progress)
+        if stop:
+            return (progress, stop)
     progress, (status, _, _, stop, performed) = inspect(
         progress,
         progress.request.initial_state,
@@ -251,9 +264,11 @@ def run_daw(
                       recovery_controller=recovery_controller, export_handoff=export_handoff,
                       integrity_inspector=integrity_inspector)  # fmt: skip
 
+    start_check = partial(daw_start, clock=clock, identities=identities, journal=journal,
+                          recovery_controller=recovery_controller)  # fmt: skip
     return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker,
                 integrity_inspector=integrity_inspector, journal=journal, clock=clock, identities=identities,
-                execute=execute)  # fmt: skip
+                execute=execute, start_check=start_check)  # fmt: skip
 
 
 def _run(
@@ -267,12 +282,14 @@ def _run(
     clock: RunClock,
     identities: IdentitySource,
     execute: Callable,
+    start_check: Callable | None = None,
 ) -> RunReport | RunSuspended:
     initial = AcceptedReference(request.initial_state, 0)
     opened = journal.snapshot()
     if not isinstance(opened, Success) or not isinstance(opened.value, RunJournalSnapshot):
         raise ValueError("the journal could not confirm its initialization for this run")
     validate_run_journal_snapshot(request.run_id, initial, opened.value)
+    require_snapshot_durability(journal, opened.value)
     if opened.value.events or opened.value.acceptances:
         raise ValueError("the journal already holds a trace or acceptances; this API does not resume a run")
     first = clock.read()
@@ -302,7 +319,7 @@ def _run(
     )
     step = partial(ordinary, analyzer=analyzer, clock=clock, decision_maker=decision_maker,
                    diagnosis_source=diagnosis_source, identities=identities, integrity_inspector=integrity_inspector,
-                   journal=journal, execute=execute)  # fmt: skip
+                   journal=journal, execute=execute, start_check=start_check)  # fmt: skip
     return _complete(progress, step, clock=clock, identities=identities, journal=journal)
 
 
@@ -356,9 +373,8 @@ def _complete(
 
 def _suspended(progress: RuntimeProgress, checkpoint: RunTraceEvent, journal: RunJournal) -> RunSuspended:
     """The suspended run: the journal's acknowledged prefix ending with the checkpoint, else the locally known one."""
-    snapshot = RunJournalSnapshot(
-        progress.request.run_id, progress.initial, tuple(progress.known), tuple(progress.commits)
-    )
+    snapshot = RunJournalSnapshot(progress.request.run_id, progress.initial, tuple(progress.known),
+                                  tuple(progress.commits), journal.store_durability)  # fmt: skip
     opened = journal.snapshot()
     if isinstance(opened, Success) and isinstance(opened.value, RunJournalSnapshot):
         try:
@@ -367,6 +383,7 @@ def _suspended(progress: RuntimeProgress, checkpoint: RunTraceEvent, journal: Ru
                 snapshot = opened.value
         except ValueError:
             pass
+    require_snapshot_durability(journal, snapshot)
     return RunSuspended(progress.request, snapshot, checkpoint)
 
 
@@ -407,6 +424,7 @@ def resume_daw(
         snapshot = opened.value
         initial = AcceptedReference(request.initial_state, 0)
         validate_run_journal_snapshot(request.run_id, initial, snapshot)
+        require_snapshot_durability(journal, snapshot)
         refusal = admit_continuation(snapshot, request, checkpoint_event, manifest)
         if refusal is not None:
             return refusal

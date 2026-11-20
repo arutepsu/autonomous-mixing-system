@@ -268,6 +268,13 @@ JOURNAL_EDGES = {
         {f"{JOURNAL}.memory"} | _r("acceptance", "identifiers", "invariants", "results", "run_trace"),
         set(),
     ),
+    # Increment 5 (ADR-039): the exact codec (records are loaded by module path, never by a stored name) and the
+    # durable SQLite run journal; standard library only.
+    "record_codec": (set(), set()),
+    "sqlite_run": (
+        {f"{JOURNAL}.record_codec"} | _r("acceptance", "identifiers", "invariants", "results", "run_trace"),
+        set(),
+    ),
 }
 
 

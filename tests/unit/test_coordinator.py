@@ -321,6 +321,10 @@ class FaultyJournal:
             return PortFailure(PortFailureCode.UNAVAILABLE, "labelled snapshot failure", False)
         return self.inner.snapshot()
 
+    @property
+    def store_durability(self):
+        return self.inner.store_durability
+
 
 class Probe:
     """Forwards to the journal under test and notes the clock read index after each first intent."""
@@ -341,6 +345,10 @@ class Probe:
 
     def snapshot(self):
         return self.inner.snapshot()
+
+    @property
+    def store_durability(self):
+        return self.inner.store_durability
 
 
 def limits(**overrides):
