@@ -225,7 +225,9 @@ def test_records_are_immutable_and_have_no_duplicate_identity_fields():
     with pytest.raises(dataclasses.FrozenInstanceError):
         state.processing.track_gains[0].gain_db = -1.0
     assert isinstance(state.processing.track_gains, tuple)
-    assert {f.name for f in dataclasses.fields(ProjectState)} == {"snapshot", "processing", "audio"}
+    # ADR-035 adds the optional DAW parameter state (ADR-034 Option A); offline states leave it None.
+    assert {f.name for f in dataclasses.fields(ProjectState)} == {"snapshot", "processing", "audio", "daw"}
+    assert state.daw is None
 
 
 def test_snapshot_timestamp_is_part_of_state_identity():
@@ -366,7 +368,8 @@ def test_derived_state_is_only_a_candidate_record():
     previous = _state()
     candidate = _derive(previous, *_render_step(previous, -3.0, 2))
     assert isinstance(candidate, ProjectState)
-    assert {f.name for f in dataclasses.fields(candidate)} == {"snapshot", "processing", "audio"}
+    assert {f.name for f in dataclasses.fields(candidate)} == {"snapshot", "processing", "audio", "daw"}
+    assert candidate.daw is None  # the offline derivation never creates DAW parameter state
 
 
 # --- audit F1: gain settings require consistent artifact replacement ------------------------

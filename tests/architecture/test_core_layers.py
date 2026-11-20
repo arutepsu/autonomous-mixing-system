@@ -34,7 +34,41 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
+    "admission.daw": (
+        "resolve_daw_gain",
+        "daw_gain_bounds",
+        "gate_daw_apply",
+        "gate_daw_restore",  # 2026-11-18
+        "daw_recovery_decision",
+        "daw_start_check",  # Increment 5 (ADR-039)
+        "operator_recovery_options",  # Increment 6 (ADR-040)
+    ),  # coordinator Increment 4 (ADR-038)  # fmt: skip
+    "admission.daw_export": ("assess_daw_import",),  # export handoff plan, 2026-11-18 (revision 3)
+    "admission.daw_correction": ("preflight_daw_correction",),  # coordinator Increment 2 (ADR-036)
+    "loop.daw_execution": (
+        "daw_track_state",
+        "daw_capabilities",
+        "prepare_daw",
+        "execute_daw",
+        "daw_start",
+    ),  # ADR-036, 039
+    "loop.daw_continuation": (  # coordinator Increment 3 (ADR-037)
+        "continue_daw",
+        "promote_daw",
+        "accept_daw",
+        "reconcile_daw_acceptance",
+        "admit_continuation",
+    ),
+    "loop.daw_recovery": ("recovery_ids", "require_recovery_authority", "recover_daw"),  # Increment 4 (ADR-038)
+    "loop.restart": ("classify_run", "restart_facts", "reopen_daw_run"),  # Increment 5 (ADR-039)
+    "loop.operator_recovery": ("run_view", "orphan_facts", "orphan_view", "perform"),  # Increment 6 (ADR-040)
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
+    "loop.daw_transitions": (  # coordinator-integration Increment 1 (ADR-035)
+        "daw_execution_receipt",
+        "validate_daw_execution",
+        "derive_daw_candidate_state",
+        "validate_daw_acceptance_event",  # Increment 3
+    ),
     "loop.completion": ("finalize",),
     "loop.correction": ("render", "verify_candidate"),
     "loop.decision_round": ("decision_round", "evaluate_decision", "act"),
@@ -49,6 +83,7 @@ BEHAVIOR_INVENTORY = {
         "reconcile_unknown",
     ),
     "loop.runtime": (
+        "elapsed_at",  # Increment 3 (C2)
         "checkpoint",
         "fresh",
         "identity_failure",
@@ -59,10 +94,29 @@ BEHAVIOR_INVENTORY = {
         "observed",
         "promote",
     ),
-    "ports.run_journal": ("RunJournal", "validate_trace_append_response", "validate_run_journal_snapshot"),
+    "ports.run_journal": (
+        "RunJournal",
+        "RunExclusion",  # coordinator Increment 3 (ADR-037)
+        "validate_trace_append_response",
+        "validate_run_journal_snapshot",
+    ),
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
     "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
     "ports.rendering": ("Renderer", "validate_rendered_candidate"),
+    "ports.daw": ("DawParameterController", "validate_daw_inspection", "validate_daw_apply_outcome"),  # 2026-11-18
+    "ports.daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
+        "DawRecoveryController",
+        "validate_daw_restore_outcome",
+        "validate_daw_reconciliation",
+        "validate_daw_resolution",
+        "validate_daw_control_state",
+        "validate_daw_state_anchor",  # export handoff plan, 2026-11-18 (revision 3)
+        "validate_daw_continuity_snapshot",
+        "validate_daw_recovery_lineage",  # coordinator Increment 4 (ADR-038)
+        "validate_daw_recovery_snapshot",
+        "validate_daw_latest_state",  # Increment 5 (ADR-039)
+    ),
+    "ports.daw_export": ("DawExportHandoff", "validate_daw_export_preparation", "validate_daw_files_verified"),
     "ports.acceptance": (
         "AcceptanceJournal",
         "validate_acceptance_commit_response",
@@ -89,7 +143,11 @@ BEHAVIOR_INVENTORY = {
     "loop.budgets": ("check_budget",),
     "loop.verification_routing": ("route_verification",),
     "loop.acceptance": ("validate_acceptance_event",),
-    "loop.coordinator": ("run",),  # controlled-coordinator composition plan, 2026-11-09
+    "loop.coordinator": (
+        "run",
+        "run_daw",
+        "resume_daw",
+    ),  # controlled-coordinator composition plan, 2026-11-09; run_daw: ADR-036
     "loop.reconciliation": ("reconcile_acceptance",),
 }
 

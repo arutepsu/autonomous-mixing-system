@@ -11,12 +11,13 @@ from autonomous_mixing.core.records.actions import Action, ExecutionReceipt
 from autonomous_mixing.core.records.admission import StemBinding
 from autonomous_mixing.core.records.budgets import BudgetUsage
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading, RunRequest
+from autonomous_mixing.core.records.daw_correction import DawCorrectionPlan
 from autonomous_mixing.core.records.decision import Decision, ProposeAction
 from autonomous_mixing.core.records.diagnosis import DiagnosisReport
 from autonomous_mixing.core.records.feedback import DecisionFeedback
 from autonomous_mixing.core.records.identifiers import ArtifactId, AttemptId, DecisionCallId, ExecutionId, Revision
 from autonomous_mixing.core.records.integrity import ArtifactRootBinding
-from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of
+from autonomous_mixing.core.records.invariants import require_finite, require_instance, require_text, require_tuple_of
 from autonomous_mixing.core.records.project import ProjectState
 from autonomous_mixing.core.records.rendering import RenderPlan
 from autonomous_mixing.core.records.run_trace import RunTraceEvent
@@ -26,6 +27,16 @@ from autonomous_mixing.core.records.verification_assessment import VerificationA
 from autonomous_mixing.core.records.verification_evidence import StateEvidence
 
 Stop = tuple[TerminationReason, str]
+
+# Review fix 2026-11-19 (ADR-036): the terminal reason an unexpected exception must keep once a DAW write may have
+# taken effect. ``None`` means nothing is pending (an unexpected error is then a runtime contract failure).
+_PENDING_EFFECT_REASONS = frozenset({
+    TerminationReason.DAW_COMMAND_UNRESOLVED,
+    TerminationReason.DAW_CONVERSION_BLOCKED,
+    TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+    TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN,  # Increment 3 (A1): set immediately before a DAW commit
+    TerminationReason.RESTORATION_UNCERTAIN,  # Increment 4 (ADR-038): restored, rollback not yet established
+})  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -50,6 +61,11 @@ class RuntimeProgress:
     roots: tuple[ArtifactRootBinding, ...]
     observations: tuple[StateEvidence, ...]
     diagnosed: tuple[Revision, DiagnosisReport] | None
+    pending_effect: TerminationReason | None = None  # ADR-036 review fix; trailing, so offline progress is unchanged
+    # Increment 3 (C2): controller time before the current clock segment, and that segment's first reading. A
+    # resumed run starts a new segment, so the operator pause is never charged. Offline runs keep one segment.
+    elapsed_before: float = 0.0
+    segment_start: ClockReading | None = None
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -86,6 +102,12 @@ class RuntimeProgress:
                 raise ValueError("RuntimeProgress.diagnosed must be a revision/report pair")
             require_instance(self.diagnosed[0], Revision, "RuntimeProgress.diagnosed revision")
             require_instance(self.diagnosed[1], DiagnosisReport, "RuntimeProgress.diagnosed report")
+        if require_finite(self.elapsed_before, "RuntimeProgress.elapsed_before") < 0:
+            raise ValueError("RuntimeProgress.elapsed_before must be non-negative")
+        if self.segment_start is not None:
+            require_instance(self.segment_start, ClockReading, "RuntimeProgress.segment_start")
+        if self.pending_effect is not None and self.pending_effect not in _PENDING_EFFECT_REASONS:
+            raise ValueError("RuntimeProgress.pending_effect must name a DAW effect that is not recovered")
 
 
 @dataclass(frozen=True)
@@ -94,7 +116,7 @@ class PreparedCorrection:
     before: ProjectState
     decision: Decision
     attempt_id: AttemptId
-    plan: RenderPlan
+    plan: RenderPlan | DawCorrectionPlan  # ADR-035: the offline render or the DAW correction
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -102,7 +124,7 @@ class PreparedCorrection:
             ("before", ProjectState),
             ("decision", Decision),
             ("attempt_id", AttemptId),
-            ("plan", RenderPlan),
+            ("plan", (RenderPlan, DawCorrectionPlan)),
         ):
             require_instance(getattr(self, name), cls, f"PreparedCorrection.{name}")
         if not isinstance(self.decision.outcome, ProposeAction):
@@ -116,6 +138,8 @@ class PreparedCorrection:
             self.plan.requested_gain_db,
         ):
             raise ValueError("PreparedCorrection action differs from its render operation")
+        if isinstance(self.plan, DawCorrectionPlan):
+            self.plan.validate_against(self.before)
 
     @property
     def action(self) -> Action:
@@ -127,6 +151,8 @@ class PreparedCorrection:
 
     @property
     def candidate_revision(self) -> Revision:
+        if isinstance(self.plan, DawCorrectionPlan):
+            return self.plan.candidate_revision
         return self.plan.candidate.revision
 
 

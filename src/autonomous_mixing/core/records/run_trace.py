@@ -25,6 +25,58 @@ from autonomous_mixing.core.records.coordinator_runtime import (
     RunRenderRequest,
     RunRequest,
 )
+from autonomous_mixing.core.records.daw_control import (
+    DawApplyPermitted,
+    DawApplyRejected,
+    DawApplyRequest,
+    DawInspection,
+    DawInspectRequest,
+    DawNoWrite,
+    DawWriteConfirmed,
+    DawWriteOffTarget,
+    DawWriteRefused,
+    DawWriteUncertain,
+)
+from autonomous_mixing.core.records.daw_correction import (
+    DawContinuationFinished,
+    DawContinuationStarted,
+    DawCorrectionSuspended,
+    DawPlanReady,
+    DawStateQuery,
+)
+from autonomous_mixing.core.records.daw_export import (
+    DawContinuitySnapshot,
+    DawExportAwaiting,
+    DawExportPreparationFailure,
+    DawExportRequest,
+    DawFilesVerified,
+    DawImportRejected,
+    DawImportRequest,
+    DawImportVerified,
+    DawStateAnchor,
+)
+from autonomous_mixing.core.records.daw_recovery import (
+    DawControlState,
+    DawLineageQuery,
+    DawReconcileRequest,
+    DawReconciliation,
+    DawRecoveryDecision,
+    DawRecoveryLineage,
+    DawRecoverySnapshot,
+    DawResolutionRecorded,
+    DawResolutionRefused,
+    DawResolutionRequest,
+    DawRestoreConfirmed,
+    DawRestoreMismatch,
+    DawRestoreNoWrite,
+    DawRestorePermitted,
+    DawRestoreRefused,
+    DawRestoreRejected,
+    DawRestoreRequest,
+    DawRestoreTarget,
+    DawRestoreUncertain,
+)
+from autonomous_mixing.core.records.daw_rollback import DawRollbackRecord
 from autonomous_mixing.core.records.decision import DecisionResponse, Situation
 from autonomous_mixing.core.records.decision_gate import (
     DeclineAction,
@@ -49,6 +101,13 @@ from autonomous_mixing.core.records.reconciliation import ReconciliationResult
 from autonomous_mixing.core.records.rendering import RenderedCandidate, RenderFailure
 from autonomous_mixing.core.records.results import PortFailure
 from autonomous_mixing.core.records.run import CorrectionAttempt, FinalProjectState, RunOutcome, RunRecord, RunState
+from autonomous_mixing.core.records.run_restart import (
+    DawLatestAnchorQuery,
+    DawLatestState,
+    DawStartRefused,
+    OperatorRecoveryAuthorization,
+    RunInterrupted,
+)
 from autonomous_mixing.core.records.termination import TerminationReason
 from autonomous_mixing.core.records.verification import VerificationResult
 from autonomous_mixing.core.records.verification_assessment import VerificationAssessment
@@ -61,10 +120,32 @@ class OperationKind(Enum):
     RENDER = "render"
     QUERY_ACCEPTANCE = "query_acceptance"
     INSPECT_STATE = "inspect_state"
+    # ADR-035: the DAW execution path
+    DAW_INSPECT = "daw_inspect"
+    DAW_APPLY = "daw_apply"
+    DAW_RECOVERY = "daw_recovery"
+    DAW_STATE = "daw_state"
+    EXPORT_PREPARE = "export_prepare"
+    EXPORT_IMPORT = "export_import"
 
 
 StageRequest = (
-    AnalysisRequest | DiagnosisRequest | Situation | RunRenderRequest | AcceptanceQuery | StateIntegrityRequest
+    AnalysisRequest
+    | DiagnosisRequest
+    | Situation
+    | RunRenderRequest
+    | AcceptanceQuery
+    | StateIntegrityRequest
+    | DawInspectRequest
+    | DawApplyRequest
+    | DawReconcileRequest
+    | DawRestoreRequest
+    | DawResolutionRequest
+    | DawStateQuery
+    | DawLineageQuery
+    | DawLatestAnchorQuery
+    | DawExportRequest
+    | DawImportRequest
 )
 
 _REQUEST_TYPES = {
@@ -74,7 +155,29 @@ _REQUEST_TYPES = {
     OperationKind.RENDER: RunRenderRequest,
     OperationKind.QUERY_ACCEPTANCE: AcceptanceQuery,
     OperationKind.INSPECT_STATE: StateIntegrityRequest,
+    OperationKind.DAW_INSPECT: DawInspectRequest,
+    OperationKind.DAW_APPLY: DawApplyRequest,
+    OperationKind.DAW_RECOVERY: (DawReconcileRequest, DawRestoreRequest, DawResolutionRequest),
+    # lineage queries: Increment 4 (ADR-038); the run-start latest-anchor query: Increment 5 (ADR-039)
+    OperationKind.DAW_STATE: (DawStateQuery, DawLineageQuery, DawLatestAnchorQuery),
+    OperationKind.EXPORT_PREPARE: DawExportRequest,
+    OperationKind.EXPORT_IMPORT: DawImportRequest,
 }
+_DAW_KINDS = frozenset({OperationKind.DAW_INSPECT, OperationKind.DAW_APPLY, OperationKind.DAW_RECOVERY,
+                        OperationKind.DAW_STATE, OperationKind.EXPORT_PREPARE, OperationKind.EXPORT_IMPORT})  # fmt: skip
+
+
+def _daw_request_project(request):
+    """The project a DAW-path request names, or None when it names none (resolutions, state queries)."""
+    if isinstance(request, (DawInspectRequest, DawReconcileRequest, DawRestoreRequest)):
+        return request.binding.project_id
+    if isinstance(request, DawApplyRequest):
+        return request.admitted.action.project_id
+    if isinstance(request, DawExportRequest):
+        return request.project_id
+    if isinstance(request, DawImportRequest):
+        return request.awaiting.request.project_id
+    return None
 
 
 @dataclass(frozen=True)
@@ -100,6 +203,9 @@ class DispatchIntent:
         if self.operation is OperationKind.DECIDE:
             if self.call_id is None or self.attempt_id is not None or self.execution_id is not None:
                 raise ValueError("decision intent requires a call ID and no attempt or execution IDs")
+        if self.operation in _DAW_KINDS:
+            self._check_daw()
+            return
         if self.operation is OperationKind.RENDER:
             if self.call_id is None or self.attempt_id is None or self.execution_id != self.request.plan.execution_id:
                 raise ValueError("render intent requires call, attempt and assigned execution IDs")
@@ -112,6 +218,29 @@ class DispatchIntent:
             raise ValueError("dispatch request and accepted reference name different projects")
         if self.operation in (OperationKind.DECIDE, OperationKind.RENDER) and state != self.accepted.state:
             raise ValueError("decision/render request must use exactly the accepted state")
+
+    def _check_daw(self) -> None:
+        """DAW-path intents (ADR-035): same project; a write or export carries its call, attempt and execution."""
+        project = _daw_request_project(self.request)
+        if project is not None and project != self.accepted.state.project_id:
+            raise ValueError("dispatch request and accepted reference name different projects")
+        if self.operation is OperationKind.DAW_APPLY:
+            action = self.request.admitted.action
+            if self.call_id is None or self.attempt_id is None or self.execution_id != self.request.execution_id:
+                raise ValueError("DAW apply intent requires call, attempt and the request's execution IDs")
+            if action.expected_revision != self.accepted.state.revision:
+                raise ValueError("DAW apply intent must act on exactly the accepted state")
+        elif self.operation is OperationKind.DAW_RECOVERY:  # Increment 4 (ADR-038): always one attempt's recovery
+            if self.call_id is None or self.attempt_id is None or self.execution_id is None:
+                raise ValueError("DAW recovery intent requires call, attempt and execution IDs")
+            if isinstance(self.request, DawRestoreRequest) and (
+                self.request.authorization.execution_id != self.execution_id
+            ):
+                raise ValueError("a restoration intent names its authorization's execution")
+        elif self.operation in (OperationKind.EXPORT_PREPARE, OperationKind.EXPORT_IMPORT):
+            export = self.request if isinstance(self.request, DawExportRequest) else self.request.awaiting.request
+            if self.call_id is None or self.attempt_id is None or self.execution_id != export.execution_id:
+                raise ValueError("export intent requires call, attempt and the export's execution IDs")
 
 
 @dataclass(frozen=True)
@@ -155,6 +284,27 @@ OperationOutcome = (
     | StateIntegrityReport
     | DispatchSkipped
     | InvalidPortResponse
+    | DawInspection
+    | DawWriteRefused
+    | DawWriteConfirmed
+    | DawWriteOffTarget
+    | DawWriteUncertain
+    | DawReconciliation
+    | DawRestoreConfirmed
+    | DawRestoreMismatch
+    | DawRestoreRefused
+    | DawRestoreUncertain
+    | DawResolutionRecorded
+    | DawResolutionRefused
+    | DawStateAnchor
+    | DawContinuitySnapshot
+    | DawRecoveryLineage
+    | DawRecoverySnapshot
+    | DawLatestState
+    | DawExportAwaiting
+    | DawExportPreparationFailure
+    | DawFilesVerified
+    | DawImportRejected
 )
 
 _RESPONSE_TYPES = {
@@ -164,6 +314,28 @@ _RESPONSE_TYPES = {
     OperationKind.RENDER: (RenderedCandidate, RenderFailure, RenderPreparationFailure),
     OperationKind.QUERY_ACCEPTANCE: (AcceptanceFound, AcceptanceAbsent, AcceptanceAuthorityUnknown),
     OperationKind.INSPECT_STATE: (StateIntegrityReport,),
+    OperationKind.DAW_INSPECT: (DawInspection, PortFailure),
+    OperationKind.DAW_APPLY: (DawWriteRefused, DawWriteConfirmed, DawWriteOffTarget, DawWriteUncertain),
+    OperationKind.DAW_RECOVERY: (
+        DawReconciliation,
+        PortFailure,
+        DawRestoreConfirmed,
+        DawRestoreMismatch,
+        DawRestoreRefused,
+        DawRestoreUncertain,
+        DawResolutionRecorded,
+        DawResolutionRefused,
+    ),
+    OperationKind.DAW_STATE: (
+        DawStateAnchor,
+        DawContinuitySnapshot,
+        DawRecoveryLineage,
+        DawRecoverySnapshot,
+        DawLatestState,
+        PortFailure,
+    ),  # fmt: skip
+    OperationKind.EXPORT_PREPARE: (DawExportAwaiting, DawExportPreparationFailure),
+    OperationKind.EXPORT_IMPORT: (DawFilesVerified, DawImportRejected),
 }
 
 
@@ -243,6 +415,30 @@ RunTracePayload = (
     | ReconciliationResult
     | DecisionFeedback
     | TerminalSnapshot
+    | DawCorrectionSuspended
+    # Increment 2 (ADR-036): the DAW preflight, the journal control state and the capability-gate verdict
+    | DawPlanReady
+    | DawControlState
+    | DawApplyPermitted
+    | DawNoWrite
+    | DawApplyRejected
+    # Increment 3 (ADR-037): the continuation, its assessment and its completion evidence
+    | DawContinuationStarted
+    | DawImportVerified
+    | DawImportRejected
+    | DawContinuationFinished
+    # Increment 4 (ADR-038): the recovery decision, the journaled restore target and a receipt-less rollback
+    | DawRecoveryDecision
+    | DawRestoreTarget
+    | DawRestorePermitted
+    | DawRestoreNoWrite
+    | DawRestoreRejected
+    | DawRollbackRecord
+    # Increment 5 (ADR-039): a refused DAW start and the classification of an interrupted stored run
+    | DawStartRefused
+    | RunInterrupted
+    # Increment 6 (ADR-040): the operator's explicit authorization of one recovery operation
+    | OperatorRecoveryAuthorization
 )
 
 
@@ -264,7 +460,11 @@ class RunTraceEvent:
         require_instance(self.payload, RunTracePayload, "RunTraceEvent.payload")
         payload = self.payload
         run_id = None
-        if isinstance(payload, (RunRequest, DecisionFeedback, CorrectionAttempt, AcceptanceEvent)):
+        if isinstance(
+            payload,
+            (RunRequest, DecisionFeedback, CorrectionAttempt, AcceptanceEvent, DawCorrectionSuspended,
+             DawContinuationStarted, DawContinuationFinished),
+        ):  # fmt: skip
             run_id = payload.run_id
         elif isinstance(payload, AcceptanceCommitted):
             run_id = payload.event.run_id
@@ -272,17 +472,30 @@ class RunTraceEvent:
             run_id = payload.run.run_id
             if payload.run.usage != self.usage:
                 raise ValueError("terminal event usage differs from the snapshot")
+        elif isinstance(payload, (DawRollbackRecord, RunInterrupted, OperatorRecoveryAuthorization)):
+            run_id = payload.run_id
         elif isinstance(payload, DispatchIntent):
             if isinstance(payload.request, (Situation, AcceptanceQuery)):
                 run_id = payload.request.run_id
+            if isinstance(payload.request, DawRestoreRequest) and (
+                payload.request.authorization.budget_grant.usage_after_charge != self.usage
+            ):
+                raise ValueError("a restoration intent's usage is exactly its authorization's recovery charge")
         if run_id is not None and run_id != self.run_id:
             raise ValueError("trace payload belongs to a different run")
 
 
 def _require_usage_progress(current: BudgetUsage, previous: BudgetUsage) -> None:
-    for field in ("decision_calls", "attempts", "render_calls", "recovery_operations", "elapsed_seconds"):
+    for field in ("decision_calls", "attempts", "render_calls", "recovery_operations", "elapsed_seconds", "daw_writes"):
         if getattr(current, field) < getattr(previous, field):
             raise ValueError(f"trace usage decreases in {field}")
+
+
+class StoreDurability(Enum):
+    """What the store that produced a snapshot can survive (ADR-039). Independent of event acknowledgement."""
+
+    NON_DURABLE = "non_durable"  # the in-memory journals: nothing survives the process
+    LOCAL_SQLITE_PROCESS_CRASH = "local_sqlite_process_crash"  # subprocess-crash evidence only; no power-loss claim
 
 
 @dataclass(frozen=True)
@@ -291,9 +504,11 @@ class RunJournalSnapshot:
     initial: AcceptedReference
     events: tuple[RunTraceEvent, ...]
     acceptances: tuple[AcceptanceCommitted, ...]
+    durability: StoreDurability = StoreDurability.NON_DURABLE  # Increment 5 (ADR-039): the producing store's
 
     def __post_init__(self) -> None:
         require_instance(self.run_id, RunId, "RunJournalSnapshot.run_id")
+        require_instance(self.durability, StoreDurability, "RunJournalSnapshot.durability")
         require_instance(self.initial, AcceptedReference, "RunJournalSnapshot.initial")
         require_tuple_of(self.events, RunTraceEvent, "RunJournalSnapshot.events", nonempty=False, distinct=False)
         require_tuple_of(

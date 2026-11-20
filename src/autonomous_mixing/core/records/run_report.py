@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from autonomous_mixing.core.records.acceptance import AcceptedReference
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading, RunRequest
+from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended
 from autonomous_mixing.core.records.invariants import require_instance, require_tuple_of
 from autonomous_mixing.core.records.run import RunOutcome, RunRecord, RunState
 from autonomous_mixing.core.records.run_trace import (
@@ -24,6 +25,8 @@ _HIGH_PRIORITY_RECORDING_REASONS = (
     TerminationReason.RESTORATION_FAILED,
     TerminationReason.RESTORATION_UNCERTAIN,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+    TerminationReason.DAW_COMMAND_UNRESOLVED,  # ADR-036
+    TerminationReason.DAW_CONVERSION_BLOCKED,
 )
 
 
@@ -114,7 +117,7 @@ class RunReport:
 
     def _validate_usage(self) -> None:
         before, after = self.terminal_event.usage, self.final_run.usage
-        for field in ("decision_calls", "attempts", "render_calls", "recovery_operations"):
+        for field in ("decision_calls", "attempts", "render_calls", "recovery_operations", "daw_writes"):
             if getattr(before, field) != getattr(after, field):
                 raise ValueError("operation counts cannot change during terminal recording")
         if after.elapsed_seconds < before.elapsed_seconds:
@@ -163,4 +166,36 @@ class RunReport:
 
     @property
     def durability(self) -> str:
-        return "non_durable"
+        """The provenance of the store that produced this report's trace (ADR-039), not acknowledgement."""
+        return self.trace.durability.value
+
+
+@dataclass(frozen=True)
+class RunSuspended:
+    """A DAW run waiting for the operator's export (ADR-035): not a terminal report, not a termination.
+
+    The trace is the journal snapshot at suspension; its last event is the ``DawCorrectionSuspended`` checkpoint
+    from which an explicit continuation resumes. Nothing in it is candidate-ready.
+    """
+
+    request: RunRequest
+    trace: RunJournalSnapshot
+    checkpoint_event: RunTraceEvent
+
+    def __post_init__(self) -> None:
+        require_instance(self.request, RunRequest, "RunSuspended.request")
+        require_instance(self.trace, RunJournalSnapshot, "RunSuspended.trace")
+        require_instance(self.checkpoint_event, RunTraceEvent, "RunSuspended.checkpoint_event")
+        if self.request.daw_session is None:
+            raise ValueError("only a run with a DAW session can wait for an operator export")
+        if self.trace.run_id != self.request.run_id:
+            raise ValueError("RunSuspended trace belongs to another run")
+        if not self.trace.events or self.trace.events[-1] != self.checkpoint_event:
+            raise ValueError("RunSuspended checkpoint must be the trace's last event")
+        if not isinstance(self.checkpoint_event.payload, DawCorrectionSuspended):
+            raise ValueError("RunSuspended checkpoint event must carry a DawCorrectionSuspended payload")
+
+    @property
+    def durability(self) -> str:
+        """The provenance of the store that produced this suspension's trace (ADR-039)."""
+        return self.trace.durability.value

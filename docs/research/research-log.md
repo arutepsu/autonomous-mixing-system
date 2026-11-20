@@ -1585,3 +1585,475 @@
 ## 2026-11-18 — Codex live set_gain_db trial
 
 Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdrawn. Codex ran the pre-registered sequence and inspected the saved log: −1 dB measured −0.9995951652526855 dB, −2 dB measured −1.9992120265960693 dB; replay, conflict refusal and local range refusal passed. Restore and final inspect exactly matched the initial gain. Detailed evidence and procedural differences (log location and ID prefix) are recorded in [the conversion design](fl-studio-db-conversion-design.md#live-db-trial-result-2026-11-18-125613-utc). Log SHA-256: `14f4a7958ca8b5a8560209778905f8b45edbfd1e7818921eee82310e6057d3b7`. Updated the bridge status to verified live in its calibrated scope. Documentation-only update; no code/tests changed or test suite rerun. No save/export was issued; no requirement status changed. Coordinator integration and exported-audio verification remain pending.
+
+
+## 2026-11-18 — Codex DAW gain coordinates
+
+- Baseline: HEAD `033b76dcbf1855f6e65bac646b4f6d8422e3d762`, clean working tree. Scope: approved `2026-11-18-daw-gain-coordinates.md` plan, the first preparatory slice of the approved FL action-adapter design. No live calls or installed-script changes.
+- Implemented four frozen records in `core.records.daw` and the pure `resolve_daw_gain` in `core.admission.daw`. Existing actions, fixed-input processing state and rendering contracts are unchanged. Architecture inventories add the exact module edges and five public names; existing behavior assertions are unchanged.
+- Red/green: new constructor tests failed collection with `ModuleNotFoundError` for `core.records.daw`, then 66 passed. Added resolver tests failed collection for `core.admission.daw`, then 103 passed. Five additional large-integer regressions failed with `OverflowError`, then passed after local containment; final focused total 108.
+- Ruling: reuse existing `require_finite` and `require_finite_result`, rather than adding duplicate private numeric validators, because `require_finite` already rejects bool. A derived integer outside float representability leaks `OverflowError` from the shared result helper's finiteness check; catch it locally in the two new modules without changing existing helpers. This preserves exact integer arithmetic and the promised `ValueError` boundary. Risk if wrong: an uncontained numeric error would violate the contract; five regressions and a mutation probe cover it.
+- Ruling: preserve the approved in-place, uncommitted review workflow. No new worktree, branch, stage, commit or push. The starting tree was clean. The plan's coordinate slice adds no runtime architectural boundary, so the proposed adoption ADR remains a prerequisite of later FL runtime integration.
+- Mutation probes on formatted source, each restored byte-identically: relative target instead of baseline absolute target (8 failures), accept stale reading (3), omit revision checks (2), remove local integer-overflow containment (5). All caught.
+- Final verification through `uv run --locked`: focused plus architecture/public contracts 359 passed with warnings as errors; full suite 5514 passed, 4 platform skips. Ruff check, format check of src/tests, CLI help and `uv lock --check` passed. Baseline architecture/public-contract set was 251 passed. An earlier full run before the five extra regressions was 5509 passed, 4 skipped; the final run is the evidence for the final source tree.
+- Independent read-only review: no actionable findings. Reviewer read all new code/tests and approved plan/spec; did not rerun tests, and could not independently inspect git diff because of filesystem permissions. Primary session verified the inventory diffs are additions only.
+- Overview updated with truthful limits. No policy permission is granted by resolution; zero/increase deltas are mappings only. No FL transport adapter, calibrated capability gate, dispatch, recovery, export continuation, candidate-ready evidence or coordinator integration is implemented. No requirement status changed.
+
+
+## 2026-11-18 — DAW inspect/apply contract and calibrated capability gate (Claude Code)
+- **Baseline.** HEAD `033b76d`, with the uncommitted DAW-coordinate slice preserved (its final verification was 5,514 passed, 4 skipped). The plan `docs/superpowers/plans/2026-11-18-daw-control-contract.md` was approved by the owner with five amendments:
+  1. reference checks in `daw_gain_bounds`;
+  2. self-validating `DawApplyRequest`;
+  3. full-precision calibration endpoints;
+  4. `commanded_normalized` documented as an adapter claim;
+  5. simulated-controller evidence labelled as intended contract only.
+- **Implemented, in core only, without I/O:**
+  - `core.records.daw_control`: calibrated `DawControlProfile`, inspect request and inspection, self-validating `DawApplyRequest`, gate results, and four fader-only apply outcomes;
+  - `core.ports.daw`: `DawParameterController`, with structural response validators;
+  - `core.admission.daw`: `daw_gain_bounds` and `gate_daw_apply`, beside `resolve_daw_gain`.
+
+  The offline rendering contracts are unchanged. `ExecutionStatus` is unchanged, and DAW outcomes carry no candidate fields.
+- **Evidence:**
+  - 136 new tests, written first; the red run failed at collection on the missing module;
+  - full-precision range endpoints taken from the reviewed conversion function (test-only fixture), with `math.nextafter` cases beyond each;
+  - five mutation probes, each caught by a permanent test;
+  - locked full suite: 5,651 passed, 4 skipped. Ruff check and format are clean, and the lock is consistent.
+- **Decision recorded.** `PROFILE_SCOPE` is checked before inspection wiring, because an out-of-scope `DawInspectRequest` cannot be constructed.
+- **Proposed, not adopted:** ADR-030 (DAW parameter-control boundary) and requirement and scope decision D14. FR-14 stays withdrawn; the `.flp` exclusion, ADR-009 and requirement statuses are unchanged.
+- **Remaining gaps:**
+  - the FL transport adapter, which must derive the profile's dB range at full precision, recompute the commanded position before dispatch, and repeat the pending, replay, conflict, timeout and reload checks against the real bridge;
+  - exact-target recovery;
+  - pending-export continuation;
+  - coordinator integration, including where unresolved-operation and conversion-block state lives.
+
+  Identity still rests on the metadata title and operator confirmation. Left uncommitted for Codex review.
+
+## 2026-11-18 — DAW control contract: review fixes (Claude Code)
+- **Source.** Codex review of the DAW inspect/apply contract (three findings). Codex independently verified 496 focused and architecture tests, additive changes to existing tests, and unchanged offline contracts.
+- **P2, advertised bounds the gate refused.** With fader baseline −4 dB and application baseline 0, `daw_gain_bounds` advertised an upper gain of −0.1 dB. That resolves to a 0.09999999999999964 dB cut, which the gate refused.
+  - **Fix:** one records-level rule, `daw_change_rejection`, serves both the gate and the bounds, and the baseline mapping is written once. Endpoints are checked with the gate's arithmetic and moved inward by float steps only (at most 64), so the cut range is never widened.
+  - **Tests:** end-to-end regressions over seven baselines, including the reviewed one, the live start, nonzero application baselines and both calibrated range edges. Both endpoints are gate-permitted; they lie within the naive bounds; any moved endpoint is tight, with the next float outward refused.
+  - The earlier near-floor expectation, which pinned the naive −3.6, now pins the inward endpoint −3.6000000000000005.
+- **P2, decision ID.** D14 was already the resolved approval-recording decision of 2026-10-15, which is kept. The DAW adoption decision is now **D15** in the requirements, ADR-030, the overview and the plan. *Correction to the entry above, which says D14 and stays as written.*
+- **P3, replay wording.** The port's obligations previously required `replayed=True` for every identical retry, but refused and uncertain outcomes have no such field. Clarified in the port, the records, ADR-030 and the plan: written outcomes are replayed with the flag, and refused and uncertain outcomes are returned unchanged, never with another write. New simulated-controller tests replay an uncertain outcome (with and without a preceding write) and a refusal.
+- **Checks.**
+  - 154 tests in `test_daw_control_contract.py`.
+  - Mutation probes for naive endpoints and outward shift, each caught and reverted byte-identically.
+  - Locked: focused suites (`-W error`) 514 passed; full suite 5,669 passed, 4 skipped; ruff check and format clean; CLI help runs; lock consistent.
+  - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-18 — DAW control contract: endpoint search across zero (Claude Code)
+- **Finding (P2, second Codex review).** With baseline application gain +0.1 dB at fader −4 dB and policy [−10, +10] dB, `daw_gain_bounds` returned `None`, yet an absolute action of −0.9 dB passes the gate as a −1 dB cut. The naive upper endpoint is 0.0, and the 64-step float walk stayed in the subnormal range near zero; raising the limit would not have helped. Codex also verified the D15 and replay corrections (514 focused tests passed).
+- **Fix** (`core.admission.daw`): the walk is replaced by a bisection on the floats' ordered bit patterns, at most 64 halvings, from a permitted anchor: the window's midpoint, else a permitted endpoint.
+  - **Why it is valid:** every float operation of the mapping is monotone, so the gate's predicate is monotone along the gain axis and its permitted values form one contiguous run. The search finds that run's exact edge, including across zero.
+  - **Kept:** endpoints still only move inward and are tight.
+  - **Conservative case:** `None` only if neither endpoint nor the midpoint is permitted, which is possible only when the window is within float rounding of being empty.
+- **Regressions** (red before the fix, three failing):
+  - the reviewed case, with −0.9 dB advertised and the new upper endpoint just below zero, plus two further zero-crossing baselines in the end-to-end, inward-only and tightness checks;
+  - single-value policy windows, kept when permitted and `None` when refused.
+
+  Two mutation probes (reinstating the step walk; returning the refused side) were each caught and reverted byte-identically.
+- **Checks:** 164 tests in `test_daw_control_contract.py`. Locked: focused suites (`-W error`) 524 passed; full suite 5,679 passed, 4 skipped; ruff check and format clean; CLI help runs; lock consistent. No live calls and no installs. Left uncommitted for review.
+
+
+## 2026-11-18 — Codex FL Studio runtime adapter (unintegrated)
+
+- Owner approved `2026-11-18-fl-studio-transport-adapter.md`; implementation stayed within its non-live scope. Baseline HEAD `033b76dcbf1855f6e65bac646b4f6d8422e3d762` included earlier uncommitted DAW coordinate/control work, preserved. The initial DAW/coordinate/frozen-bridge baseline set passed 575 tests.
+- Added runtime protocol/profile, controlled request/reply exchange, lazy WinMM transport, strict canonical request/outcome serialization, SQLite dispatch journal and `FlStudioParameterController`. No runtime research-script imports, cross-adapter imports or core contract edits. Shared architecture change adds only the new package to completeness; a new architecture file pins all exact edges/import isolation.
+- Tests first: protocol/profile, exchange/transport, journal/serialization and controller test files each failed collection for their missing implementation module, then passed. The new package first failed the existing completeness check; its exact package addition fixed it. A mistaken focused test selector ran no tests and was corrected. A shell-quoted inventory-edit attempt wrote nothing and was replaced by a file-based edit.
+- Additional native flag regression failed before fixing receive requeue to preserve MHDR_PREPARED. A test for invalid inspect responses was made genuinely malformed instead of substituting an open failure. These changes are in owned new tests, not relaxed existing behavior assertions.
+- Ruling: keep frozen research scripts byte-identical and copy the codec into runtime ownership. The historical duplication is explicit, with parity/hash tests; no compatibility alias or import from scripts. Their existing live trial claims remain historical and do not validate this runtime extraction.
+- Ruling: a SQLite DELETE/EXTRA committed transaction is the pending-intent boundary, with an exclusive authoritative journal per configured session. This is not an acceptance journal. Power-loss/hardware durability remains an assumption about the SQLite VFS/storage stack; subprocess exits test process-crash persistence only. No new dependency was added.
+- Ruling: inspect does not clear unresolved writes or conversion blocks. Local replay is journal-backed across reopen. Ambiguous outcome commits poison the active controller; a subsequent reopen can replay intact committed evidence without resending. Unpersisted storage-failure fallbacks have memory-only replay, explicitly qualified in ADR-031.
+- Independent review found partial-constructor cleanup could leave native handles without poisoning the controller; it also raised inspect-ID reuse. Five new tests failed first. Added TransportCleanupError carrying retained resources, poisoning on factory cleanup failure, and persistent inspection-ID reservation. Follow-up P3 retryability review produced two failing tests; permanent journal/cleanup/ID failures now report nonretryable. Reviewer rechecked and confirmed all original findings resolved (read-only, no suite rerun).
+- Ruling: preserve known native resource ownership rather than release buffers after a cooperative timeout. Retain failed cleanup objects until successfully released/process exit; no new dispatch on that controller. This error-only retention can retain memory/resources and is documented, not silently treated as a healthy close.
+- Six mutation probes on final formatted source, each restored byte-identically: send before pending commit (33 failures), accept foreign ID (1), resend pending intent (1), clear conversion block on inspect (1), skip core validator (1), confirm despite failed outcome commit (2). All caught; outcome-commit and constructor-cleanup fault tests are permanent.
+- Final locked verification: 630 focused adapter/DAW/architecture/public-contract tests passed with warnings as errors; full suite 5785 passed, 4 platform skips. Ruff check/format, CLI help and lock check passed. An earlier pre-review full run was 5778 passed, 4 skipped; it is not the final-tree evidence. Final adapter-specific additions: 106 tests including ten architecture cases.
+- Proposed ADR-031/index, overview and layout updated; implementation-plan checkboxes completed with this outcome. ADR-030 remains Proposed and D15 open; no requirement status changed. No installed scripts, FL Studio state, audio files, dependency files, initializers outside the new package or existing offline contracts changed. No staging, commit or push.
+- Remaining: owner scope/adoption decision, separately authorized runtime live testing, exact-target recovery/reconciliation, pending-export continuation and coordinator integration. Confirmed fader control alone is not candidate-ready audio or a mixing research result.
+
+
+## 2026-11-18 — DAW exact-target recovery and explicit reconciliation (Claude Code)
+- **Baseline.** HEAD `033b76d`, with the coordinate, control and transport slices uncommitted (5,785 passed, 4 skipped). The plan was approved by the owner as revision 2, after review of revision 1 (six points), with Amendment R: resolution evidence is subject-specific and the latest relevant.
+- **Implemented, unintegrated, tests first.**
+  - **Core:** `core.records.daw_recovery`; port `DawRecoveryController` with its validators; `gate_daw_restore`.
+  - **Adapter:**
+    - runtime protocol v2 with the additive `restore_gain` (sha256 `68fb70dd…`; research protocol still `03637001…`);
+    - restore serialization;
+    - journal schema v2 with one append-only ledger: reservations, charges, reconciliations, resolutions; v1 migration with unchanged field contents;
+    - controller methods `control_state`, `restore_target`, `reconcile`, `restore` and `resolve`.
+  - **Device:** script v2 in `device/fl_studio/thesis_bridge_v2/`, outside the package, derived from the frozen v1 script by explicit substitutions, with a byte-identical protocol copy.
+- **Rules realized:**
+  - exact confirmation on both readings;
+  - targets recomputed from the journal under the basis rule;
+  - lineage and agreement checked by the gate and, authoritatively, the journal;
+  - the recovery charge committed with the reservation before sending, once per ID, never refunded;
+  - reconciliation classified from the reading's two matches and never clearing;
+  - resolution only with subject-specific, latest evidence and no later reservation;
+  - conversion blocks never cleared.
+
+  The installed v1 device script refuses `restore_gain` before any FL call, which is recorded as `UNSUPPORTED`, charged and still blocking.
+- **Deliberate test change:** the runtime protocol's byte-identity assertion was replaced by a research-hash pin, a v2 snapshot pin and a parity corpus.
+- **Mutation evidence:** eleven probes, all caught. "Re-reserve on an identical retry" first survived (the cache masked it); a restart-replay regression was added.
+- **Checks:** focused 739 passed; full 5,894 passed, 4 skipped; ruff and format clean; CLI help runs; lock consistent; `git diff --check` clean; research hashes unchanged.
+- **Evidence status.** All behaviour is shown through device v2 on a fake host. That is not live FL evidence. Installation of v2 and live recovery trials need separate authorization.
+- **Remaining gaps:** coordinator integration (recovery budgeting from journal charges, authorization authority, gate inputs); a validated recalibration clearance; export continuation; D15 and adoption decisions.
+
+  Restoring a fader proves only its readings. Left uncommitted for Codex review.
+
+## 2026-11-18 — DAW recovery journal: review fixes (Claude Code)
+- **Source.** The second Codex review found three defects, reproduced with disposable databases and fake hosts. Codex independently verified 739 focused tests and accepted the protocol snapshot change.
+- **Findings and fixes (`adapters.fl_studio.journal`), each with regressions written first and failing before the fix:**
+  1. **Freshness ignored the rest of the lineage.** An older root finding could resolve the lineage despite a newer `NEITHER` about its restoration. Freshness is now judged across the root and all its restorations.
+  2. **Consumed resolution authorization IDs escaped the shared namespace.** A new apply could reuse one. Each consumed authorization is now registered as a `RESOLUTION_AUTHORIZED` ledger entry, and its ID is refused for every other operation.
+  3. **A command without a reservation silently counted as a local refusal**, so deleting a pending reservation unblocked writes. Now:
+     - every command needs exactly one marker: `RESERVED`, or an explicit `LOCAL_REFUSAL` for a refused apply recorded locally;
+     - every reserved restoration needs exactly one recovery charge;
+     - inconsistency fails closed on open.
+- **ADR-032** (Proposed) is revised in place to state the lineage-wide freshness rule and the marker and namespace invariants.
+- **Checks.** Five new mutation probes, all caught. Locked: focused 746 passed; full 5,901 passed, 4 skipped; ruff, format, CLI, lock and `git diff --check` clean; protocol hashes unchanged. No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-18 — DAW pending-export handoff and verified import (Claude Code)
+- **Source.** The owner approved plan revision 2 with three continuity amendments (revision 3):
+  - coherent snapshots captured under the controller lock;
+  - the complete journaled binding and profile instead of references;
+  - anchor and continuity rules living in records.
+
+  Preparation is described as recording journal-backed source evidence only.
+- **Implemented (ADR-033, Proposed; unintegrated):**
+  - `core.records.daw_export`, `core.ports.daw_export` and `core.admission.daw_export.assess_daw_import`;
+  - `DawRecoveryController.state_anchor` and `continuity_snapshot`, with their FL journal and controller implementations;
+  - `adapters.rendering.export_handoff.FileExportHandoff` as a new listed `audio_io` client.
+- **What it establishes.** A pending export is a waiting state, never a render success. Candidate evidence comes only from the pure assessment of verified files plus two coherent continuity snapshots. Continuity is observed agreement only, not proof that nothing moved during the export. The timeline is declared, with physical alignment unverified. Stereo exports stay stereo.
+- **Evidence:**
+  - 144 new tests: 96 contract, 15 FL anchor and snapshot against device v2 on a fake host, 33 adapter on real temporary directories with synthetic unit-test WAVs;
+  - eighteen mutation probes, all caught. One survived at first, the request-file handle identity, and was caught after a test that replaces the file between its `lstat` and its `open` was added.
+  - None of this is live FL evidence.
+- **Open.** Whether a device-refused write should keep an anchor current; currently it supersedes the anchor (fail closed). Baseline export settings. A predeclared timing method for any physical alignment claim. Capture of routing declarations.
+- **Not done.** No coordinator integration, saving, exporting, installation or live calls. Requirement statuses are unchanged. Left uncommitted for review.
+
+## 2026-11-18 — DAW export import: in-place change review fix (Claude Code)
+- **Source.** Codex reproduced the defect with a disposable WAV: a one-byte in-place change made immediately after verification passed. The import returned `DawFilesVerified`, and `assess_daw_import` built `DawImportVerified` with the old hash. Codex independently verified 408 tests.
+- **Fix (`adapters.rendering.export_handoff`).**
+  - Each file's identity, size, modification and change timestamps, link count, mode and attributes are compared after its read with what was observed before it.
+  - All files, the request file included, are re-checked before returning, so a change to an earlier file during a later read is caught.
+  - Any difference is `WORKSPACE_CHANGED`.
+  - Still not race-free: it depends on timestamp granularity and on writers not resetting timestamps, and a change after the final re-check is not detected.
+- **ADR-033** (Proposed) is revised in place to state this.
+- **Evidence.**
+  - Three regressions, failing before the fix. Their timestamps are backdated so the result does not depend on clock granularity.
+  - Four new mutation probes, all caught. One survived at first and was caught after a fail-fast assertion was added. All 22 probes of the slice are caught.
+- **Kept.** The conservative anchor rule: any later reservation supersedes an anchor. The owner accepted it for this slice.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-18 — D15 decided: bounded, operator-assisted FL Studio integration (Claude Code)
+- **Owner decision.** D15 is adopted for bounded, operator-assisted FL Studio runtime integration, initially limited to gain changes and verified manual exports.
+  - **Option A:** explicit DAW parameter state inside `ProjectState`, separate from `TrackGainState`.
+  - **Rollback claims:** fader restoration is distinguished from complete project rollback.
+  - **Authorization:** scope documentation only. No implementation, installation or live calls.
+- **Recorded:**
+  - **ADR-034** (Proposed) supersedes in part the FL Studio scheduling clause of ADR-009, whose file is unchanged. ADR-001, ADR-004 and ADR-010 are unchanged, and ADR-030 to 033 stay Proposed.
+  - **`requirements.md` v1.2:** FR-19 and FR-20, both Planned; the system context and exclusions updated; D15 marked decided.
+  - **Scope and roadmap:** the project-scope core boundaries, and roadmap priority 4.
+  - **The coordinator-integration plan:** Increment 0 completed as documentation; G4 and G6 resolved by the decision.
+- **Rollback claims, kept apart:**
+  - fader restoration proves one fader's readings;
+  - selected-state rollback: retained accepted audio plus the fader restored exactly;
+  - complete project rollback (routing, plugins, automation, saved file, fresh exports) is never claimed.
+- **Open.** Whether DAW-path results enter the main evaluation and under which comparison conditions.
+
+## 2026-11-19 — Resolution is not rollback (owner amendment; Claude Code)
+- **Amendment.** A resolution may clear uncertainty, but must not establish verified selected-state rollback. That rollback requires:
+  - retained-audio integrity;
+  - exact equality of both fader readings to the saved target, supported by recorded evidence.
+- **Defect it closes.** Revision 2 of the coordinator-integration plan let a `NOT_APPLIED` resolution count toward VERIFIED rollback. It also labelled an `AT_RECORDED_START` attempt "not executed", although such a finding matches only within tolerance. Both are withdrawn.
+- **Evidence now accepted:** `EXACT_RESTORE` (a journaled `DawRestoreConfirmed` to the saved target) or `EXACT_OBSERVATION` (a recorded reading exactly equal in both coordinates, after the lineage's last reservation).
+- **Regression specified, written first in Increments 1 and 4:**
+  - a reconciliation matches within tolerance but differs from the exact target;
+  - the resolution succeeds;
+  - verified rollback is refused when the exact restoration is unavailable, and granted in the control case after an exact restoration.
+
+  Record-level ulp cases and three mutation probes accompany it.
+- **Updated:** ADR-034 (Proposed, revised in place with a note), FR-19 text and verification, and plan revision 3. Documentation only: no code, installation or live calls.
+
+## 2026-11-19 — Coordinator DAW path, Increment 1: contracts (Claude Code)
+- **Source.** The owner approved plan revision 3 and Increment 1, tests-first, with one condition: exact-reading evidence is bound to the same fader and saved target, and ordered after the latest relevant write reservation. **ADR-035** (Proposed) records the contracts.
+- **Implemented (records and pure rules; no loop behaviour):**
+  - **State:** Option A DAW parameter state in `ProjectState`, refused by the offline preflight and the offline derivation.
+  - **Correction:** `DawCorrectionPlan` beside `RenderPlan`, and `RunRequest.daw_session`.
+  - **Receipt and candidate:** the DAW receipt and candidate derivation (`core.loop.daw_transitions`). Supersession is exactly the import's replacements, and groups of the target are refused.
+  - **Rollback:** a rollback scope with typed fader evidence.
+  - **Run records:** the suspension checkpoint and `RunSuspended`, six trace kinds, the `DAW_WRITE` budget (which needs a free recovery slot), five termination reasons, and `RunState.AWAITING_OPERATOR_EXPORT`.
+  - **Module move:** `DawFaderReading` and `DawTrackBinding` move to `core.records.daw_binding`, to avoid an import cycle.
+- **Rollback rule.**
+  - **Exact fader evidence:** verified selected-state rollback needs retained-audio integrity plus exact fader evidence (`EXACT_RESTORE` or `EXACT_OBSERVATION`). That evidence must be bound to the complete binding and to the saved target, and must follow the latest write reservation by ledger position.
+  - **Resolution:** a resolution is refused as evidence.
+  - **Project rollback:** no receipt can claim complete project rollback for a DAW-controlled state.
+- **Evidence.**
+  - **New tests:** 59, including the owner's four regressions (resolution only, one-ULP mismatch, exact reading, failed integrity).
+  - **Mutation probes:** 20, all caught.
+  - **Pins updated explicitly** for the added enum members and trailing fields.
+  - **Suite:** 6,138 passed, 4 skipped.
+- **Consequence noted.** FL restoration identities now include `daw_writes: 0`. No runtime FL journal has been persisted, and an older one would fail safe with a conflict.
+- **Not done.** No coordinator integration, installation or live calls. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 1: review fixes (Claude Code)
+- **Source.** Codex review of Increment 1 found two P2 defects, both reproduced with synthetic records. Codex independently ran 315 contract and architecture tests.
+- **Findings and fixes, with regressions written first:**
+  1. **The DAW candidate could record a gain other than the executed action's.** A substituted −99 dB action on the same track produced a receipt, and the candidate recorded −99 dB.
+     - The receipt and candidate derivation now take the journaled `DawApplyRequest`.
+     - `daw_apply_export_problem` binds it to the export's anchor, execution, binding, profile, before state, track and resolved target.
+     - The apply must have been resolved from the selected state.
+     - The suspension checkpoint now carries the apply request.
+  2. **The suspension checkpoint ignored the timeline, format and render spec.** They are now compared, with one regression per field.
+- **ADR-035** (Proposed) is revised in place to state both rules.
+- **Checks.**
+  - **Mutation probes:** nine new, all caught; one survived at first and was caught after an added regression. The 20 original probes are all still caught.
+  - **Contract tests:** 71.
+  - **Locked checks:** focused suites with warnings as errors, 1,592 passed; full suite 6,150 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 1: exact apply identity (Claude Code)
+- **Source.** Codex's re-review found one remaining P2: `daw_apply_export_problem` identified the apply request through the success tolerance. A substitute with the same command ID and 0.99 dB instead of 1.00 dB was accepted. Codex independently ran 327 tests.
+- **Fix, with regressions written first:**
+  - the journal-backed `DawStateAnchor` now carries the exact journaled `DawApplyRequest` of a confirmed write;
+  - the FL adapter rebuilds it from the stored text and requires an exact re-serialization;
+  - identity is exact agreement, and the success-tolerance check stays separate;
+  - the redundant command and execution comparisons were removed as implied by the anchor and request invariants.
+- **ADR-035** (Proposed) is revised in place.
+- **Checks.** 33 mutation probes, all caught; one new probe survived at first and was caught after an added regression. Locked: focused suites with warnings as errors, 1,596 passed; full suite 6,154 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 2: write path to the export suspension (Claude Code)
+- **Source.** The owner approved Increment 2, tests-first, and asked that the interim termination of off-target, uncertain and post-write failures be stated before coding. It is in the plan's "Increment 2 design note", and **ADR-036** (Proposed) records it.
+- **Implemented:** `run_daw` drives the calibrated capability view, admission, the DAW preflight, the journal control state, a fresh inspection, the capability gate, and one stable-ID write.
+  - **Nothing written:** gate rejection, no-write and pre-write refusal are separate outcomes, and the loop continues.
+  - **Confirmed write:** the journal-backed anchor, the export handoff, the complete checkpoint, then `RunSuspended`. There is no receipt, analysis or acceptance.
+  - **Off-target, uncertain and post-write failures:** the run ends at once. There is no recovery and no rollback claim; the FL journal's blocks are preserved, and the final state is `UNKNOWN`.
+- **Evidence.**
+  - **Tests:** 15 coordinator tests, using the real FL adapter against device v2 on a fake host and the real export handoff on temporary files.
+  - **Mutation probes:** 11 new, all caught; two survived first and were fixed. The 33 earlier probes are still caught.
+  - None of this is live FL evidence.
+- **Locked checks.** Focused suites with warnings as errors, 1,796 passed; full suite 6,169 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- **Not done.** No continuation, recovery routing, durable journals, CLI, installation or live calls. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 2: phase-aware exception handling (Claude Code)
+- **Source.** Codex reproduced the defect on a simulated host. After a confirmed write, an `OSError` in export preparation made the terminal record `RUNTIME_CONTRACT_FAILED`, losing `REQUIRED_RECOVERY_NOT_PERFORMED`. Codex independently ran 414 tests.
+- **Fix.**
+  - `RuntimeProgress.pending_effect` tracks the reason an unexpected exception must keep: uncertain from just before the apply, blocked after off-target, recovery-required after confirmation, cleared after a pre-write refusal.
+  - `_run`'s best-effort terminal recording uses it, names the exception, re-raises the original, restores nothing and clears nothing.
+  - Offline behaviour is unchanged.
+  - **ADR-036** (Proposed) is revised in place.
+- **Evidence.**
+  - **Regressions:** four, written first. Two failed before the fix; the two controls passed before and after.
+  - **Mutation probes:** four new, all caught. All earlier probe sets are still caught.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 2: classify the reply before recording it (Claude Code)
+- **Source.** Codex found that the phase marker was set after `observed()`. A confirmed write whose observation append raised was reported as `DAW_COMMAND_UNRESOLVED`.
+- **Fix.** The validated reply is classified before it is recorded:
+  - confirmed: recovery required;
+  - off-target: conversion blocked;
+  - refused: marker cleared and verified reference re-established;
+  - uncertain or invalid: unresolved retained.
+- **ADR-036** (Proposed) is revised in place.
+- **Evidence.**
+  - **Regressions:** three, written first, all failing before the fix: an exception while recording a confirmed, an off-target and a refused reply.
+  - **Mutation probes:** five marker probes, all caught, and all earlier sets still caught.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 3: continuation to acceptance (Claude Code)
+- **Source.** The owner approved Increment 3 with amendment A, plus two constraints: accepted authority is selected before promotion, and one shared lock authority per run. **ADR-037** (Proposed) records it.
+- **Implemented:** `resume_daw` takes the run's exclusive ownership, then admits or refuses duplicates using explicit completion evidence.
+  - **The continuation:** coherent snapshots before and after the verified import; assessment; the DAW receipt and candidate; one candidate analysis with the real level analyzer on native stereo; the `ATTEMPT` verification; DAW acceptance.
+  - **Acceptance:** the authority is unknown during the commit; a committed or found reference is selected before promotion; confirmed-absent is never a restoration.
+  - **Unaccepted candidates** stop with "recovery not attempted": an `UNCERTAIN` DAW-scope receipt, `UNKNOWN` final state, nothing restored or cleared.
+  - **Pause:** recorded and never charged (clock segments).
+  - **Channels:** native export channels with exact baseline equality; the mono masking profile unchanged.
+- **Contract found during implementation:** the export handoff was bound to one before state; it now takes a driver-supplied state inventory.
+- **Evidence.**
+  - **Tests:** 27 continuation tests and 2 handoff tests, using real adapters on a fake FL host and synthetic WAVs.
+  - **Mutation probes:** 14 new, all caught; one survived first and was fixed. Earlier sets are still caught.
+  - None of this is live FL evidence.
+- **Locked checks.** Focused suites with warnings as errors, 1,871 passed; full suite 6,208 passed, 4 skipped; ruff, format, CLI help, lock and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path, Increment 3: review fixes (Claude Code)
+- **Findings (Codex) and fixes, with regressions written first that failed before the fix:**
+  1. **A found acceptance was established only after its observation was recorded.** An append exception then reported unknown authority while the journal held the acceptance. The answer is now validated and established, or its absent marker set, before recording.
+  2. **`resume_daw` compared only the run ID and initial state with the journal.** A changed budget reached the commit. Admission now requires exact equality with the recorded `RunRequest` (`REQUEST_MISMATCH`) before any append or dispatch.
+- **ADR-037** (Proposed) is revised in place.
+- **Checks.**
+  - **Mutation probes:** two new, both caught; all earlier sets still caught.
+  - **Locked checks:** `uv run --locked pytest -q -W error` on the focused DAW, coordinator, loop, run-record and architecture suites, 1,876 passed. The full suite: 6,213 passed, 4 skipped. `ruff check .` and `ruff format --check src tests` clean, CLI help runs, `uv lock --check` and `git diff --check` clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path: Increment 4 plan proposed (Claude Code)
+- **Plan:** the Increment 4 recovery-routing plan is in the coordinator-integration plan, for review. Nothing is implemented.
+- **What it replaces:** the interim "recovery not attempted" stops, with one recovery routine.
+- **What it uses:** the existing journal-backed targets, recovery gate, recovery charges, reconciliation and resolution.
+- **Rollback rule:** VERIFIED rollback only with exact, bound and ordered fader evidence from a final coherent snapshot, plus retained-audio integrity.
+- **Continuation rule:** only a rejected candidate with a VERIFIED rollback continues; everything else terminates by an explicit precedence.
+- **Findings from inspection, recorded as conflicts or decisions (D1–D6):**
+  - the restore target is the journaled start, which may differ from the saved target within the start tolerance;
+  - a restoration that is not confirmed stays unresolved in the FL journal, which amends the earlier expectation for a refused restoration;
+  - a DAW write reserves one recovery slot, but a rollback needs two;
+  - cancellation and the elapsed limit block recovery;
+  - no record carries a rollback receipt before a candidate exists.
+- No code, no installation and no live calls.
+
+## 2026-11-19 — Coordinator DAW path: Increment 4 plan, revision 1 (Claude Code)
+- **Review gaps (Codex), each confirmed in the code, corrected in the plan in place:**
+  1. **An off-target root cannot be anchored.** `state_anchor` refuses it as `not_confirmed`. Replaced, for recovery, by a new journal-backed recovery-lineage query and a coherent recovery snapshot (R7). Export-anchor semantics are unchanged.
+  2. **Two recovery slots are not enough.** The authority query after an unknown commit is charged as a `RECOVERY_OPERATION`, so D2 now reserves three slots (query, restoration, integrity). A minimum-budget test is planned.
+  3. **The `EXACT_RESTORE` evidence used the historical restoration reading.** The final snapshot's fresh reading must now equal both that reading and the saved target exactly. A test with the fader moved after the restoration is planned.
+- **Owner decisions:**
+  - **Agreed:** D1, D3, D5 and the standalone rollback receipt.
+  - **Revised:** D2 and D6.
+  - **D4:** the reuse of render reasons is kept and explicitly documented.
+- No code, no installation and no live calls. Not yet approved.
+
+## 2026-11-19 — Coordinator DAW path, Increment 4: authorized recovery routing (Claude Code)
+- **Implemented** tests-first per the approved plan (revision 1, D1–D6), recorded in ADR-038 (Proposed).
+- **What changed:**
+  - **Interim stops replaced.** Off-target and uncertain writes, preparation failures, rejected imports and unaccepted candidates now go through authorized recovery.
+  - **Recovery lineage.** A new journal-backed recovery-lineage query and snapshot serve recovery, including off-target roots. Export anchors are unchanged.
+  - **Three recovery slots.** A DAW write reserves query, restoration and integrity. It is pinned at the minimum budget.
+  - **Fresh evidence.** VERIFIED rollback needs the final fresh reading to equal the saved target and the confirmed restoration's reading exactly, plus retained-audio integrity. A fader moved after the restoration is pinned.
+- **Findings recorded as deviations:**
+  - an off-target write with a lost restoration reply ends `DAW_CONVERSION_BLOCKED`, not `DAW_COMMAND_UNRESOLVED`, because the restoration is reconciled and resolved;
+  - `AMBIGUOUS` cannot be produced by an admissible write under the calibrated profile;
+  - replay charge reuse is not reachable in-process.
+- **Checks:**
+  - **Mutation probes:** 17 new, all caught; four earlier probes superseded.
+  - **Focused suites, warnings as errors:** 1,936 passed.
+  - **Full suite:** 6,273 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path, Increment 4: review fixes (Claude Code)
+- **Findings (Codex), each with regressions written first that failed before the fix:**
+  1. **Foreign history after the lineage check could still be overwritten.**
+     - **Fix:** the own-lineage rule is now enforced atomically when the FL journal reserves the restoration (`DawRestoreRequest.own_lineage_only`). The refusal writes and charges nothing.
+     - **Unchanged:** export anchors and ADR-032 behaviour without the flag.
+  2. **Resolving a restoration left a stale exception marker.**
+     - **Fix:** every validated resolution now settles the remaining facts and the marker before it is recorded.
+- **ADR-038** (Proposed) is revised in place.
+- **Checks:**
+  - **Mutation probes:** four new, all caught; earlier sets still caught.
+  - **Focused suites, warnings as errors:** 1,939 passed.
+  - **Full suite:** 6,276 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path: Increment 5 plan and ADR-039 proposed (Claude Code)
+- **Plan:** the Increment 5 plan is in the coordinator-integration plan, with ADR-039 (Proposed). It is for review, and nothing is implemented.
+- **Storage:** one SQLite file per run for the trace and the acceptance authority. Fingerprinted, append-only rows, written through an allowlisted canonical codec with a mandatory exact round-trip check.
+- **Ownership:** exclusive across processes, by the SQLite `EXCLUSIVE` lock that the operating system releases when the process dies.
+- **Restart:** a recorded suspension is rebuilt and resumed through the unchanged Increment 3 admission. Budgets, elapsed segments, tokens and charges are reconstructed exactly.
+- **Interrupted states:** every other interrupted state is classified (crashes around the write, suspension, continuation, acceptance commit and recovery) and refused for explicit operator recovery.
+- **Orphans:** a new run-start check refuses unexplained FL state, using a new read-only `latest_anchor()`. Nothing is adopted or restored automatically.
+- **Evidence planned:** subprocess crash tests only, with no power-loss claim.
+- **Decisions for review:** E1–E7.
+
+## 2026-11-20 — Coordinator DAW path: Increment 5 plan, amendment A (Claude Code)
+- **Decisions:** the owner accepted E1–E7 and asked for three amendments before implementation. All three are written into the plan and into ADR-039 (Proposed, revised in place with dated notes).
+  1. **Failed-commit cleanup:** `ROLLBACK`, close and verified reopen. No read is ever answered on a connection that had a failed transaction, so an uncommitted acceptance is never reported found. If reopening fails, the instance is unavailable. Tests cover the failure before `COMMIT` takes effect, after success with the acknowledgement lost, and a refused reopen.
+  2. **Classification:** a first-match precedence in which the committed acceptance head is always authoritative and an unrecorded commit comes first. Specific effects come before the generic continuation interruption. New codes cover crashes before the first write intent and between rounds after a continuation. A trace-prefix coverage test pins that no state is unclassified.
+  3. **Durability provenance:** `StoreDurability` travels in `RunJournalSnapshot` into reports and reloaded suspensions. In-memory results keep `"non_durable"`. It is independent of event acknowledgement.
+- **Storage:** network and synced storage stay explicitly unsupported; tests use local temporary storage only.
+- Nothing is implemented.
+
+## 2026-11-20 — Coordinator DAW path, Increment 5: durable run store and restart (Claude Code)
+- **Implemented** tests-first per the approved plan with amendment A and the clarification that a recorded `AcceptanceFound` is trace evidence of acceptance. Recorded in ADR-039 (Proposed, with implementation notes).
+- **What exists now:**
+  - **A per-run SQLite store** for the trace and the acceptance authority:
+    - an exact canonical codec with a mandatory round-trip check;
+    - fingerprints re-checked on every read;
+    - exclusive ownership across processes;
+    - failed commits cleaned up by rollback, close and verified reopen, so an uncommitted acceptance is never reported found.
+  - **Restart:** a recorded suspension resumes after a process restart. Every other interrupted state is classified with the agreed precedence and refused for operator recovery.
+  - **Run start:** a check refuses unexplained FL state before any decision, adopting nothing.
+  - **Durability provenance:** reaches reports and reloaded suspensions, independent of acknowledgement.
+- **Deviations** (named in ADR-039):
+  - the port property is `store_durability`;
+  - the resumable and not-resumable records were folded into `RunSuspended` and `RunInterrupted`;
+  - no new continuation refusal codes.
+- **A budget consequence noted:** after a found acceptance, the next write needs four configured recovery slots.
+- **Checks:**
+  - **Tests:** 50 new (18 subprocess).
+  - **Mutation probes:** 13 new, all caught; the Increment 4 set still caught.
+  - **Focused suites, warnings as errors:** 2,048 passed.
+  - **Full suite:** 6,329 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- Process-crash evidence only; no power-loss claim. No CLI, no installs, no live calls. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path, Increment 5: review fix (Claude Code)
+- **Finding (Codex):** a non-SQLite exception inside a durable write transaction escaped without cleanup, and a later query reported an uncommitted acceptance as found.
+- **Fix:**
+  - every exception after transaction entry, for appends and commits, now triggers the rollback, close and verified reopen;
+  - storage failures stay "unknown";
+  - other exceptions propagate after the cleanup.
+- **Regressions** (written first; the before-commit cases failed before the fix): before `COMMIT` and after a successful `COMMIT` with the acknowledgement lost, for acceptances and trace appends, at store and coordinator level.
+- **ADR-039** (Proposed) is revised in place.
+- **Checks:**
+  - **Mutation probes:** two new, both caught; the Increment 5 set (15) all caught.
+  - **Focused suites, warnings as errors:** 2,055 passed.
+  - **Full suite:** 6,336 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path: Increment 6 plan and ADR-040 proposed (Claude Code)
+- **Plan:** the operator CLI plan is in the coordinator-integration plan, with ADR-040 (Proposed). It is for review, and nothing is implemented.
+- **Commands:** `daw start`, `daw continue`, `daw status` (read-only by default, through new read-only store opens and no MIDI transport) and a two-phase `daw recover`.
+- **Recovery:**
+  - phase 1 shows the interrupted state, the proposed target and the permitted operations with a state fingerprint;
+  - phase 2 performs exactly one fingerprint-bound, operator-authorized operation, recorded in the trace;
+  - nothing is ever adopted or restored automatically.
+- **Wiring:** a validated configuration, one composition function, process-unique UUID identities and FL inspection IDs, and a system clock with Ctrl+C cancellation.
+- **Gap found in inspection:** no production decision maker or diagnosis source exists yet. Proposed (H1): wire only implemented adapters, so `start` and `continue` refuse until `decision_agent` exists, and tests use labelled doubles through the same composition function.
+- **Decisions for review:** H1–H9.
+- **Unchanged:** saving, exporting and script installation stay manual, and live trials stay separately authorized.
+
+## 2026-11-20 — Coordinator DAW path, Increment 6: operator CLI (Claude Code)
+- **Status:** operator tooling is ready; autonomous runs are unavailable.
+- **Owner decision H1:** wire existing adapters and refuse unavailable capabilities explicitly.
+- **What was implemented:**
+  - the production clock (Ctrl+C cancels);
+  - process-unique UUID identities and FL inspection IDs;
+  - a validated configuration for operator tooling;
+  - read-only opens of both SQLite stores;
+  - read-only `daw status`;
+  - a two-phase `daw recover`: phase 1 shows the interrupted state, the proposed and saved targets and the permitted options with a fingerprint; phase 2 performs exactly one fingerprint-bound, recorded operation, and never adopts or restores anything automatically.
+- **The run commands:** `daw start` and `daw continue` refuse before opening any store or MIDI connection, naming the missing `DecisionMaker` and `DiagnosisSource`.
+- **Not built:** no decision-file adapter, and labelled doubles stay in tests.
+- **Deviations** are recorded in ADR-040:
+  - narrowed configuration scope;
+  - simplified exit codes;
+  - `close` always records `UNKNOWN`;
+  - orphan resolution only through a confirmed restoration.
+- **Docs:** the roadmap's DAW status line is updated (superseding "not implemented in the coordinator").
+- **Checks:**
+  - **Tests:** 15 CLI tests with simulated FL Studio and temporary files.
+  - **Mutation probes:** 10 new, all caught.
+  - **Full suite:** 6,351 passed, 4 skipped.
+  - **Focused suites:** 2,070 passed.
+  - **Remaining checks:** clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path, Increment 6: review fixes (Claude Code)
+- **Findings (Codex) and fixes, with regressions written first:**
+  1. **Operator recovery could restore over a committed acceptance.**
+     - **Fix:** accepted executions are excluded from restoration options and refused again at execution.
+     - **Regression:** a post-commit crash leads to no restoration dispatch.
+  2. **Confirmed and off-target orphans were invisible.**
+     - **Fix:** a read-only `apply_roots` port method lists every root that may have written; roots recorded by any run store are explained; an unreadable store refuses orphan analysis.
+     - **Regressions:** one per state, plus explained-root and fail-closed tests.
+- **ADR-040** (Proposed) is revised in place.
+- **Checks:**
+  - **Mutation probes:** five new, all caught.
+  - **Full suite:** 6,356 passed, 4 skipped.
+  - **Focused suites:** 2,083 passed.
+  - **Remaining checks:** clean.
+- **Status unchanged:** operator tooling ready; autonomous runs unavailable.
+- Uncommitted, together with the earlier requirements update.

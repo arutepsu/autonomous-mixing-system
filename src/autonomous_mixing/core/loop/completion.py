@@ -5,9 +5,13 @@ single append, the journal read-back, the completion clock reading and the effec
 from collections.abc import Callable
 from dataclasses import replace
 
-from autonomous_mixing.core.loop.runtime import append, new_event
+from autonomous_mixing.core.loop.runtime import append, elapsed_at, new_event
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
-from autonomous_mixing.core.ports.run_journal import RunJournal, validate_run_journal_snapshot
+from autonomous_mixing.core.ports.run_journal import (
+    RunJournal,
+    require_snapshot_durability,
+    validate_run_journal_snapshot,
+)
 from autonomous_mixing.core.records.coordinator_progress import RuntimeProgress
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading
 from autonomous_mixing.core.records.results import Success
@@ -23,6 +27,9 @@ _PRESERVED_ON_RECORDING_FAILURE = (
     TerminationReason.RESTORATION_FAILED,
     TerminationReason.RESTORATION_UNCERTAIN,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
+    # ADR-036: a possibly written DAW command or a blocked conversion must survive a lost terminal append
+    TerminationReason.DAW_COMMAND_UNRESOLVED,
+    TerminationReason.DAW_CONVERSION_BLOCKED,
 )
 
 
@@ -74,22 +81,19 @@ def finalize(
             validate_run_journal_snapshot(progress.request.run_id, progress.initial, trace.value)
             snapshot = trace.value
         except ValueError:
-            snapshot = RunJournalSnapshot(
-                progress.request.run_id, progress.initial, tuple(progress.known), tuple(progress.commits)
-            )
+            snapshot = RunJournalSnapshot(progress.request.run_id, progress.initial, tuple(progress.known),
+                                          tuple(progress.commits), journal.store_durability)  # fmt: skip
     else:
-        snapshot = RunJournalSnapshot(
-            progress.request.run_id, progress.initial, tuple(progress.known), tuple(progress.commits)
-        )
+        snapshot = RunJournalSnapshot(progress.request.run_id, progress.initial, tuple(progress.known),
+                                      tuple(progress.commits), journal.store_durability)  # fmt: skip
+    require_snapshot_durability(journal, snapshot)
     completion = clock.read()
     clock_valid = (
         isinstance(completion, ClockReading) and completion.monotonic_seconds >= progress.last.monotonic_seconds
     )
     if not clock_valid:
         completion = progress.last
-    final_usage = replace(
-        progress.usage, elapsed_seconds=completion.monotonic_seconds - progress.first.monotonic_seconds
-    )
+    final_usage = replace(progress.usage, elapsed_seconds=elapsed_at(progress, completion))
     final_outcome, final_reason, final_explanation = (outcome, reason, explanation)
     if not acknowledged and reason not in _PRESERVED_ON_RECORDING_FAILURE:
         final_outcome, final_reason = (RunOutcome.FAILED, TerminationReason.RECORDING_FAILED)

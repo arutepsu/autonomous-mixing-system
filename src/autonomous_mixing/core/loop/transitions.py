@@ -90,6 +90,8 @@ def derive_candidate_project_state(
     """
     require_instance(checkpoint_id, CheckpointId, "checkpoint_id")
     require_utc(captured_at, "captured_at")
+    if isinstance(previous, ProjectState) and previous.daw is not None:
+        raise ValueError("a DAW-controlled state is derived by core.loop.daw_transitions, never by the offline path")
     validate_gain_execution(previous, receipt, action)
     if receipt.candidate_revision in previous.known_revisions:
         raise ValueError(f"candidate revision {receipt.candidate_revision} reuses a locally known revision")

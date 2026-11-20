@@ -174,6 +174,7 @@ class PreflightCode(Enum):
     MISSING_GAIN_STATE = "missing_gain_state"
     INCOMPATIBLE_AUDIO = "incompatible_audio"
     UNSUPPORTED_DEPENDENCY = "unsupported_dependency"
+    DAW_CONTROLLED_STATE = "daw_controlled_state"  # ADR-035: the offline renderer never executes a DAW state
 
 
 @dataclass(frozen=True)

@@ -1,9 +1,16 @@
-"""Actions, execution and rollback receipts, and candidate checkpoint derivation."""
+"""Actions, execution and rollback receipts, and candidate checkpoint derivation.
 
+Rollback receipts distinguish three claims (ADR-034, ADR-035): fader restoration (one fader's readings), the
+rollback of the selected state (retained audio plus exact fader evidence) and complete project rollback, which
+the DAW path never claims.
+"""
+
+import math
 from dataclasses import dataclass
 from enum import Enum
 
 from autonomous_mixing.core.records.artifacts import AudioArtifact
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.identifiers import (
     ActionId,
     ArtifactId,
@@ -186,12 +193,90 @@ class RollbackStatus(Enum):
     UNCERTAIN = "uncertain"
 
 
+class RollbackScope(Enum):
+    """What a rollback receipt claims (ADR-035)."""
+
+    COMPLETE_SAVED_STATE = "complete_saved_state"  # offline: settings, audio and snapshot of the saved state
+    # DAW: the selected state (retained audio) and exact fader evidence; complete project rollback stays unverified
+    SELECTED_STATE_WITH_FADER = "selected_state_with_fader"
+
+
+class DawRollbackEvidenceKind(Enum):
+    EXACT_RESTORE = "exact_restore"  # a journaled confirmed restoration to the saved target (ADR-032)
+    EXACT_OBSERVATION = "exact_observation"  # a recorded reading exactly equal to the saved target
+    RESOLUTION = "resolution"  # clears uncertainty only: representable so that it can be refused, never evidence
+
+
+def _exactly(a: float, b: float) -> bool:
+    return a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
+
+
+@dataclass(frozen=True)
+class DawRollbackFaderEvidence:
+    """Recorded fader evidence offered for a selected-state rollback, bound to one fader and its saved target.
+
+    ``binding`` is the complete binding of the fader (equal contents, not only an equal reference). ``saved_target``
+    is the confirmed reading of the selected state for that fader. Ordering is in the DAW command ledger:
+    ``latest_reservation_seq`` is the latest write reservation relevant to this fader when the rollback is claimed;
+    ``evidence_seq`` is the restoration's own reservation (``EXACT_RESTORE``), the ledger watermark at which the
+    reading was captured (``EXACT_OBSERVATION``), or the resolution's entry (``RESOLUTION``). The record keeps what
+    the journal reported; ``daw_rollback_evidence_problem`` decides whether it can support a VERIFIED rollback.
+    """
+
+    binding: DawTrackBinding
+    saved_target: DawFaderReading
+    kind: DawRollbackEvidenceKind
+    reference: str
+    reading: DawFaderReading
+    latest_reservation_seq: int
+    evidence_seq: int
+
+    def __post_init__(self) -> None:
+        require_instance(self.binding, DawTrackBinding, "DawRollbackFaderEvidence.binding")
+        require_instance(self.saved_target, DawFaderReading, "DawRollbackFaderEvidence.saved_target")
+        require_instance(self.kind, DawRollbackEvidenceKind, "DawRollbackFaderEvidence.kind")
+        require_text(self.reference, "DawRollbackFaderEvidence.reference")
+        require_instance(self.reading, DawFaderReading, "DawRollbackFaderEvidence.reading")
+        for name in ("latest_reservation_seq", "evidence_seq"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"DawRollbackFaderEvidence.{name} must be a built-in int of at least 1")
+
+
+def daw_rollback_evidence_problem(evidence: DawRollbackFaderEvidence) -> str | None:
+    """Why ``evidence`` cannot support a VERIFIED selected-state rollback, or None.
+
+    A resolution clears uncertainty only. Otherwise both coordinates must equal the saved target exactly (no
+    tolerance; signed zeros distinguished), and the evidence must follow the latest relevant write reservation: a
+    restoration must be that reservation itself, and an observation must have been captured at or after it.
+    """
+    require_instance(evidence, DawRollbackFaderEvidence, "evidence")
+    if evidence.kind is DawRollbackEvidenceKind.RESOLUTION:
+        return "a resolution clears uncertainty only; it never establishes rollback"
+    reading, target = evidence.reading, evidence.saved_target
+    if not (_exactly(reading.normalized, target.normalized) and _exactly(reading.db, target.db)):
+        return "the evidenced reading does not equal the saved target exactly in both coordinates"
+    if evidence.kind is DawRollbackEvidenceKind.EXACT_RESTORE:
+        if evidence.evidence_seq != evidence.latest_reservation_seq:
+            return "the restoration is not the latest relevant write reservation"
+    elif evidence.evidence_seq < evidence.latest_reservation_seq:
+        return "the reading was captured before the latest relevant write reservation"
+    return None
+
+
 @dataclass(frozen=True)
 class RollbackReceipt:
     """Result of restoring the saved before state after an execution.
 
     ``restored_state`` is required for VERIFIED and forbidden otherwise. It records restoration of the
     saved state, including its original snapshot timestamp, not a newly captured snapshot.
+
+    ``scope`` (ADR-035; trailing fields with offline defaults) says what is claimed. ``COMPLETE_SAVED_STATE`` is the
+    offline claim and never applies to a state with DAW parameter state. ``SELECTED_STATE_WITH_FADER`` is the DAW
+    claim: VERIFIED requires ``retained_audio`` VERIFIED (the retained accepted audio passed its integrity
+    inspection) and, for every DAW-controlled track of the restored state, exactly one ``fader_evidence`` item bound
+    to that track's complete binding and confirmed reading that passes ``daw_rollback_evidence_problem``. It never
+    claims complete project rollback (routing, plugins, automation, saved file or fresh exports).
     """
 
     execution_id: ExecutionId
@@ -199,6 +284,9 @@ class RollbackReceipt:
     status: RollbackStatus
     restored_state: ProjectState | None
     explanation: str
+    scope: RollbackScope = RollbackScope.COMPLETE_SAVED_STATE
+    retained_audio: RollbackStatus | None = None
+    fader_evidence: tuple[DawRollbackFaderEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         require_instance(self.execution_id, ExecutionId, "RollbackReceipt.execution_id")
@@ -211,6 +299,40 @@ class RollbackReceipt:
             raise ValueError("VERIFIED rollback requires the restored complete state")
         if self.status is not RollbackStatus.VERIFIED and self.restored_state is not None:
             raise ValueError(f"{self.status.name} rollback must not claim a restored state")
+        require_instance(self.scope, RollbackScope, "RollbackReceipt.scope")
+        require_tuple_of(self.fader_evidence, DawRollbackFaderEvidence, "RollbackReceipt.fader_evidence",
+                         nonempty=False, distinct=False)  # fmt: skip
+        if self.scope is RollbackScope.COMPLETE_SAVED_STATE:
+            if self.retained_audio is not None or self.fader_evidence:
+                raise ValueError("a complete saved-state rollback carries no retained-audio or fader evidence")
+            if self.restored_state is not None and self.restored_state.daw is not None:
+                raise ValueError("a DAW-controlled state can never be claimed as a complete saved-state rollback")
+            return
+        require_instance(self.retained_audio, RollbackStatus, "RollbackReceipt.retained_audio")
+        tracks = [item.binding.track_id for item in self.fader_evidence]
+        if len(set(tracks)) != len(tracks):
+            raise ValueError("a selected-state rollback carries at most one fader evidence item per track")
+        if self.status is RollbackStatus.VERIFIED:
+            self._check_verified()
+
+    def _check_verified(self) -> None:
+        if self.retained_audio is not RollbackStatus.VERIFIED:
+            raise ValueError("VERIFIED selected-state rollback requires verified retained audio integrity")
+        daw = self.restored_state.daw
+        if daw is None:
+            raise ValueError("a selected-state rollback restores a state with DAW parameter state")
+        evidence = {item.binding.track_id: item for item in self.fader_evidence}
+        if set(evidence) != {track.track_id for track in daw.tracks}:
+            raise ValueError("VERIFIED selected-state rollback needs fader evidence for exactly its DAW tracks")
+        for track in daw.tracks:
+            item = evidence[track.track_id]
+            if item.binding != track.binding:
+                raise ValueError(f"fader evidence for track {track.track_id} is bound to another fader")
+            if item.saved_target != track.confirmed_fader:
+                raise ValueError(f"fader evidence for track {track.track_id} names another saved target")
+            problem = daw_rollback_evidence_problem(item)
+            if problem is not None:
+                raise ValueError(f"fader evidence for track {track.track_id} cannot verify rollback: {problem}")
 
 
 def validate_rollback_references(receipt: RollbackReceipt, before_state: ProjectState) -> None:

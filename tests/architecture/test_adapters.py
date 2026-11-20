@@ -46,6 +46,8 @@ SHARED_CLIENTS = {
     f"{ADAPTERS}.dsp_analysis.file_analyzer": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
     # dist10 WAV input boundary (ADR-029, Proposed; Task 3P, 2026-11-17): the shared verification path only.
     f"{ADAPTERS}.dsp_analysis.wav_input": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
+    # DAW export handoff and verified import (ADR-033, Proposed; export plan 2026-11-18): the shared verifier only.
+    f"{ADAPTERS}.rendering.export_handoff": {f"{AUDIO_IO}.locations", f"{AUDIO_IO}.integrity", f"{AUDIO_IO}.limits"},
 }
 
 
@@ -184,6 +186,13 @@ RENDERING_EDGES = {
         _a("gain_mix", "workspaces") | _s("locations") | _r("actions", "coordinator_runtime", "invariants"),
         set(),
     ),
+    # DAW export handoff (ADR-033, Proposed): workspace allocation and revalidation plus the shared verifier.
+    "export_handoff": (
+        _a("revalidation", "workspaces")
+        | _s("integrity", "limits", "locations")
+        | _r("daw_export", "invariants", "project"),
+        set(),
+    ),
 }
 ANALYSIS_EDGES = {
     "io": (set(), {"numpy", "soundfile"}),
@@ -259,6 +268,13 @@ JOURNAL_EDGES = {
         {f"{JOURNAL}.memory"} | _r("acceptance", "identifiers", "invariants", "results", "run_trace"),
         set(),
     ),
+    # Increment 5 (ADR-039): the exact codec (records are loaded by module path, never by a stored name) and the
+    # durable SQLite run journal; standard library only.
+    "record_codec": (set(), set()),
+    "sqlite_run": (
+        {f"{JOURNAL}.record_codec"} | _r("acceptance", "identifiers", "invariants", "results", "run_trace"),
+        set(),
+    ),
 }
 
 
@@ -268,7 +284,7 @@ def test_rendering_and_analysis_modules_are_exactly_the_planned_ones():
     assert {n for n in MODULES if n.startswith(JOURNAL + ".")} == {f"{JOURNAL}.{m}" for m in JOURNAL_EDGES}
     assert {n for n in MODULES if n.startswith(AUDIO_IO + ".")} == {f"{AUDIO_IO}.{m}" for m in AUDIO_IO_EDGES}
     adapter_packages = {n for n in MODULES if n.count(".") == 2 and n.startswith(ADAPTERS + ".")}
-    assert adapter_packages == {RENDERING, ANALYSIS, JOURNAL, AUDIO_IO}
+    assert adapter_packages == {RENDERING, ANALYSIS, JOURNAL, AUDIO_IO, f"{ADAPTERS}.fl_studio"}
 
 
 @pytest.mark.parametrize("module", sorted(RENDERING_EDGES))

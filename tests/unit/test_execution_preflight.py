@@ -763,6 +763,7 @@ def test_preflight_codes_are_exactly_the_planned_set():
         "MISSING_GAIN_STATE",
         "INCOMPATIBLE_AUDIO",
         "UNSUPPORTED_DEPENDENCY",
+        "DAW_CONTROLLED_STATE",  # ADR-035: the offline renderer never executes a DAW-controlled state
     ]
 
 

@@ -314,6 +314,7 @@ def test_execution_signatures_match_the_baseline():
         "MISSING_GAIN_STATE",
         "INCOMPATIBLE_AUDIO",
         "UNSUPPORTED_DEPENDENCY",
+        "DAW_CONTROLLED_STATE",  # ADR-035
     ]
 
 
@@ -393,3 +394,178 @@ def test_cross_record_and_derivation_signatures_are_preserved():
     }
     for function, signature in expected.items():
         assert _signature(function) == signature, function.__name__
+
+
+def test_daw_control_contract_signatures_unions_and_codes():
+    """Addition (DAW control contract, 2026-11-18): the new port, gate and outcome shapes are pinned."""
+    from autonomous_mixing.core.admission.daw import daw_gain_bounds, gate_daw_apply
+    from autonomous_mixing.core.ports.daw import (
+        DawParameterController,
+        validate_daw_apply_outcome,
+        validate_daw_inspection,
+    )
+    from autonomous_mixing.core.records.admission import TrackGainPermission
+    from autonomous_mixing.core.records.capabilities import GainBounds
+    from autonomous_mixing.core.records.daw import DawGainResolution, DawTrackState
+    from autonomous_mixing.core.records.daw_binding import DawFaderReading
+    from autonomous_mixing.core.records.daw_control import (
+        DawApplyOutcome,
+        DawApplyPermitted,
+        DawApplyRejected,
+        DawApplyRequest,
+        DawControlProfile,
+        DawGateCode,
+        DawGateResult,
+        DawInspection,
+        DawInspectRequest,
+        DawNoWrite,
+        DawWriteConfirmed,
+        DawWriteOffTarget,
+        DawWriteRefused,
+        DawWriteUncertain,
+    )
+    from autonomous_mixing.core.records.identifiers import ExecutionId, VersionRef
+
+    assert typing.Protocol in DawParameterController.__mro__
+    assert typing.get_args(DawApplyOutcome) == (
+        DawWriteRefused,
+        DawWriteConfirmed,
+        DawWriteOffTarget,
+        DawWriteUncertain,
+    )
+    assert typing.get_args(DawGateResult) == (DawApplyPermitted, DawNoWrite, DawApplyRejected)
+    keyword = Parameter.KEYWORD_ONLY
+    expected = {
+        DawParameterController.inspect: _method(("request", DawInspectRequest), returns=PortResult[DawInspection]),
+        DawParameterController.apply: _method(("request", DawApplyRequest), returns=DawApplyOutcome),
+        validate_daw_inspection: _fields(
+            ("request", DawInspectRequest), ("result", PortResult[DawInspection]), returns=None
+        ),
+        validate_daw_apply_outcome: _fields(("request", DawApplyRequest), ("outcome", DawApplyOutcome), returns=None),
+        DawApplyRequest: _fields(
+            ("execution_id", ExecutionId),
+            ("command_id", str),
+            ("admitted", AdmittedAction),
+            ("resolution", DawGainResolution),
+            ("profile", DawControlProfile),
+            ("inspection", DawInspection),
+            ("requested_change_db", float),
+            returns=None,
+        ),
+        DawWriteConfirmed: _fields(
+            ("command_id", str),
+            ("before", DawFaderReading),
+            ("after", DawFaderReading),
+            ("commanded_normalized", float),
+            ("achieved_change_db", float),
+            ("replayed", bool),
+            returns=None,
+        ),
+    }
+    for obj, signature in expected.items():
+        assert _params(obj) == signature, obj.__qualname__
+    assert _params(daw_gain_bounds) == [
+        ("profile", keyword, Parameter.empty, DawControlProfile),
+        ("state", keyword, Parameter.empty, DawTrackState),
+        ("permission", keyword, Parameter.empty, TrackGainPermission),
+        ("return", GainBounds | None),
+    ]
+    assert _params(gate_daw_apply) == [
+        ("admitted", Parameter.POSITIONAL_OR_KEYWORD, Parameter.empty, AdmittedAction),
+        ("state", keyword, Parameter.empty, DawTrackState),
+        ("inspection", keyword, Parameter.empty, DawInspection),
+        ("profile", keyword, Parameter.empty, DawControlProfile),
+        ("execution_id", keyword, Parameter.empty, ExecutionId),
+        ("command_id", keyword, Parameter.empty, str),
+        ("blocked_conversions", keyword, Parameter.empty, frozenset[VersionRef]),
+        ("unresolved_command_id", keyword, Parameter.empty, str | None),
+        ("return", DawGateResult),
+    ]
+    assert [c.name for c in DawGateCode] == [
+        "UNRESOLVED_OPERATION",
+        "CONVERSION_BLOCKED",
+        "PROFILE_SCOPE",
+        "IDENTITY_MISMATCH",
+        "UNSUPPORTED_BUILD",
+        "STALE_REVISION",
+        "DRIFT",
+        "GAIN_INCREASE_UNSUPPORTED",
+        "CUT_OUT_OF_BOUNDS",
+        "START_OUT_OF_RANGE",
+        "TARGET_OUT_OF_RANGE",
+    ]
+
+
+def test_daw_recovery_contract_signatures_unions_and_codes():
+    """Addition (recovery and reconciliation plan, 2026-11-18): the recovery port, gate and outcome shapes."""
+    from autonomous_mixing.core.admission.daw import gate_daw_restore
+    from autonomous_mixing.core.ports.daw_recovery import DawRecoveryController
+    from autonomous_mixing.core.records.daw_binding import DawTrackBinding
+    from autonomous_mixing.core.records.daw_control import DawControlProfile, DawInspection
+    from autonomous_mixing.core.records.daw_recovery import (
+        DawControlState,
+        DawReconcileFinding,
+        DawReconcileRequest,
+        DawReconciliation,
+        DawRecoveryAuthorization,
+        DawResolutionKind,
+        DawResolutionOutcome,
+        DawResolutionRecorded,
+        DawResolutionRefused,
+        DawResolutionRequest,
+        DawRestoreConfirmed,
+        DawRestoreGateResult,
+        DawRestoreMismatch,
+        DawRestoreNoWrite,
+        DawRestoreOutcome,
+        DawRestorePermitted,
+        DawRestoreRefused,
+        DawRestoreRejected,
+        DawRestoreRequest,
+        DawRestoreTarget,
+        DawRestoreUncertain,
+    )
+
+    assert typing.Protocol in DawRecoveryController.__mro__
+    assert typing.get_args(DawRestoreOutcome) == (
+        DawRestoreConfirmed,
+        DawRestoreMismatch,
+        DawRestoreRefused,
+        DawRestoreUncertain,
+    )
+    assert typing.get_args(DawRestoreGateResult) == (DawRestorePermitted, DawRestoreNoWrite, DawRestoreRejected)
+    assert typing.get_args(DawResolutionOutcome) == (DawResolutionRecorded, DawResolutionRefused)
+    expected = {
+        DawRecoveryController.control_state: _method(returns=PortResult[DawControlState]),
+        DawRecoveryController.restore_target: _method(("source_command_id", str), returns=PortResult[DawRestoreTarget]),
+        DawRecoveryController.reconcile: _method(
+            ("request", DawReconcileRequest), returns=PortResult[DawReconciliation]
+        ),
+        DawRecoveryController.restore: _method(("request", DawRestoreRequest), returns=DawRestoreOutcome),
+        DawRecoveryController.resolve: _method(("request", DawResolutionRequest), returns=DawResolutionOutcome),
+    }
+    for obj, signature in expected.items():
+        assert _params(obj) == signature, obj.__qualname__
+    keyword = Parameter.KEYWORD_ONLY
+    assert _params(gate_daw_restore) == [
+        ("authorization", Parameter.POSITIONAL_OR_KEYWORD, Parameter.empty, DawRecoveryAuthorization),
+        ("binding", keyword, Parameter.empty, DawTrackBinding),
+        ("inspection", keyword, Parameter.empty, DawInspection),
+        ("profile", keyword, Parameter.empty, DawControlProfile),
+        ("recovery_command_id", keyword, Parameter.empty, str),
+        ("control_state", keyword, Parameter.empty, DawControlState),
+        ("own_lineage_only", keyword, False, bool),  # coordinator Increment 4 review fix (ADR-038)
+        ("return", DawRestoreGateResult),
+    ]
+    assert [f.value for f in DawReconcileFinding] == [
+        "at_commanded",
+        "at_recorded_start",
+        "ambiguous",
+        "neither",
+        "identity_unverified",
+    ]
+    assert [k.value for k in DawResolutionKind] == [
+        "applied_as_commanded",
+        "not_applied_or_reverted",
+        "restored_to_recorded_start",
+    ]

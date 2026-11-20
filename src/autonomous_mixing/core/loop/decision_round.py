@@ -13,6 +13,7 @@ from autonomous_mixing.core.admission.capabilities import build_action_capabilit
 from autonomous_mixing.core.admission.decision_gate import assess_decision
 from autonomous_mixing.core.admission.preflight import preflight_execution
 from autonomous_mixing.core.loop.budgets import check_budget
+from autonomous_mixing.core.loop.daw_execution import daw_capabilities, prepare_daw
 from autonomous_mixing.core.loop.feedback import _rejection, add_feedback
 from autonomous_mixing.core.loop.observation import diagnose
 from autonomous_mixing.core.loop.runtime import (
@@ -99,7 +100,10 @@ def decision_round(
         scope=progress.request.configuration.scope,
         context=progress.request.configuration.context,
         policy=progress.request.policy,
-        renderer=progress.request.renderer_capabilities,
+        # ADR-036: a DAW session advertises the calibrated window of the confirmed fader instead of the renderer's
+        renderer=progress.request.renderer_capabilities
+        if progress.request.daw_session is None
+        else daw_capabilities(state, progress.request.daw_session),
     )
     retries = 0
     while True:
@@ -498,6 +502,9 @@ def act(
             on_progress=on_progress,
         )
         return (progress, reject_result_2)
+    if progress.request.daw_session is not None:  # ADR-036: the DAW preflight replaces the offline render preflight
+        return prepare_daw(progress, call_id, situation, decision, attempt_id, reject, identities=identities,
+                           journal=journal, on_progress=on_progress)  # fmt: skip
     progress, execution_id = fresh(progress, ExecutionId, identities=identities, on_progress=on_progress)
     token = identities.next_token()
     progress, revision = fresh(progress, Revision, identities=identities, on_progress=on_progress)

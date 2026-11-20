@@ -29,7 +29,8 @@ def _dimensions(artifact: AudioArtifact) -> tuple[int, int, int, float]:
 def preflight_execution(request: ExecutionRequest) -> PreflightResult:
     """Check an execution request's metadata in a fixed order; the first failure wins.
 
-    1. rerun admission now (an earlier admission is not a capability token); 2. workspace identity;
+    1. rerun admission now (an earlier admission is not a capability token); 1a. no DAW parameter state
+    (ADR-035); 2. workspace identity;
     3. new candidate revision and IDs disjoint from current audio and fixed baselines; 4. recipe equals
     the snapshot inventory and bindings cover it exactly with matching STEM members; 5. selected mix is a
     MIX member with exactly the recipe contributors; 6. explicit target gain state; 7. identical
@@ -55,6 +56,10 @@ def preflight_execution(request: ExecutionRequest) -> PreflightResult:
     target = action.operation.track_id
     state = request.decision_request.state
     audio = state.audio
+
+    # 1a. the offline renderer never executes a DAW-controlled state (ADR-035)
+    if state.daw is not None:
+        return reject(PreflightCode.DAW_CONTROLLED_STATE, "the state holds DAW parameter state; use the DAW path")
 
     # 2. logical workspace assignment
     if request.workspace.execution_id != execution_id:

@@ -12,7 +12,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [006](0006-research-first-development-policy.md) | Research-first development policy | 2026-10-15 | Accepted; point 6 clarified by ADR-008 |
 | [007](0007-docs-folder-structure.md) | Documentation folder structure and one file per ADR | 2026-10-15 | Accepted |
 | [008](0008-controlled-defect-injection.md) | Controlled defect injection into real stems | 2026-10-15 | Accepted; recording location refined by ADR-010 |
-| [009](0009-agent-team-implementation-baseline.md) | Development agent team follows the offline Python/WAV baseline | 2026-10-15 | Accepted; hidden-reference item closed by ADR-010 |
+| [009](0009-agent-team-implementation-baseline.md) | Development agent team follows the offline Python/WAV baseline | 2026-10-15 | Accepted; hidden-reference item closed by ADR-010; FL Studio scheduling clause superseded in part by ADR-034 (Proposed) |
 | [010](0010-hidden-reference-boundary.md) | Hidden-reference boundary between runtime and research evaluation | 2026-10-15 | Accepted |
 | [011](0011-domain-foundation-boundary.md) | Dependency-free domain records for projects, context and observations | 2026-10-19 | Proposed |
 | [012](0012-typed-action-proposals-and-decisions.md) | Typed action proposals and single-outcome decisions | 2026-10-19 | Proposed |
@@ -31,8 +31,19 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [025](0025-exclusive-wav-output.md) | Exclusive WAV/DOUBLE output in a separate infrastructure component, with read-only workspace revalidation | 2026-11-03 | Proposed |
 | [026](0026-gain-mix-processor-adapter.md) | Gain/full-mix processor adapter bound to a pre-allocated workspace | 2026-11-03 | Accepted |
 | [027](0027-hexagonal-control-loop-architecture.md) | Hexagonal architecture around a MAPE-K control loop, with immutable records | 2026-11-03 | Accepted; supersedes ADR-017 and ADR-022 |
-| [028](0028-shared-read-only-audio-access.md) | Shared read-only audio access component with exact client edges | 2026-11-10 | Proposed; one client edge added by ADR-029 |
+| [028](0028-shared-read-only-audio-access.md) | Shared read-only audio access component with exact client edges | 2026-11-10 | Proposed; one client edge added by ADR-029 and one by ADR-033 |
 | [029](0029-dist10-wav-input-boundary.md) | dist10 WAV input boundary as a client of the shared audio reader | 2026-11-17 | Proposed |
+| [030](0030-daw-parameter-control-boundary.md) | DAW parameter-control boundary beside the offline renderer | 2026-11-18 | Proposed |
+| [031](0031-fl-studio-control-journal.md) | FL Studio runtime dispatch journal and local replay | 2026-11-18 | Proposed; extended by ADR-032 |
+| [032](0032-daw-exact-recovery-and-reconciliation.md) | DAW exact-target recovery, explicit reconciliation and the shared command ledger | 2026-11-18 | Proposed; port extended by ADR-033 |
+| [033](0033-daw-export-handoff-and-verified-import.md) | DAW pending-export handoff and verified audio import | 2026-11-18 | Proposed |
+| [034](0034-bounded-operator-assisted-fl-studio-integration.md) | Bounded, operator-assisted FL Studio runtime integration (D15) | 2026-11-18 | Proposed; supersedes in part ADR-009 |
+| [035](0035-coordinator-daw-execution-path.md) | Coordinator DAW execution path: contracts (Increment 1) | 2026-11-19 | Proposed |
+| [036](0036-coordinator-daw-write-path-to-suspension.md) | Coordinator DAW write path up to the export suspension (Increment 2) | 2026-11-19 | Proposed |
+| [037](0037-coordinator-daw-continuation.md) | Coordinator DAW continuation: import, verification and acceptance (Increment 3) | 2026-11-19 | Proposed |
+| [038](0038-coordinator-daw-recovery-routing.md) | Coordinator DAW recovery routing (Increment 4) | 2026-11-19 | Proposed |
+| [039](0039-durable-run-journal-and-restart.md) | Durable run and acceptance journals, restart and orphan detection (Increment 5) | 2026-11-20 | Proposed |
+| [040](0040-operator-cli-for-the-daw-path.md) | Operator CLI for the DAW path: start, continue, status and authorized recovery (Increment 6) | 2026-11-20 | Proposed |
 
 ## Template
 

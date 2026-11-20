@@ -37,3 +37,9 @@ class TerminationReason(Enum):
     ACCEPTANCE_COMMIT_UNCERTAIN = "acceptance_commit_uncertain"
     RUNTIME_CONTRACT_FAILED = "runtime_contract_failed"
     USER_CANCELLED = "user_cancelled"
+    # ADR-035: the DAW execution path
+    DAW_WRITE_LIMIT = "daw_write_limit"
+    DAW_COMMAND_UNRESOLVED = "daw_command_unresolved"
+    DAW_CONVERSION_BLOCKED = "daw_conversion_blocked"
+    DAW_CONTINUITY_FAILED = "daw_continuity_failed"
+    EXPORT_IMPORT_REJECTED = "export_import_rejected"

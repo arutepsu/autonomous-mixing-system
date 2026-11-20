@@ -28,7 +28,48 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
+    "daw_binding": {"identifiers", "invariants"},  # coordinator-integration Increment 1 (ADR-035)
+    "daw": {"identifiers", "invariants", "actions", "daw_binding"},
+    "daw_control": {"identifiers", "invariants", "daw", "daw_binding", "admission"},  # DAW control contract, 2026-11-18
+    "daw_recovery": {"identifiers", "invariants", "daw_binding", "daw_control", "budgets"},  # recovery plan, 2026-11-18
+    "daw_rollback": {"actions", "identifiers", "invariants", "project"},  # coordinator Increment 4 (ADR-038)
+    "run_restart": {  # Increment 5 (ADR-039)
+        "acceptance",
+        "daw_binding",
+        "daw_export",
+        "daw_recovery",
+        "identifiers",
+        "invariants",
+        "termination",
+    },
+    "daw_export": {  # export handoff plan, 2026-11-18 (revision 3)
+        "identifiers",
+        "invariants",
+        "artifacts",
+        "project",
+        "rendering",
+        "daw_binding",
+        "daw_control",
+        "daw_recovery",
+    },
+    "daw_correction": {  # coordinator-integration Increment 1 (ADR-035); integrity and artifacts: Increment 3
+        "acceptance",
+        "admission",
+        "artifacts",
+        "integrity",
+        "daw_binding",
+        "daw_control",
+        "daw_export",
+        "decision",
+        "feedback",
+        "identifiers",
+        "invariants",
+        "project",
+        "rendering",
+        "verification_evidence",
+    },
     "coordinator_progress": {
+        "daw_correction",  # ADR-035: the DAW correction plan
         "verification_evidence",
         "identifiers",
         "invariants",
@@ -51,11 +92,11 @@ ALLOWED_RECORD_IMPORTS = {
     "identifiers": {"invariants"},
     "invariants": set(),
     "artifacts": {"identifiers", "invariants"},
-    "project": {"identifiers", "invariants", "artifacts"},
+    "project": {"identifiers", "invariants", "artifacts", "daw_binding"},
     "mix": {"identifiers", "invariants"},
     "context": {"identifiers", "invariants", "project"},
     "observation": {"identifiers", "invariants", "artifacts", "project"},
-    "actions": {"identifiers", "invariants", "artifacts", "project"},
+    "actions": {"identifiers", "invariants", "artifacts", "project", "daw_binding"},
     "budgets": {"identifiers", "invariants"},
     "results": {"identifiers", "invariants"},
     "decision": {
@@ -98,6 +139,7 @@ ALLOWED_RECORD_IMPORTS = {
     "reconciliation": {"acceptance", "invariants"},  # acceptance-reconciliation plan, 2026-11-09
     # Coordinator-runtime-contracts plan, 2026-11-09 (no reverse edges into this module).
     "coordinator_runtime": {
+        "daw_correction",  # ADR-035: the optional DAW session
         "actions",
         "admission",
         "artifacts",
@@ -132,6 +174,12 @@ ALLOWED_RECORD_IMPORTS = {
     },
     "termination": set(),
     "run_trace": {
+        "daw_control",  # ADR-035: DAW-path operation records
+        "daw_correction",
+        "daw_export",
+        "daw_recovery",
+        "daw_rollback",  # Increment 4 (ADR-038): the standalone DAW rollback record
+        "run_restart",  # Increment 5 (ADR-039): restart classification and the run-start check records
         "acceptance",
         "actions",
         "admission",
@@ -153,11 +201,132 @@ ALLOWED_RECORD_IMPORTS = {
         "verification",
         "verification_assessment",
     },
-    "run_report": {"acceptance", "coordinator_runtime", "invariants", "run", "run_trace", "termination"},
+    "run_report": {
+        "acceptance",
+        "coordinator_runtime",
+        "daw_correction",
+        "invariants",
+        "run",
+        "run_trace",
+        "termination",
+    },
 }
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
+    "daw_binding": ("DawFaderReading", "DawTrackBinding"),  # moved from daw (ADR-035)
+    "daw": ("DawTrackState", "DawGainResolution"),
+    "daw_control": (  # DAW control contract, 2026-11-18
+        "DawBuild",
+        "DawRange",
+        "DawControlProfile",
+        "DawInspectRequest",
+        "DawInspection",
+        "DawGateCode",
+        "DawApplyRejected",
+        "daw_state_rejection",
+        "daw_cut_rejection",
+        "daw_change_rejection",  # review fix 2026-11-18: one rule for the gate and advertised endpoints
+        "DawApplyRequest",
+        "DawApplyPermitted",
+        "DawNoWrite",
+        "DawGateResult",
+        "DawRefusalCode",
+        "DawUncertainReason",
+        "DawWriteRefused",
+        "DawWriteConfirmed",
+        "DawWriteOffTarget",
+        "DawWriteUncertain",
+        "DawApplyOutcome",
+    ),
+    "daw_export": (  # export handoff plan, 2026-11-18 (revision 3)
+        "DAW_EXPORT_REQUEST_FILE",
+        "daw_file_name_key",
+        "daw_export_file_name_problem",
+        "DawStateBasis",
+        "DawStateAnchor",
+        "DawContinuitySnapshot",
+        "DawImportRejectionCode",
+        "daw_continuity_rejection",
+        "DawDependencyStatus",
+        "RoutingUnknownError",
+        "DawRoutingDeclaration",
+        "DawExportFormat",
+        "DawExportTimeline",
+        "DawExportOutput",
+        "DawExportRequest",
+        "daw_export_artifact",
+        "DawFileIdentity",
+        "DawExportAwaiting",
+        "DawExportPreparationCode",
+        "DawExportPreparationFailure",
+        "DawExportedFile",
+        "DawExportManifest",
+        "DawImportRequest",
+        "DawImportedFileEvidence",
+        "DawFilesVerified",
+        "DawAlignmentStatus",
+        "DawImportVerified",
+        "DawImportRejected",
+        "daw_export_coverage_problem",  # shared with DawCorrectionPlan (ADR-035)
+    ),
+    "daw_correction": (
+        "daw_apply_export_problem",  # review fix 2026-11-19
+        "DawSessionConfig",
+        "DawCorrectionPlan",
+        "DawStateQuery",
+        "DawCorrectionSuspended",
+        "DawPlanReady",  # coordinator Increment 2 (ADR-036)
+        "DawContinuationStarted",  # coordinator Increment 3 (ADR-037)
+        "DawContinuationDisposition",
+        "DawContinuationFinished",
+        "DawContinuationRefusalCode",
+        "DawContinuationRefused",
+    ),
+    "daw_recovery": (  # recovery and reconciliation plan, 2026-11-18
+        "DawCommandKind",
+        "DawTargetBasis",
+        "DawRestoreTarget",
+        "DawRecoveryAuthorization",
+        "DawRestoreRequest",
+        "DawRestoreGateCode",
+        "DawRestorePermitted",
+        "DawRestoreNoWrite",
+        "DawRestoreRejected",
+        "DawRestoreGateResult",
+        "DawRestoreConfirmed",
+        "DawRestoreMismatch",
+        "DawRestoreRefused",
+        "DawRestoreUncertain",
+        "DawRestoreOutcome",
+        "DawUnresolvedCommand",
+        "DawRecoveryCharge",
+        "DawControlState",
+        "DawReconcileFinding",
+        "classify_reconciliation",
+        "DawReconcileRequest",
+        "DawReconciliation",
+        "DawResolutionKind",
+        "DawResolutionRefusalCode",
+        "DawResolutionAuthorization",
+        "DawResolutionRequest",
+        "DawResolutionRecorded",
+        "DawResolutionRefused",
+        "DawResolutionOutcome",
+        # coordinator Increment 4 (ADR-038): the recovery lineage, recovery snapshots and recovery decisions
+        "DawRootStatus",
+        "DawLedgerKind",
+        "DawLedgerEntry",
+        "DawLineageRestoration",
+        "DawRecoveryLineage",
+        "DawRecoverySnapshot",
+        "DawLineageQuery",
+        "DawRecoveryEntry",
+        "DawRecoveryPlan",
+        "DawRecoveryDecision",
+        "daw_recovery_plan_for",
+    ),
+    "daw_rollback": ("DawRollbackRecord",),  # coordinator Increment 4 (ADR-038)
     "coordinator_progress": ("RuntimeProgress", "PreparedCorrection", "AssessedCorrection", "Stop"),
     "identifiers": (
         "ProjectId",
@@ -198,6 +367,8 @@ INVENTORY = {
         "ArtifactCheckpoint",
         "TrackGainState",
         "ProjectProcessingState",
+        "DawTrackParameter",  # ADR-034 Option A, ADR-035
+        "DawParameterState",
         "ProjectState",
     ),
     "mix": (
@@ -232,6 +403,10 @@ INVENTORY = {
         "validate_receipt_against_checkpoint",
         "derive_candidate_checkpoint",
         "RollbackStatus",
+        "RollbackScope",  # ADR-035: fader restoration versus complete project rollback
+        "DawRollbackEvidenceKind",
+        "DawRollbackFaderEvidence",
+        "daw_rollback_evidence_problem",
         "RollbackReceipt",
         "validate_rollback_references",
     ),
@@ -406,8 +581,21 @@ INVENTORY = {
         "TraceNotAppended",
         "TraceAppendUnknown",
         "TraceAppendResult",
+        "StoreDurability",  # Increment 5 (ADR-039)
     ),
-    "run_report": ("RunReport",),
+    "run_report": ("RunReport", "RunSuspended"),
+    "run_restart": (  # Increment 5 (ADR-039): restart classification and the DAW facts it is decided from
+        "RunInterruptionCode",
+        "RunInterrupted",
+        "DawRestartFacts",
+        "DawLatestAnchorQuery",
+        "DawLatestState",
+        "DawStartRefused",
+        "OperatorOperation",  # Increment 6 (ADR-040)
+        "OperatorRecoveryOption",
+        "OperatorRecoveryView",
+        "OperatorRecoveryAuthorization",
+    ),
 }
 
 MUTABLE_TYPES = {"list", "dict", "set", "bytearray", "List", "Dict", "Set", "MutableMapping", "MutableSequence"}

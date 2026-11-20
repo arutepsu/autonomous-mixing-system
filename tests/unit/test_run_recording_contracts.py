@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 import pytest
+from daw_export_support import BINDING, PROFILE, awaiting, export_request, manifest
+from fl_runtime_support import make_request
 
 from autonomous_mixing.core.records.actions import ExecutionStatus
 from autonomous_mixing.core.records.admission import (
@@ -37,6 +39,10 @@ from autonomous_mixing.core.records.coordinator_runtime import (
     RunRenderRequest,
     RunRequest,
 )
+from autonomous_mixing.core.records.daw_control import DawInspectRequest
+from autonomous_mixing.core.records.daw_correction import DawStateQuery
+from autonomous_mixing.core.records.daw_export import DawImportRequest
+from autonomous_mixing.core.records.daw_recovery import DawReconcileRequest
 from autonomous_mixing.core.records.decision import ControllerIdentity
 from autonomous_mixing.core.records.diagnosis import (
     DiagnosisCoverage,
@@ -426,7 +432,7 @@ def make_acceptance(expected=INITIAL, number=1):
 
 
 def test_reason_values_and_groups():
-    assert len(TerminationReason) == 33
+    assert len(TerminationReason) == 38  # five added for the DAW path (ADR-035)
     assert all(r.value == r.name.lower() for r in TerminationReason)
     for reason in TerminationReason:
         for outcome in RunOutcome:
@@ -449,6 +455,7 @@ def test_reason_values_and_groups():
                     "RENDER_CALL_LIMIT",
                     "RECOVERY_CAPACITY_LIMIT",
                     "ELAPSED_TIME_LIMIT",
+                    "DAW_WRITE_LIMIT",
                 }
                 and outcome is RunOutcome.LIMIT_REACHED
                 or reason.name == "USER_CANCELLED"
@@ -467,6 +474,7 @@ def test_reason_values_and_groups():
                     "RENDER_CALL_LIMIT",
                     "RECOVERY_CAPACITY_LIMIT",
                     "ELAPSED_TIME_LIMIT",
+                    "DAW_WRITE_LIMIT",
                     "USER_CANCELLED",
                 }
                 and outcome is RunOutcome.FAILED
@@ -666,10 +674,22 @@ def make_intent(operation):
         OperationKind.RENDER: RunRenderRequest(plan, integrity, REQUIRED, integrity.bindings),
         OperationKind.QUERY_ACCEPTANCE: AcceptanceQuery(RUN_REQUEST.run_id, AcceptanceId("acceptance")),
         OperationKind.INSPECT_STATE: integrity,
+        # ADR-035: the DAW execution path (records from the DAW test support; project p1, execution e1)
+        OperationKind.DAW_INSPECT: DawInspectRequest(BINDING, PROFILE),
+        OperationKind.DAW_APPLY: make_request("apply_root_0001"),
+        OperationKind.DAW_RECOVERY: DawReconcileRequest("reconcile_0001", "apply_root_0001", BINDING, PROFILE),
+        OperationKind.DAW_STATE: DawStateQuery("apply_root_0001", True),
+        OperationKind.EXPORT_PREPARE: export_request(),
+        OperationKind.EXPORT_IMPORT: DawImportRequest(awaiting(), manifest(awaiting())),
     }
-    call = DecisionCallId("call") if operation in (OperationKind.DECIDE, OperationKind.RENDER) else None
-    attempt = AttemptId("attempt") if operation is OperationKind.RENDER else None
+    # Increment 4 (ADR-038): a DAW recovery intent always belongs to one attempt, like an effect
+    effects = (OperationKind.RENDER, OperationKind.DAW_APPLY, OperationKind.EXPORT_PREPARE, OperationKind.EXPORT_IMPORT,
+               OperationKind.DAW_RECOVERY)  # fmt: skip
+    call = DecisionCallId("call") if operation in (OperationKind.DECIDE, *effects) else None
+    attempt = AttemptId("attempt") if operation in effects else None
     execution = workspace.execution_id if operation is OperationKind.RENDER else None
+    if operation in effects[1:]:
+        execution = ExecutionId("e1")
     return DispatchIntent(operation, requests[operation], INITIAL, call, attempt, execution)
 
 
@@ -759,7 +779,6 @@ def test_every_usage_dimension_must_be_nondecreasing(field):
         (OperationObserved, ("intent_id", "operation", "outcome")),
         (TerminalSnapshot, ("run", "authoritative", "verified")),
         (RunTraceEvent, ("event_id", "sequence", "run_id", "created_at", "usage", "payload")),
-        (RunJournalSnapshot, ("run_id", "initial", "events", "acceptances")),
         (TraceAppended, ("event",)),
         (TraceNotAppended, ("event_id", "explanation")),
         (TraceAppendUnknown, ("event_id", "explanation")),
@@ -782,3 +801,17 @@ def test_diagnosis_failed_reason_maps_to_failed():
         if outcome is not RunOutcome.FAILED:
             with pytest.raises(ValueError):
                 make_run(reason, outcome=outcome)
+
+
+def test_a_snapshot_carries_its_store_durability_as_a_trailing_defaulted_field():
+    """Increment 5 (ADR-039): the only defaulted field, so in-memory snapshots keep their existing shape."""
+    from autonomous_mixing.core.records.run_trace import StoreDurability
+
+    fields = dataclasses.fields(RunJournalSnapshot)
+    assert tuple(f.name for f in fields) == ("run_id", "initial", "events", "acceptances", "durability")
+    assert RunJournalSnapshot.__dataclass_params__.frozen
+    assert fields[-1].default is StoreDurability.NON_DURABLE
+    assert all(f.default is dataclasses.MISSING for f in fields[:-1])
+    assert make_snapshot().durability is StoreDurability.NON_DURABLE
+    with pytest.raises(ValueError):
+        dataclasses.replace(make_snapshot(), durability="non_durable")

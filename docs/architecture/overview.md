@@ -19,9 +19,9 @@ Names and module paths in this document follow the ADR-027 layout and the M5 voc
 
 | Package | Modules | Contents | Former location |
 | --- | --- | --- | --- |
-| `core.records` | `identifiers`, `invariants`, `artifacts`, `project`, `mix`, `context`, `observation`, `diagnosis`, `capabilities`, `feedback`, `actions`, `budgets`, `results`, `decision`, `analysis`, `verification`, `rendering`, `admission`, `run` | All core-facing business and port records, and the cross-record checks records call in `__post_init__` (for example `validate_observation_sources`, `validate_receipt_against_checkpoint`, `derive_candidate_checkpoint`). Acyclic module graph (migration plan, section 3). | `domain.*` records; request, response, plan, outcome and policy records of `application.*` |
-| `core.ports` | `analysis`, `decision`, `rendering` | Protocols `AudioAnalyzer`, `DecisionMaker`, `Renderer` and the checks on their responses (`validate_analysis_response`, `validate_decision_response`, `validate_decision_references`, `validate_rendered_candidate`). | `application.{observation,decision,execution}` ports and validation; `domain.decision.references` |
-| `core.admission` | `admission`, `preflight`, `capabilities` | `admit_action`, `preflight_execution`, `build_action_capability_view` (descriptive view, added 2026-11-04; see below). | `core.admission.admission`, `core.admission.preflight`; `capabilities` is new |
+| `core.records` | `identifiers`, `invariants`, `artifacts`, `project`, `mix`, `context`, `observation`, `diagnosis`, `capabilities`, `daw`, `daw_control`, `feedback`, `actions`, `budgets`, `results`, `decision`, `analysis`, `verification`, `rendering`, `admission`, `run` | All core-facing business and port records, and the cross-record checks records call in `__post_init__` (for example `validate_observation_sources`, `validate_receipt_against_checkpoint`, `derive_candidate_checkpoint`). Acyclic module graph (migration plan, section 3). | `domain.*` records; request, response, plan, outcome and policy records of `application.*` |
+| `core.ports` | `analysis`, `decision`, `rendering`, `daw` | Protocols `AudioAnalyzer`, `DecisionMaker`, `Renderer` and the checks on their responses (`validate_analysis_response`, `validate_decision_response`, `validate_decision_references`, `validate_rendered_candidate`). `daw` (added 2026-11-18, proposed by ADR-030): `DawParameterController` with `validate_daw_inspection` and `validate_daw_apply_outcome`; see "DAW control contract". | `application.{observation,decision,execution}` ports and validation; `domain.decision.references` |
+| `core.admission` | `admission`, `preflight`, `capabilities`, `daw` | `admit_action`, `preflight_execution`, `build_action_capability_view` (descriptive view, added 2026-11-04; see below). `daw`: `resolve_daw_gain`, and from 2026-11-18 `daw_gain_bounds` and `gate_daw_apply` (see "DAW control contract"). | `core.admission.admission`, `core.admission.preflight`; `capabilities` is new |
 | `core.verification` | `consistency` | `validate_verification_references` (record consistency only; no verifier yet). | `domain.validation.consistency` |
 | `core.loop` | `transitions`, `references`, `budgets` | `validate_gain_execution`, `derive_candidate_project_state`, `validate_attempt_references`, `check_budget` (pure budget gate, added 2026-11-04; see below); `run()` does not exist yet. | `domain.action.execution`, `domain.run.references`; `budgets` is new |
 | `adapters.rendering` | `dsp`, `integrity`, `locations`, `workspaces`, `revalidation`, `wav_output`, `gain_mix` | Numerical kernels, read-only WAV integrity checks, location resolution, workspace allocation and revalidation, exclusive WAV output and the gain/full-mix `Renderer` (`GainMixProcessor`). | `infrastructure.{audio,filesystem,workspaces,wav_output,processing}` |
@@ -31,6 +31,137 @@ Names and module paths in this document follow the ADR-027 layout and the M5 voc
 Not created yet (created with their first real code): `core.diagnosis`, `adapters.decision_agent`, `adapters.baselines`, `drivers.experiments`, `evaluation`.
 
 Enforcement: `tests/architecture/test_core_records.py` (records import graph, inventory, immutability), `test_core_layers.py` (ADR-027 rules a and b), `test_adapters.py` (rule c, exact rendering and analysis edges, runtime isolation), `test_layout.py` (ring classification, unresolved imports, docstring-only initializers, console script, each module importable alone), all sharing `import_resolver.py`; `tests/unit/test_public_contracts.py` keeps the public signature, union, enum and protocol baselines. These are static source checks: dynamic imports are not analysed, and only the records graph has a static acyclicity guarantee (ledger G2, G3).
+
+### DAW gain coordinates (`core.records.daw`, `core.admission.daw`; implemented 2026-11-18, not integrated)
+
+The four frozen records `DawFaderReading`, `DawTrackBinding`, `DawTrackState` and `DawGainResolution` describe declared insert identity, an immutable baseline and measured DAW parameter state separately from the fixed-input `TrackGainState`. `resolve_daw_gain` validates project, track and revision references, rejects observed fader drift beyond two explicit inclusive tolerances, then maps an absolute action from the binding's baseline and derives the delta from the current reading. Positive and zero deltas remain valid coordinate results; permission and runtime capability still require separate checks. Derived non-finite or unrepresentable results raise `ValueError`, including large integer arithmetic. Evidence: `tests/unit/test_daw_gain_coordinates.py` (108 tests).
+
+Limits: metadata titles do not authenticate the open project file; gain coordinates do not prove exported audio gain. This slice supplies no admission enforcement, calibrated profile, FL transport adapter, dispatch, retry mechanism, recovery operation, candidate artifacts or coordinator integration. The existing offline rendering and fixed-input processing contracts are unchanged. See the [approved design](../superpowers/specs/2026-11-18-fl-studio-action-adapter-design.md) and [implementation plan](../superpowers/plans/2026-11-18-daw-gain-coordinates.md). ADR-009 and requirement statuses are unchanged.
+
+### FL Studio runtime parameter adapter (`adapters.fl_studio`; implemented 2026-11-18, not integrated)
+
+Implements `DawParameterController` using the reviewed frozen wire protocol, an exact calibrated profile, one bounded byte exchange, lazy WinMM transport, canonical serialization and a single-owner local SQLite command journal. The journal commits pending intent with checked DELETE/EXTRA settings before dispatch; same-ID complete-request replay returns stored outcomes without reopening MIDI. Pending/uncertain writes and off-target conversion blocks persist across reopen. Inspect is read-only and does not clear them. Inspection IDs are persisted and cannot be reused as write IDs. Native cleanup failure, including partial-constructor cleanup failure, retains resources and blocks further dispatch. See [ADR-031 (Proposed)](../decisions/0031-fl-studio-control-journal.md) for durability assumptions and failure semantics, and the [implementation plan](../superpowers/plans/2026-11-18-fl-studio-transport-adapter.md) for interfaces and evidence.
+
+Limits: tests use the real adapter with controlled byte transports and a fake native library; no live runtime validation, installation, saving or exporting was performed. The research scripts remain unchanged historical implementations. No driver/coordinator uses the adapter; recovery, explicit reconciliation and export continuation remain missing. Profile scope remains the single calibrated build/project/insert. Fader evidence is not candidate audio or acceptance. ADR-030, ADR-031 and D15 remain proposed/open; no requirement status changed.
+
+### DAW control contract (`core.records.daw_control`, `core.ports.daw`, `core.admission.daw`; implemented 2026-11-18, not integrated)
+
+Proposed by [ADR-030](../decisions/0030-daw-parameter-control-boundary.md) (not adopted; decision D15).
+
+**Profile.** `DawControlProfile` declares one tested write path:
+- the build, project metadata title, insert and conversion;
+- the normalized and fader-dB ranges (the dB range derived by the adapter at full precision);
+- the cut limits and the tolerances.
+
+**Inspection.** `DawInspectRequest` and `DawInspection` report observed identity, build and fader. A mismatching identity is represented, with no fader.
+
+**The gate.** `gate_daw_apply` takes an already admitted action and checks, in order:
+1. an unresolved earlier operation;
+2. a blocked conversion;
+3. the profile scope;
+4. identity, build, stale references and drift;
+5. `resolve_daw_gain` with the profile's tolerances;
+6. exactly 0 dB, giving `DawNoWrite`;
+7. increase, cut limits, start range and target range.
+
+It returns `DawApplyPermitted`, `DawNoWrite` or `DawApplyRejected`. `daw_gain_bounds` derives the advertised range from the confirmed state, after checking that the permission and the profile belong to the bound insert. Its endpoints are checked with the gate's own arithmetic and change rule. Where rounding would make the gate refuse one, the nearest permitted float inside the window is found by bisection on float order, which also works across zero and through subnormal floats. Endpoints only move inward, so the cut range never widens, and a moved endpoint is tight.
+
+**The request.** `DawApplyRequest` independently validates everything except the run-state checks, using the same records-level functions as the gate.
+
+**Outcomes.** `DawWriteRefused`, `DawWriteConfirmed`, `DawWriteOffTarget` and `DawWriteUncertain` carry only parameter readings, never candidate revisions, artifacts or `ExecutionStatus`.
+
+**Validation.** `validate_daw_apply_outcome` checks structure:
+- the start against the inspected reading;
+- the read-back at the claimed commanded position;
+- the claimed position inside the range;
+- the side of the success tolerance.
+
+It cannot check that the claimed position produces the requested dB, which is an adapter claim checked before dispatch.
+
+**Evidence:**
+- `tests/unit/test_daw_control_contract.py` (164 tests after the review fixes of 2026-11-18), whose full-precision range endpoints come from the reviewed conversion function, loaded only as a test fixture;
+- five mutation probes, each caught;
+- architecture inventories and public-contract pins.
+
+The simulated controller in those tests demonstrates the intended pending, replay, conflict, timeout and reload contract only; the real adapter must repeat these checks.
+
+**Limits.** No FL adapter, MIDI, dispatch, recovery, export continuation, candidate artifacts or coordinator use. The offline rendering contracts are unchanged. ADR-009 and requirement statuses are unchanged. [Plan](../superpowers/plans/2026-11-18-daw-control-contract.md).
+
+### DAW exact-target recovery and reconciliation (`core.records.daw_recovery`, `core.ports.daw_recovery`, `core.admission.daw`, `adapters.fl_studio`; implemented 2026-11-18, not integrated)
+
+Proposed by [ADR-032](../decisions/0032-daw-exact-recovery-and-reconciliation.md). [Plan](../superpowers/plans/2026-11-18-daw-recovery-reconciliation.md): approved revision 2 with Amendment R.
+
+**Restoration.**
+- **Port:** `DawRecoveryController` (`control_state`, `restore_target`, `reconcile`, `restore`, `resolve`), beside the unchanged `DawParameterController`.
+- **Authorization:** a `DawRecoveryAuthorization` with a `RECOVERY_OPERATION` budget grant, separate from cuts-only admission.
+- **Gate:** `gate_daw_restore` permits upward or downward restoration to a journaled target inside the calibrated range, from any current reading, after scope, conversion, identity, build and lineage checks.
+- **Confirmation:** confirmed only when both read-back readings equal the target exactly. A mismatch, refusal or uncertain outcome keeps actions blocked.
+
+**Reconciliation.**
+- `reconcile` classifies a fresh reading against the recorded start and the commanded value, and appends the finding; it clears nothing.
+- Only `resolve` clears, citing subject-specific, latest relevant evidence with no write reserved after it. A child's finding never resolves its parent.
+
+**Journal (schema v2).**
+- **Ledger:** one append-only ledger orders reservations, recovery charges, reconciliations and resolutions.
+- **Charges:** committed with the reservation, before dispatch, once per stable ID, never refunded.
+- **Migration:** v1 journals migrate in place with unchanged field contents.
+
+**Conversion blocks** have no clearing transition.
+
+**Wire and device.**
+- **Protocol:** the runtime protocol v2 snapshot adds `restore_gain`, with every existing command at parity with the frozen research protocol.
+- **Device script v2:** `device/fl_studio/thesis_bridge_v2/`, outside the package and never imported. It is not installed.
+
+**Evidence:**
+- four new test files: core contract; wire and device; journal; controller end to end through device v2 on a fake host;
+- eleven mutation probes, each caught;
+- not live FL evidence.
+
+**Limits.** Restoring a fader proves only its readings, never routing, plugins, the project or audio. No coordinator integration, recovery budgeting in the loop, export continuation or live trial.
+
+### DAW pending-export handoff and verified import (`core.records.daw_export`, `core.ports.daw_export`, `core.admission.daw_export`, `adapters.rendering.export_handoff`, `adapters.fl_studio`; implemented 2026-11-18, not integrated)
+
+Proposed by [ADR-033](../decisions/0033-daw-export-handoff-and-verified-import.md). [Plan](../superpowers/plans/2026-11-18-daw-export-handoff-import.md): approved revision 2 with the revision 3 continuity amendments.
+
+**Preparation.**
+- `DawExportHandoff.prepare` persists an immutable `DawExportRequest` exclusively in a fresh workspace that overlaps no protected original, and returns `DawExportAwaiting`: awaiting operator export, never a render success or candidate-ready.
+- The request carries a journal-backed `DawStateAnchor`: source evidence only, with no fresh inspection.
+- Its outputs replace named before-members exactly: the target stem, one stem per declared dependent, one master.
+
+**Anchor and continuity.**
+- `DawRecoveryController.state_anchor` returns the latest state-establishing ledger event with the complete journaled binding and profile.
+- `continuity_snapshot` captures the anchor, a fresh inspection and the control state coherently under the controller lock.
+- `daw_continuity_rejection` (in records) requires the snapshot to agree exactly with the prepared anchor (watermarks included), nothing unresolved, no blocked conversion, the bound identity and build, and the exact fader reading.
+
+**Import.**
+- `import_files` checks:
+  - the workspace's and request file's file-system identity, size and hash;
+  - the manifest;
+  - the listing and every file object (no links, hard links or duplicate physical files);
+  - each WAV, through the shared verifier, against the requested container and subtype;
+  - after each read and again before returning, every file's identity, size, timestamps and link count against what was observed before the reads. This detects in-place writes, but is not race-free.
+
+  It returns `DawFilesVerified` and writes nothing.
+- Only `assess_daw_import` builds `DawImportVerified`, from the file result and the `before_import` and `after_import` snapshots. Its timeline is declared, with physical alignment unverified.
+
+**Limits.**
+- Continuity is observed agreement only: a move and move-back during the export, or a routing or plugin change, is undetectable.
+- No file check is race-free.
+- Saving and exporting stay manual. No coordinator integration, receipt, analysis conversion or live trial exists. `Renderer` and `RunRenderer` are unchanged.
+
+### Coordinator DAW execution path: contracts (`core.records.daw_correction`, `core.records.daw_binding`, `core.loop.daw_transitions`; implemented 2026-11-19, not integrated)
+
+Proposed by [ADR-035](../decisions/0035-coordinator-daw-execution-path.md), within the scope of [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md). [Plan](../superpowers/plans/2026-11-18-daw-coordinator-integration.md): Increment 1 of revision 3.
+
+- **State and plan:**
+  - `ProjectState.daw` holds explicit DAW parameter state (Option A), separate from `TrackGainState`; the offline path refuses it.
+  - `PreparedCorrection.plan` is `RenderPlan | DawCorrectionPlan`.
+  - `RunRequest.daw_session` is optional.
+- **Receipt:** only a verified import yields a DAW receipt. Its supersession is exactly the import's replacements, and groups of the target are refused.
+- **Rollback:**
+  - VERIFIED selected-state rollback needs retained-audio integrity plus exact, correctly ordered fader evidence bound to the same fader and saved target. A resolution never counts.
+  - No DAW receipt can claim complete project rollback.
+- **Run records:** suspension records, trace kinds, the `DAW_WRITE` budget and termination reasons exist. No loop stage uses them yet.
 
 ### Budget gate (`core.loop.budgets`; implemented 2026-11-04, not integrated)
 Implements Task 1 of `docs/superpowers/plans/2026-11-04-control-loop-budget-gate-plan.md` (attempt contract, sections 25–26 and 29). `core.records.budgets` adds `BudgetOperation` (decision call, attempt, render call, recovery operation), `BudgetBlockReason` (elapsed time, decision-call, attempt, render-call and recovery-capacity limits), the frozen outcomes `BudgetGrant(operation, usage_after_charge)` and `BudgetBlock(operation, reason, usage)` and the union `BudgetAssessment`; a block rejects a reason unrelated to its operation. `BudgetLimits` and `BudgetUsage` are unchanged. `check_budget(operation, *, limits, usage, elapsed_seconds)` takes a caller-supplied elapsed checkpoint (finite, non-negative, not earlier than recorded usage, else `ValueError`) and returns, in this order: an elapsed-time block at or above the limit; a block when the operation's own count has reached its limit (count limits are inclusive); for a render, a recovery-capacity block when no recovery slot is unused; otherwise a grant whose usage increments only that operation's counter. Recovery is not blocked by exhausted decision, attempt or render counters. Recorded overruns are kept, not clamped; integer counts stay exact. Evidence: `tests/unit/test_loop_budgets.py`.

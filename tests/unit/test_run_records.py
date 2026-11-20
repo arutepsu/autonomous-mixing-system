@@ -181,6 +181,7 @@ def test_run_id_is_a_distinct_identifier_kind():
                 "PREPARING_EXECUTION",
                 "EXECUTING",
                 "RECONCILING",
+                "AWAITING_OPERATOR_EXPORT",  # ADR-035
                 "ANALYZING_RESULT",
                 "VALIDATING",
                 "RESTORING",

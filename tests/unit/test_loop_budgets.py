@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from autonomous_mixing.core.loop.budgets import check_budget
+from autonomous_mixing.core.loop.budgets import DAW_WRITE_RECOVERY_RESERVE, RENDER_RECOVERY_RESERVE, check_budget
 from autonomous_mixing.core.records.budgets import (
     BudgetBlock,
     BudgetBlockReason,
@@ -28,29 +28,35 @@ COUNTER = {
     Op.ATTEMPT: "attempts",
     Op.RENDER_CALL: "render_calls",
     Op.RECOVERY_OPERATION: "recovery_operations",
+    Op.DAW_WRITE: "daw_writes",  # ADR-035
 }
 LIMIT = {
     Op.DECISION_CALL: "max_decision_calls",
     Op.ATTEMPT: "max_attempts",
     Op.RENDER_CALL: "max_render_calls",
     Op.RECOVERY_OPERATION: "max_recovery_operations",
+    Op.DAW_WRITE: "max_daw_writes",
 }
 COUNT_REASON = {
     Op.DECISION_CALL: Reason.DECISION_CALL_LIMIT,
     Op.ATTEMPT: Reason.ATTEMPT_LIMIT,
     Op.RENDER_CALL: Reason.RENDER_CALL_LIMIT,
     Op.RECOVERY_OPERATION: Reason.RECOVERY_CAPACITY_LIMIT,
+    Op.DAW_WRITE: Reason.DAW_WRITE_LIMIT,
 }
 PERMITTED = {
     Op.DECISION_CALL: {Reason.ELAPSED_TIME_LIMIT, Reason.DECISION_CALL_LIMIT},
     Op.ATTEMPT: {Reason.ELAPSED_TIME_LIMIT, Reason.ATTEMPT_LIMIT},
     Op.RENDER_CALL: {Reason.ELAPSED_TIME_LIMIT, Reason.RENDER_CALL_LIMIT, Reason.RECOVERY_CAPACITY_LIMIT},
     Op.RECOVERY_OPERATION: {Reason.ELAPSED_TIME_LIMIT, Reason.RECOVERY_CAPACITY_LIMIT},
+    # A DAW write, like a render, needs unused recovery capacity (ADR-035).
+    Op.DAW_WRITE: {Reason.ELAPSED_TIME_LIMIT, Reason.DAW_WRITE_LIMIT, Reason.RECOVERY_CAPACITY_LIMIT},
 }
 
 
 def _usage(**overrides) -> BudgetUsage:
-    values = {"decision_calls": 0, "attempts": 0, "render_calls": 0, "recovery_operations": 0, "elapsed_seconds": 0.0}
+    values = {"decision_calls": 0, "attempts": 0, "render_calls": 0, "recovery_operations": 0, "elapsed_seconds": 0.0,
+              "daw_writes": 0}  # fmt: skip
     return BudgetUsage(**{**values, **overrides})
 
 
@@ -61,6 +67,7 @@ def _limits(**overrides) -> BudgetLimits:
         "max_render_calls": 1,
         "max_recovery_operations": 1,
         "max_elapsed_seconds": 10.0,
+        "max_daw_writes": 1,
     }
     return BudgetLimits(**{**values, **overrides})
 
@@ -74,6 +81,7 @@ def test_budget_operation_names_and_values_are_exact():
         ("ATTEMPT", "attempt"),
         ("RENDER_CALL", "render_call"),
         ("RECOVERY_OPERATION", "recovery_operation"),
+        ("DAW_WRITE", "daw_write"),  # ADR-035
     ]
 
 
@@ -84,6 +92,7 @@ def test_budget_block_reason_names_and_values_are_exact():
         ("ATTEMPT_LIMIT", "attempt_limit"),
         ("RENDER_CALL_LIMIT", "render_call_limit"),
         ("RECOVERY_CAPACITY_LIMIT", "recovery_capacity_limit"),
+        ("DAW_WRITE_LIMIT", "daw_write_limit"),  # ADR-035
     ]
 
 
@@ -165,14 +174,18 @@ def test_existing_budget_limits_and_usage_signatures_are_unchanged():
         "max_render_calls",
         "max_recovery_operations",
         "max_elapsed_seconds",
+        "max_daw_writes",  # ADR-035: trailing, defaulting to 0 (no DAW writes), so offline constructors are unchanged
     ]
+    assert inspect.signature(BudgetLimits).parameters["max_daw_writes"].default == 0
     assert list(inspect.signature(BudgetUsage).parameters) == [
         "decision_calls",
         "attempts",
         "render_calls",
         "recovery_operations",
         "elapsed_seconds",
+        "daw_writes",  # ADR-035: trailing, defaulting to 0
     ]
+    assert inspect.signature(BudgetUsage).parameters["daw_writes"].default == 0
     assert BudgetLimits(0, 0, 0, 0, 1.0).max_attempts == 0
     with pytest.raises(ValueError):
         BudgetLimits(0, 0, 0, 0, 0.0)
@@ -185,11 +198,16 @@ def test_existing_budget_limits_and_usage_signatures_are_unchanged():
 # --- check_budget ----------------------------------------------------------------------------------
 
 
+def _default_limits(operation):
+    """The default limits, with the free recovery slots a DAW write reserves (three, ADR-038 D2) when it is checked."""
+    return _limits(max_recovery_operations=DAW_WRITE_RECOVERY_RESERVE) if operation is Op.DAW_WRITE else _limits()
+
+
 def _check(operation, *, limits=None, usage=None, elapsed=None):
     usage = _usage() if usage is None else usage
     return check_budget(
         operation,
-        limits=_limits() if limits is None else limits,
+        limits=_default_limits(operation) if limits is None else limits,
         usage=usage,
         elapsed_seconds=usage.elapsed_seconds if elapsed is None else elapsed,
     )
@@ -289,8 +307,8 @@ def test_decision_and_attempt_check_only_their_own_counter(operation):
 @pytest.mark.parametrize("operation", list(BudgetOperation))
 def test_a_grant_preserves_unrelated_recorded_overruns(operation):
     overruns = {name: 9 for op, name in COUNTER.items() if op is not operation}
-    if operation is Op.RENDER_CALL:
-        overruns["recovery_operations"] = 0  # a render needs unused recovery capacity
+    if operation in (Op.RENDER_CALL, Op.DAW_WRITE):
+        overruns["recovery_operations"] = 0  # a render or DAW write needs unused recovery capacity
     usage = _usage(**overruns)
     result = _check(operation, usage=usage)
     assert isinstance(result, BudgetGrant)
@@ -302,7 +320,7 @@ def test_a_grant_preserves_unrelated_recorded_overruns(operation):
 @pytest.mark.parametrize("exhausted", [False, True])
 def test_inputs_are_unchanged_and_the_operation_is_retained(operation, exhausted):
     usage = _usage(**{COUNTER[operation]: 1 if exhausted else 0}, elapsed_seconds=2.5)
-    limits = _limits()
+    limits = _default_limits(operation)
     usage_before, limits_before = dataclasses.astuple(usage), dataclasses.astuple(limits)
     result = check_budget(operation, limits=limits, usage=usage, elapsed_seconds=3.5)
     assert result.operation is operation
@@ -367,3 +385,17 @@ def test_invalid_elapsed_seconds_raise(elapsed):
 def test_elapsed_lower_than_recorded_elapsed_raises():
     with pytest.raises(ValueError):
         check_budget(Op.ATTEMPT, limits=_limits(), usage=_usage(elapsed_seconds=5.0), elapsed_seconds=4.999)
+
+
+@pytest.mark.parametrize(("free", "granted"), [(3, True), (4, True), (2, False), (1, False), (0, False)])
+def test_a_daw_write_reserves_three_recovery_slots_and_a_render_one(free, granted):
+    """ADR-038 D2 (revised): the worst complete DAW recovery is query + restoration + integrity; offline stays one."""
+    usage = _usage(recovery_operations=1)
+    limits = _limits(max_recovery_operations=1 + free)
+    write = _check(Op.DAW_WRITE, limits=limits, usage=usage)
+    assert isinstance(write, BudgetGrant) is granted
+    if not granted:
+        assert write == BudgetBlock(Op.DAW_WRITE, Reason.RECOVERY_CAPACITY_LIMIT, usage)
+    assert isinstance(_check(Op.RENDER_CALL, limits=limits, usage=usage), BudgetGrant) is (
+        free >= RENDER_RECOVERY_RESERVE
+    )
