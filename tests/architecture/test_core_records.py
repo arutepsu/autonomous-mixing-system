@@ -591,6 +591,10 @@ INVENTORY = {
         "DawLatestAnchorQuery",
         "DawLatestState",
         "DawStartRefused",
+        "OperatorOperation",  # Increment 6 (ADR-040)
+        "OperatorRecoveryOption",
+        "OperatorRecoveryView",
+        "OperatorRecoveryAuthorization",
     ),
 }
 

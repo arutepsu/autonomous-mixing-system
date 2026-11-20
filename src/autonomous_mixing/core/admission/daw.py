@@ -29,11 +29,13 @@ from autonomous_mixing.core.records.daw_control import (
 )
 from autonomous_mixing.core.records.daw_recovery import (
     DawControlState,
+    DawReconcileFinding,
     DawReconciliation,
     DawRecoveryAuthorization,
     DawRecoveryDecision,
     DawRecoveryEntry,
     DawRecoveryPlan,
+    DawResolutionKind,
     DawRestoreGateCode,
     DawRestoreGateResult,
     DawRestoreNoWrite,
@@ -44,7 +46,15 @@ from autonomous_mixing.core.records.daw_recovery import (
 )
 from autonomous_mixing.core.records.identifiers import ExecutionId, VersionRef
 from autonomous_mixing.core.records.invariants import require_finite, require_finite_result, require_instance
-from autonomous_mixing.core.records.run_restart import DawLatestState, DawStartRefused
+from autonomous_mixing.core.records.run_restart import (
+    DawLatestState,
+    DawRestartFacts,
+    DawStartRefused,
+    OperatorOperation,
+    OperatorRecoveryOption,
+    RunInterrupted,
+    RunInterruptionCode,
+)
 from autonomous_mixing.core.records.termination import TerminationReason
 
 
@@ -375,3 +385,77 @@ def daw_start_check(
                                f"the latest FL state ({anchor.source_id}) is not exactly the configured confirmed "
                                "fader: the DAW state is unexplained")  # fmt: skip
     return None
+
+
+_KIND_FOR_FINDING = {
+    DawReconcileFinding.AT_COMMANDED: DawResolutionKind.APPLIED_AS_COMMANDED,
+    DawReconcileFinding.AT_RECORDED_START: DawResolutionKind.NOT_APPLIED_OR_REVERTED,
+}
+_NO_RECOVERY = (RunInterruptionCode.FINISHED, RunInterruptionCode.NOT_STARTED)
+
+
+def operator_recovery_options(
+    run: RunInterrupted | None,
+    facts: DawRestartFacts,
+    reconciliations: tuple[DawReconciliation, ...],
+    accepted_executions: frozenset = frozenset(),
+) -> tuple[OperatorRecoveryOption, ...]:
+    """The operations an operator may authorize for an interrupted run, or for FL commands no run explains (``run``
+    None), from journal facts only (ADR-040). Nothing here adopts a state or restores anything by itself.
+
+    For every unresolved command in scope: reconcile; resolve, only where the latest evidence of its lineage supports
+    a kind (the run's recorded reconciliation of it, or the root's own confirmed restoration). For every write root in
+    scope whose lineage is the latest and has no unresolved restoration, and whose execution no committed acceptance
+    holds (``accepted_executions``; an accepted edit is never undone, review fix 2026-11-20): one exact restoration to
+    its journaled target. For orphans (``run`` None) the facts hold only roots no run records.
+    For a run: the retained-audio integrity inspection and closing. A finished or unstarted run has none.
+    """
+    require_instance(facts, DawRestartFacts, "facts")
+    if run is not None:
+        require_instance(run, RunInterrupted, "run")
+        if run.code in _NO_RECOVERY:
+            return ()
+    if facts.control_state is None or not facts.available:
+        return ((OperatorRecoveryOption(OperatorOperation.CLOSE, None, None, None, "close the run with what is "
+                                        "recorded; the FL journal's facts are unavailable"),) if run else ())  # fmt: skip
+    lineages = facts.lineages
+    members = {member: lineage for lineage in lineages for member in lineage.members}
+    unresolved = [c for c in facts.control_state.unresolved if run is None or c.command_id in members]
+    options = []
+    for command in unresolved:
+        options.append(OperatorRecoveryOption(OperatorOperation.RECONCILE, command.command_id, None, None,
+                                              f"read the fader once for unresolved {command.kind.value} "
+                                              f"{command.command_id}; clears nothing"))  # fmt: skip
+        lineage = members.get(command.command_id)
+        findings = [f for f in (lineage.findings if lineage else ()) if f.subject_command_id == command.command_id]
+        latest = findings[-1] if findings else None
+        evidence = next((r for r in reconciliations if latest is not None
+                         and r.reconciliation_id == latest.entry_id), None)  # fmt: skip
+        newer_restoration = lineage is not None and any(
+            r.reserved_seq > (latest.seq if latest else 0) for r in lineage.restorations
+        )
+        if evidence is not None and not newer_restoration and evidence.finding in _KIND_FOR_FINDING:
+            kind = _KIND_FOR_FINDING[evidence.finding]
+            options.append(OperatorRecoveryOption(OperatorOperation.RESOLVE, command.command_id, kind,
+                                                  evidence.reconciliation_id, f"resolve {command.command_id} as "
+                                                  f"{kind.value}, citing its latest reconciliation"))  # fmt: skip
+        if lineage is not None and command.command_id == lineage.root_command_id and lineage.restorations:
+            last = lineage.restorations[-1]
+            confirmed = type(last.outcome).__name__ == "DawRestoreConfirmed"
+            if confirmed and last.reserved_seq > (latest.seq if latest else 0):
+                options.append(OperatorRecoveryOption(
+                    OperatorOperation.RESOLVE, command.command_id, DawResolutionKind.RESTORED_TO_RECORDED_START,
+                    last.command_id, f"resolve {command.command_id}, citing its own confirmed restoration"))  # fmt: skip
+    for lineage in lineages:
+        open_restoration = any(r.command_id in lineage.unresolved for r in lineage.restorations)
+        accepted = lineage.apply.execution_id in accepted_executions
+        if lineage.own_latest() and not open_restoration and not accepted:
+            options.append(OperatorRecoveryOption(OperatorOperation.RESTORE, lineage.root_command_id, None, None,
+                                                  f"restore the fader exactly to the journaled start of "
+                                                  f"{lineage.root_command_id}"))  # fmt: skip
+    if run is not None:
+        options.append(OperatorRecoveryOption(OperatorOperation.INSPECT_INTEGRITY, None, None, None,
+                                              "inspect the retained audio of the authoritative state"))  # fmt: skip
+        options.append(OperatorRecoveryOption(OperatorOperation.CLOSE, None, None, None,
+                                              "close the run, recording facts only; nothing is restored"))  # fmt: skip
+    return tuple(dict.fromkeys(options))

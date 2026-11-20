@@ -41,6 +41,7 @@ BEHAVIOR_INVENTORY = {
         "gate_daw_restore",  # 2026-11-18
         "daw_recovery_decision",
         "daw_start_check",  # Increment 5 (ADR-039)
+        "operator_recovery_options",  # Increment 6 (ADR-040)
     ),  # coordinator Increment 4 (ADR-038)  # fmt: skip
     "admission.daw_export": ("assess_daw_import",),  # export handoff plan, 2026-11-18 (revision 3)
     "admission.daw_correction": ("preflight_daw_correction",),  # coordinator Increment 2 (ADR-036)
@@ -60,6 +61,7 @@ BEHAVIOR_INVENTORY = {
     ),
     "loop.daw_recovery": ("recovery_ids", "require_recovery_authority", "recover_daw"),  # Increment 4 (ADR-038)
     "loop.restart": ("classify_run", "restart_facts", "reopen_daw_run"),  # Increment 5 (ADR-039)
+    "loop.operator_recovery": ("run_view", "orphan_facts", "orphan_view", "perform"),  # Increment 6 (ADR-040)
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
     "loop.daw_transitions": (  # coordinator-integration Increment 1 (ADR-035)
         "daw_execution_receipt",

@@ -2002,3 +2002,58 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Full suite:** 6,336 passed, 4 skipped.
   - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
 - Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path: Increment 6 plan and ADR-040 proposed (Claude Code)
+- **Plan:** the operator CLI plan is in the coordinator-integration plan, with ADR-040 (Proposed). It is for review, and nothing is implemented.
+- **Commands:** `daw start`, `daw continue`, `daw status` (read-only by default, through new read-only store opens and no MIDI transport) and a two-phase `daw recover`.
+- **Recovery:**
+  - phase 1 shows the interrupted state, the proposed target and the permitted operations with a state fingerprint;
+  - phase 2 performs exactly one fingerprint-bound, operator-authorized operation, recorded in the trace;
+  - nothing is ever adopted or restored automatically.
+- **Wiring:** a validated configuration, one composition function, process-unique UUID identities and FL inspection IDs, and a system clock with Ctrl+C cancellation.
+- **Gap found in inspection:** no production decision maker or diagnosis source exists yet. Proposed (H1): wire only implemented adapters, so `start` and `continue` refuse until `decision_agent` exists, and tests use labelled doubles through the same composition function.
+- **Decisions for review:** H1–H9.
+- **Unchanged:** saving, exporting and script installation stay manual, and live trials stay separately authorized.
+
+## 2026-11-20 — Coordinator DAW path, Increment 6: operator CLI (Claude Code)
+- **Status:** operator tooling is ready; autonomous runs are unavailable.
+- **Owner decision H1:** wire existing adapters and refuse unavailable capabilities explicitly.
+- **What was implemented:**
+  - the production clock (Ctrl+C cancels);
+  - process-unique UUID identities and FL inspection IDs;
+  - a validated configuration for operator tooling;
+  - read-only opens of both SQLite stores;
+  - read-only `daw status`;
+  - a two-phase `daw recover`: phase 1 shows the interrupted state, the proposed and saved targets and the permitted options with a fingerprint; phase 2 performs exactly one fingerprint-bound, recorded operation, and never adopts or restores anything automatically.
+- **The run commands:** `daw start` and `daw continue` refuse before opening any store or MIDI connection, naming the missing `DecisionMaker` and `DiagnosisSource`.
+- **Not built:** no decision-file adapter, and labelled doubles stay in tests.
+- **Deviations** are recorded in ADR-040:
+  - narrowed configuration scope;
+  - simplified exit codes;
+  - `close` always records `UNKNOWN`;
+  - orphan resolution only through a confirmed restoration.
+- **Docs:** the roadmap's DAW status line is updated (superseding "not implemented in the coordinator").
+- **Checks:**
+  - **Tests:** 15 CLI tests with simulated FL Studio and temporary files.
+  - **Mutation probes:** 10 new, all caught.
+  - **Full suite:** 6,351 passed, 4 skipped.
+  - **Focused suites:** 2,070 passed.
+  - **Remaining checks:** clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path, Increment 6: review fixes (Claude Code)
+- **Findings (Codex) and fixes, with regressions written first:**
+  1. **Operator recovery could restore over a committed acceptance.**
+     - **Fix:** accepted executions are excluded from restoration options and refused again at execution.
+     - **Regression:** a post-commit crash leads to no restoration dispatch.
+  2. **Confirmed and off-target orphans were invisible.**
+     - **Fix:** a read-only `apply_roots` port method lists every root that may have written; roots recorded by any run store are explained; an unreadable store refuses orphan analysis.
+     - **Regressions:** one per state, plus explained-root and fail-closed tests.
+- **ADR-040** (Proposed) is revised in place.
+- **Checks:**
+  - **Mutation probes:** five new, all caught.
+  - **Full suite:** 6,356 passed, 4 skipped.
+  - **Focused suites:** 2,083 passed.
+  - **Remaining checks:** clean.
+- **Status unchanged:** operator tooling ready; autonomous runs unavailable.
+- Uncommitted, together with the earlier requirements update.

@@ -91,8 +91,10 @@ def _run_lock(run_id: RunId) -> threading.Lock:
 class SqliteRunJournal:
     """Implements ``RunJournal`` and ``RunExclusion`` durably for one run (ADR-039)."""
 
-    def __init__(self, path: Path, run_id: RunId, initial: AcceptedReference, *, create: bool) -> None:
+    def __init__(self, path: Path, run_id: RunId, initial: AcceptedReference, *, create: bool,
+                 read_only: bool = False) -> None:  # fmt: skip
         self._path = Path(path)
+        self._read_only = read_only
         self._lock = threading.RLock()
         self._connection = None
         self._needs_reopen = False
@@ -115,6 +117,20 @@ class SqliteRunJournal:
         return cls(path, run_id, initial, create=True)
 
     @classmethod
+    def open_read_only(cls, path: Path, *, run_id: RunId | None = None) -> "SqliteRunJournal":
+        """A verified view of an existing store that takes no lock and writes nothing (ADR-040 ``daw status``).
+
+        SQLite ``mode=ro``: a store another process holds raises ``RunStoreBusy``; appends and commits are refused.
+        """
+        if not Path(path).exists():
+            raise RunStoreError("no store exists at this path")
+        journal = cls(path, None, None, create=False, read_only=True)
+        if run_id is not None and journal.run_id != run_id:
+            journal.close()
+            raise RunStoreError("the store belongs to another run")
+        return journal
+
+    @classmethod
     def open(cls, path: Path, *, run_id: RunId | None = None) -> "SqliteRunJournal":
         """An existing store, verified; ``run_id`` (optional) must match the stored run."""
         if not Path(path).exists():
@@ -126,6 +142,8 @@ class SqliteRunJournal:
         return journal
 
     def _connect(self, *, create: bool) -> None:
+        if self._read_only:
+            return self._connect_read_only()
         try:
             connection = sqlite3.connect(self._path, timeout=0, isolation_level=None, check_same_thread=False)
         except sqlite3.Error as error:
@@ -165,6 +183,26 @@ class SqliteRunJournal:
             self._connection = None
             if isinstance(error, RunStoreError):
                 raise
+            raise RunStoreError(f"the run store failed verification: {error}") from error
+
+    def _connect_read_only(self) -> None:
+        uri = f"{self._path.resolve().as_uri()}?mode=ro"
+        try:
+            self._connection = sqlite3.connect(uri, uri=True, timeout=0, isolation_level=None,
+                                               check_same_thread=False)  # fmt: skip
+            self.settings = {"read_only": True}
+            self._verify_all()
+        except sqlite3.OperationalError as error:
+            if self._connection is not None:
+                self._connection.close()
+            self._connection = None
+            if "locked" in str(error) or "busy" in str(error):
+                raise RunStoreBusy("another process holds the run store") from error
+            raise RunStoreError(f"cannot read the run store: {error}") from error
+        except (_Unverified, ValueError, sqlite3.Error) as error:
+            if self._connection is not None:
+                self._connection.close()
+            self._connection = None
             raise RunStoreError(f"the run store failed verification: {error}") from error
 
     def _verify_all(self) -> None:
@@ -259,6 +297,8 @@ class SqliteRunJournal:
         return LOCAL_SQLITE_PROCESS_CRASH
 
     def try_acquire_exclusive(self) -> bool:
+        if self._read_only:
+            return False  # a read-only view never owns the run
         return _run_lock(self._run_id).acquire(blocking=False)
 
     def release_exclusive(self) -> None:
@@ -279,6 +319,8 @@ class SqliteRunJournal:
     def append(self, event: RunTraceEvent) -> TraceAppendResult:
         require_instance(event, RunTraceEvent, "event")
         with self._lock:
+            if self._read_only:
+                return TraceNotAppended(event.event_id, "the run store is open read-only")
             if not self._ready():
                 return TraceNotAppended(event.event_id, "the run store is unavailable")
             if event.run_id != self._run_id:
@@ -315,6 +357,10 @@ class SqliteRunJournal:
     def commit(self, event: AcceptanceEvent) -> AcceptanceCommitResult:
         require_instance(event, AcceptanceEvent, "event")
         with self._lock:
+            if self._read_only:
+                return AcceptanceNotCommitted(
+                    event.acceptance_id, "the run store is open read-only; nothing was stored"
+                )
             if not self._ready():
                 return AcceptanceNotCommitted(event.acceptance_id, "the run store is unavailable; nothing was stored")
             if event.run_id != self._run_id:

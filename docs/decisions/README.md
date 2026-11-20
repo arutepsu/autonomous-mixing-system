@@ -43,6 +43,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [037](0037-coordinator-daw-continuation.md) | Coordinator DAW continuation: import, verification and acceptance (Increment 3) | 2026-11-19 | Proposed |
 | [038](0038-coordinator-daw-recovery-routing.md) | Coordinator DAW recovery routing (Increment 4) | 2026-11-19 | Proposed |
 | [039](0039-durable-run-journal-and-restart.md) | Durable run and acceptance journals, restart and orphan detection (Increment 5) | 2026-11-20 | Proposed |
+| [040](0040-operator-cli-for-the-daw-path.md) | Operator CLI for the DAW path: start, continue, status and authorized recovery (Increment 6) | 2026-11-20 | Proposed |
 
 ## Template
 

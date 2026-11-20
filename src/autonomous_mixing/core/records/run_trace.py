@@ -105,6 +105,7 @@ from autonomous_mixing.core.records.run_restart import (
     DawLatestAnchorQuery,
     DawLatestState,
     DawStartRefused,
+    OperatorRecoveryAuthorization,
     RunInterrupted,
 )
 from autonomous_mixing.core.records.termination import TerminationReason
@@ -436,6 +437,8 @@ RunTracePayload = (
     # Increment 5 (ADR-039): a refused DAW start and the classification of an interrupted stored run
     | DawStartRefused
     | RunInterrupted
+    # Increment 6 (ADR-040): the operator's explicit authorization of one recovery operation
+    | OperatorRecoveryAuthorization
 )
 
 
@@ -469,7 +472,7 @@ class RunTraceEvent:
             run_id = payload.run.run_id
             if payload.run.usage != self.usage:
                 raise ValueError("terminal event usage differs from the snapshot")
-        elif isinstance(payload, (DawRollbackRecord, RunInterrupted)):
+        elif isinstance(payload, (DawRollbackRecord, RunInterrupted, OperatorRecoveryAuthorization)):
             run_id = payload.run_id
         elif isinstance(payload, DispatchIntent):
             if isinstance(payload.request, (Situation, AcceptanceQuery)):

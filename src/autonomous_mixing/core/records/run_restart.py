@@ -6,15 +6,17 @@ committed or re-dispatched. The authoritative reference is always the committed 
 derived from the trace.
 """
 
+import math
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from autonomous_mixing.core.records.acceptance import AcceptedReference
-from autonomous_mixing.core.records.daw_binding import DawTrackBinding
+from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_export import DawStateAnchor
-from autonomous_mixing.core.records.daw_recovery import DawControlState, DawRecoveryLineage
+from autonomous_mixing.core.records.daw_recovery import DawControlState, DawRecoveryLineage, DawResolutionKind
 from autonomous_mixing.core.records.identifiers import RunEventId, RunId
-from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of
+from autonomous_mixing.core.records.invariants import require_instance, require_text, require_tuple_of, require_utc
 from autonomous_mixing.core.records.termination import TerminationReason
 
 
@@ -133,3 +135,106 @@ class DawStartRefused:
             raise ValueError("a refused DAW start reuses an existing DAW reason (ADR-039 E6)")
         require_tuple_of(self.daw_command_ids, str, "DawStartRefused.daw_command_ids", nonempty=False, distinct=True)
         require_text(self.explanation, "DawStartRefused.explanation")
+
+
+# --- operator-authorized recovery (coordinator Increment 6, ADR-040) ---------------------------------------------------
+
+
+class OperatorOperation(Enum):
+    """One operation an operator may authorize; none adopts a state or restores anything automatically."""
+
+    RECONCILE = "reconcile"  # one fresh read of an unresolved command; clears nothing
+    RESTORE = "restore"  # one exact restoration to the journaled target (own lineage only)
+    RESOLVE = "resolve"  # a resolution, only of the kind the latest evidence supports (the FL journal decides)
+    INSPECT_INTEGRITY = "inspect_integrity"  # the retained-audio integrity inspection of the authoritative state
+    CLOSE = "close"  # records a terminal snapshot of facts only; never restores
+
+
+@dataclass(frozen=True)
+class OperatorRecoveryOption:
+    """One permitted operation with its exact subject; shown before any authorization."""
+
+    operation: OperatorOperation
+    subject_command_id: str | None
+    resolution_kind: DawResolutionKind | None
+    evidence_id: str | None
+    explanation: str
+
+    def __post_init__(self) -> None:
+        require_instance(self.operation, OperatorOperation, "OperatorRecoveryOption.operation")
+        for name in ("subject_command_id", "evidence_id"):
+            value = getattr(self, name)
+            if value is not None:
+                require_text(value, f"OperatorRecoveryOption.{name}")
+        if self.resolution_kind is not None:
+            require_instance(self.resolution_kind, DawResolutionKind, "OperatorRecoveryOption.resolution_kind")
+        require_text(self.explanation, "OperatorRecoveryOption.explanation")
+        needs_subject = self.operation in (OperatorOperation.RECONCILE, OperatorOperation.RESTORE,
+                                           OperatorOperation.RESOLVE)  # fmt: skip
+        if needs_subject != (self.subject_command_id is not None):
+            raise ValueError("reconcile, restore and resolve name a command; the other operations do not")
+        is_resolve = self.operation is OperatorOperation.RESOLVE
+        if is_resolve != (self.resolution_kind is not None) or is_resolve != (self.evidence_id is not None):
+            raise ValueError("exactly a resolution names its kind and its evidence")
+
+
+@dataclass(frozen=True)
+class OperatorRecoveryView:
+    """Everything an operator sees before authorizing one recovery operation (phase 1, read-only).
+
+    ``run`` is None for FL commands no run explains (``--orphans``). The proposed target is the journaled restore
+    target of the run's write; the saved target is the authoritative state's confirmed fader; ``exact`` says whether
+    they are exactly equal (ADR-038 D1). The authorization binds to a fingerprint of this whole record.
+    """
+
+    run: RunInterrupted | None
+    control_state: DawControlState | None
+    lineages: tuple[DawRecoveryLineage, ...]
+    proposed_target: DawFaderReading | None
+    saved_target: DawFaderReading | None
+    options: tuple[OperatorRecoveryOption, ...]
+
+    def __post_init__(self) -> None:
+        if self.run is not None:
+            require_instance(self.run, RunInterrupted, "OperatorRecoveryView.run")
+        if self.control_state is not None:
+            require_instance(self.control_state, DawControlState, "OperatorRecoveryView.control_state")
+        require_tuple_of(self.lineages, DawRecoveryLineage, "OperatorRecoveryView.lineages", nonempty=False,
+                         distinct=False)  # fmt: skip
+        for name in ("proposed_target", "saved_target"):
+            value = getattr(self, name)
+            if value is not None:
+                require_instance(value, DawFaderReading, f"OperatorRecoveryView.{name}")
+        require_tuple_of(self.options, OperatorRecoveryOption, "OperatorRecoveryView.options", nonempty=False,
+                         distinct=True)  # fmt: skip
+
+    @property
+    def exact(self) -> bool | None:
+        if self.proposed_target is None or self.saved_target is None:
+            return None
+        a, b = self.proposed_target, self.saved_target
+        return all(x == y and math.copysign(1.0, x) == math.copysign(1.0, y)
+                   for x, y in ((a.normalized, b.normalized), (a.db, b.db)))  # fmt: skip
+
+
+@dataclass(frozen=True)
+class OperatorRecoveryAuthorization:
+    """The operator's explicit authorization of exactly one shown option, bound to the shown state's fingerprint."""
+
+    run_id: RunId
+    operator: str
+    view_fingerprint: str
+    option: OperatorRecoveryOption
+    authorized_at: datetime
+
+    def __post_init__(self) -> None:
+        require_instance(self.run_id, RunId, "OperatorRecoveryAuthorization.run_id")
+        require_text(self.operator, "OperatorRecoveryAuthorization.operator")
+        if (
+            not isinstance(self.view_fingerprint, str)
+            or len(self.view_fingerprint) != 64
+            or any(c not in "0123456789abcdef" for c in self.view_fingerprint)
+        ):
+            raise ValueError("OperatorRecoveryAuthorization.view_fingerprint must be a SHA-256 hex digest")
+        require_instance(self.option, OperatorRecoveryOption, "OperatorRecoveryAuthorization.option")
+        require_utc(self.authorized_at, "OperatorRecoveryAuthorization.authorized_at")

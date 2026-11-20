@@ -141,7 +141,12 @@ def _plain_reading(reading: DawFaderReading) -> dict:
 class SqliteCommandJournal:
     """One locked journal per configured DAW session, retaining IDs, lineage, charges and blocks across restarts."""
 
-    def __init__(self, path: Path, *, session_key: str):
+    def __init__(self, path: Path, *, session_key: str, read_only: bool = False):
+        """``read_only`` (ADR-040 ``daw status`` and recovery phase 1): SQLite ``mode=ro`` on an existing journal; no
+        lock is taken, nothing is created, migrated or written, and every write fails as a ``JournalError``."""
+        if read_only:
+            self._open_read_only(path, session_key)
+            return
         if not isinstance(path, Path) or not path.is_absolute() or str(path).startswith("\\\\"):
             raise ValueError("journal path must be an absolute local Path")
         if not isinstance(session_key, str) or not session_key.strip():
@@ -188,6 +193,28 @@ class SqliteCommandJournal:
         except (sqlite3.Error, JournalError, ValueError) as error:
             self.close()
             raise JournalError("cannot initialize command journal: " + str(error)) from error
+
+    def _open_read_only(self, path: Path, session_key: str) -> None:
+        if not isinstance(path, Path) or not path.is_absolute() or not path.is_file():
+            raise JournalError("cannot open command journal read-only: it must be an existing absolute local file")
+        if not isinstance(session_key, str) or not session_key.strip():
+            raise ValueError("session_key must be nonblank")
+        self._lock = threading.RLock()
+        self._connection = None
+        try:
+            self._connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=0,
+                                               isolation_level=None, check_same_thread=False)  # fmt: skip
+            connection = self._connection
+            connection.execute("PRAGMA busy_timeout=0")
+            self.settings = {"read_only": True}
+            if connection.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA_VERSION:
+                raise JournalError("a read-only open needs a current command journal")
+            if connection.execute("SELECT session_key FROM metadata").fetchall() != [(session_key,)]:
+                raise JournalError("journal belongs to another configured session")
+            self._entries()
+        except (sqlite3.Error, JournalError, ValueError) as error:
+            self.close()
+            raise JournalError("cannot open command journal read-only: " + str(error)) from error
 
     # --- schema --------------------------------------------------------------------------------------------------
 
@@ -466,6 +493,14 @@ class SqliteCommandJournal:
         root = self._root(rows, row.command_id if row.kind == "apply" else row.root)
         request = root.request["request"]
         return request["resolution"]["state"]["binding"], request["profile"]
+
+    def apply_roots(self) -> tuple[str, ...]:
+        """Every reserved apply that was not refused (it may have written), in reservation order (ADR-040)."""
+        with self._lock:
+            rows = self._rows()
+        roots = [row for row in rows if row.kind == "apply" and row.reserved_seq is not None
+                 and not isinstance(row.outcome, DawWriteRefused)]  # fmt: skip
+        return tuple(row.command_id for row in sorted(roots, key=lambda row: row.reserved_seq))
 
     def latest_source(self):
         """(source ID or None, ledger watermark): the latest state-establishing entry (ADR-039 run-start check).

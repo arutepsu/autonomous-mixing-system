@@ -81,6 +81,8 @@ class DawRecoveryController(Protocol):
 
     def latest_anchor(self) -> PortResult[DawLatestState]: ...
 
+    def apply_roots(self) -> PortResult[tuple[str, ...]]: ...  # Increment 6 (ADR-040): orphan discovery, read-only
+
 
 def validate_daw_restore_outcome(request: DawRestoreRequest, outcome: DawRestoreOutcome) -> None:
     """Structural consistency of a restore outcome with its request (raises ``ValueError``)."""

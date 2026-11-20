@@ -1670,3 +1670,292 @@ Nothing is ever reported found, committed or appended from an unverified connect
   | CLI help | runs |
   | `uv lock --check` | clean |
   | `git diff --check` | clean |
+
+## Increment 6 plan: the operator CLI for the DAW path (proposed 2026-11-20; not started)
+
+**Status:** for owner and Codex review. Nothing is implemented. The driver decisions are proposed in [ADR-040](../../decisions/0040-operator-cli-for-the-daw-path.md) (Proposed).
+
+**Goal.** Four operator commands over the reviewed DAW path, wired through validated configuration, the durable run store (ADR-039), the FL command journal and process-unique IDs:
+- `autonomous-mixing daw start`;
+- `daw continue`;
+- `daw status`;
+- an explicitly authorized `daw recover`.
+
+**Out of scope:**
+- saving, exporting and script installation, which stay manual;
+- live trials, which stay separately authorized;
+- new decision or diagnosis capabilities (see H1).
+
+### What exists (inspected 2026-11-20)
+
+- **The CLI** (`drivers/cli.py`, argparse) has one command, `analyze`. The `autonomous-mixing` entry point is registered in `pyproject.toml`.
+- **Reviewed adapters:**
+  - the FL controller (`FlStudioParameterController`: profile, `SqliteCommandJournal`, MIDI transport factory, timeout, clock, inspection-ID source) and its journal (single-owner, exclusive);
+  - `FileExportHandoff`, `FileAudioAnalyzer`, `FileStateIntegrityInspector`;
+  - `SqliteRunJournal` (ADR-039).
+- **Core entry points:** `run_daw`, `resume_daw`, `reopen_daw_run` (`classify_run`, `restart_facts`), `daw_start_check` and the recovery contracts (`gate_daw_restore`, `reconcile`, `resolve`, `recovery_lineage`, `latest_anchor`).
+- **Not existing, and decisive for this increment:**
+  - a production `DecisionMaker` (`adapters.decision_agent` is planned, ADR-005);
+  - a production `DiagnosisSource` (`core.diagnosis` is created only in its roadmap phase);
+  - a production `RunClock`;
+  - a production `IdentitySource`.
+
+  The coordinator cannot run a decision round without the first two.
+
+### H1. The decision and diagnosis gap (decision for review, listed first)
+
+**Recommended.** Increment 6 wires everything except the decision maker and the diagnosis source, which the composition root takes only from implemented adapters.
+- **Today:** none are implemented, so `daw start` and `daw continue` refuse up front, before opening any store or the FL journal (exit 2, "no decision maker is implemented"). `status` and `recover` need neither and work fully.
+- **Tests:** the command layer is driven with labelled doubles injected through the same composition function the CLI uses.
+- **Live trials** therefore stay blocked until `decision_agent` (and a diagnosis source) exist, which keeps ADR-006: no temporary features and no stand-ins.
+
+**Alternative.** An operator decision-file `DecisionMaker`, where the operator writes one validated proposal per round. It would be a manual comparison condition under `adapters.baselines` and needs its own requirement trace and ADR. It is not recommended without a requirement.
+
+### Configuration (validated; `drivers.daw_config`)
+
+**The file.** One versioned JSON file, `daw-session.json` with `"schema": 1`, parsed by the driver into core records. Unknown keys and wrong types are refused with the key path, and every record is built through its constructor, so its invariants apply. The file holds:
+- **Stores:** `run_store_dir`, holding one file per run (`<run_id>.sqlite`), and `fl_journal`, a path plus `session_key`.
+- **Transport:** the input and output MIDI port names, and the reply timeout.
+- **Profile:** `calibrated_profile(reference=...)` only. Any other profile is refused, as the controller already requires.
+- **The DAW session:**
+  - the binding (project title, insert, name, baseline gain and fader);
+  - the permission;
+  - the routing declaration;
+  - the export format, timeline and render spec;
+  - `export_root`, a path, with its key.
+- **The initial project:** the input root and its stem and mix files. The driver reads their metadata and checksums through `adapters.audio_io` integrity reading, and builds the `AudioArtifact`s and `ProjectState`.
+- **The run configuration:** analysis spec, criteria, measurements, budget limits and the retry policy.
+
+**Path rules:**
+- paths are resolved and must lie on local storage;
+- network and synced folders are unsupported (documented, not detected; ADR-039);
+- the export root and run-store directory must differ from the input root.
+
+**SR-10 (hidden-reference boundary).**
+- **The rule:** the configuration schema has no field for evaluation data.
+- **How it is checked:** the driver imports nothing from `evaluation`, and an architecture test pins that. A key naming a hidden-reference concept, such as `reference`, `injection` or `ground_truth` outside the schema, is refused as unknown.
+
+### Runtime components and process-unique IDs (`drivers.daw_runtime`)
+
+**Identity.**
+- **Run tokens:** `UuidIdentitySource` gives `uuid4().hex`, 32 characters, so every recovery ID fits (ADR-038 needs at most 56) and tokens never repeat across processes.
+- **FL inspection IDs:** `inspect_<uuid4 hex>`, unique per call. This closes the Increment 5 driver obligation.
+
+**Clock.** `SystemClock` reads `time.monotonic()`, UTC now and a cancellation flag, which `SIGINT` (Ctrl+C) sets. Cancellation stops the run at its next gate and blocks recovery (fail closed, D3); the report says so.
+
+**Composition.** `compose(config, *, decision_maker, diagnosis_source, transport_factory=None)` builds:
+- the analyzer, inspector and handoff over the configured roots;
+- the FL controller over the configured journal, with the Windows MIDI transport by default;
+- the run store.
+
+The CLI passes only implemented adapters (H1). Tests pass labelled doubles and a fake-host transport factory through the same function, so the composition under test is the composition the CLI uses. No test switch exists in configuration or `main`.
+
+### The commands
+
+**Exit codes, shared by all four:**
+
+| Code | Meaning |
+| --- | --- |
+| 0 | finished, outcome `SUCCEEDED` or `ABSTAINED` |
+| 1 | finished with any other outcome |
+| 2 | usage or configuration error, nothing opened |
+| 3 | suspended, awaiting the operator's export |
+| 4 | refused (busy, duplicate, interrupted, unexplained DAW state), nothing done |
+| 5 | an interrupted state awaiting `daw recover` |
+
+**Output:** human-readable by default, or `--json` (the canonical codec's text for records).
+
+1. **`daw start --config C [--run-id ID] [--accept-current-fader N]`**
+   - **Store:** creates the run store, refused if it exists (exit 4) or is busy.
+   - **Start check:** `run_daw` performs the run-start check.
+   - **Initial confirmed fader:**
+     - if the FL journal has a latest anchor, its reading is the initial state's confirmed fader;
+     - on an empty FL journal, one fresh inspection is shown, and the start proceeds only when `--accept-current-fader` repeats that normalized value exactly (H9).
+
+     The latter is an explicit declaration of the starting state, never adoption of unexplained history; `daw_start_check` refuses unexplained history regardless.
+   - **On suspension (exit 3):** prints the operator's manual export instructions (workspace directory, required output file names, the timeline and format, and the export ID) and that saving and exporting stay manual.
+2. **`daw continue --config C --run-id ID --attestation TEXT [--operator NAME]`**
+   - **Busy store:** gives `CONTINUATION_IN_PROGRESS` (exit 4), and nothing is done.
+   - **Classification:** `reopen_daw_run`. A `RunInterrupted` prints its code and evidence (exit 5, or exit 4 for `FINISHED`), and nothing else happens.
+   - **The manifest (H3)** is built from the awaiting request's declared output file names only: each file's SHA-256 and the operator's attestation and identity. The verified import still checks everything (stray files, encoding, coverage, continuity).
+   - **Then** `resume_daw`, whose Increment 3 admission keeps refusing duplicates, conflicting manifests and request substitutions.
+   - **Budgets, elapsed segments and acceptance authority** come from the store (ADR-039).
+3. **`daw status --config C [--run-id ID] [--json] [--record-classification]`**: read-only by default (H4).
+   - **Reading the stores:** both are opened read-only (new `open_read_only` on `SqliteRunJournal` and `SqliteCommandJournal`: SQLite `mode=ro`, no lock taken, nothing written). A store held by another process shows as "in use".
+   - **No DAW contact:** no MIDI transport is created and nothing is sent.
+   - **It shows:**
+     - the classification (ADR-039 precedence), with evidence;
+     - the authoritative (committed) reference;
+     - the awaiting export, if suspended;
+     - usage against the budget limits;
+     - the FL journal's unresolved commands, blocked conversions and latest anchor;
+     - the durability label.
+   - **`--record-classification`** additionally records the `RunInterrupted` event, and requires ownership.
+   - **Without `--run-id`,** it lists the run stores in the directory with one classification line each.
+4. **`daw recover --config C --run-id ID`**, two phases, one operation per invocation (H5).
+   - **Phase 1, read-only (the default).** It shows:
+     - the interrupted state (code, evidence);
+     - the FL facts (lineage, unresolved and blocked);
+     - the **proposed target** (the journaled restore target of the root, the saved target of the authoritative state, and whether they are exactly equal, ADR-038 D1);
+     - the **permitted operations** from a pure rule, `operator_recovery_options(classification, facts)`;
+     - a **state fingerprint** (SHA-256 of the canonical encoding of everything shown).
+
+     Nothing is written or sent, and no transport is opened.
+   - **Phase 2, authorized.** `--authorize FINGERPRINT --operation OP --operator NAME`:
+     1. it takes ownership and re-reads the state;
+     2. it requires the fingerprint to match, or refuses with "state changed" (exit 4);
+     3. it records an `OperatorRecoveryAuthorization` (operator, fingerprint, operation, UTC) in the run trace;
+     4. it performs exactly that operation through the existing contracts.
+
+     The permitted operations:
+
+     | Operation | What it does |
+     | --- | --- |
+     | `reconcile` | One fresh read of an unresolved command; clears nothing. |
+     | `restore` | One exact restoration to the journaled target, through `gate_daw_restore` with `own_lineage_only=True`, a new deterministic operator recovery ID and a recorded `RECOVERY_OPERATION` charge (H6). |
+     | `resolve` | Only the kind the latest evidence supports; the FL journal enforces it. |
+     | `inspect-integrity` | The retained-audio integrity inspection of the authoritative state. |
+     | `close` | Records a `TerminalSnapshot` with authoritative = committed head and a final state established only by recorded evidence (H7). It never restores. |
+   - **Never offered:** adopting the current fader, or any unexplained state, as a run's confirmed state; restoring anything automatically; clearing a conversion block; resubmitting an acceptance.
+   - **Orphans:** `daw recover --orphans` applies the same two phases to FL commands that no run explains (G14). It offers `reconcile`, `restore` and `resolve` against the FL journal alone, with the operator identity as the authorization's `authorized_by`.
+
+### Record and adapter changes (each test-pinned)
+
+- **Driver modules:** `drivers.daw_config`, `drivers.daw_runtime` and `drivers.daw_commands`, plus the `daw` subcommands in `drivers.cli`. Driver-local data stays in the drivers.
+- **New core records:**
+  - `OperatorRecoveryAuthorization` and `OperatorRecoveryOption`, in `core.records.run_restart`;
+  - the pure rule `operator_recovery_options`, in `core.admission`;
+  - a trace payload for the authorization.
+- **New adapter methods:**
+  - `open_read_only` on both SQLite stores, which takes no lock and writes nothing;
+  - `UuidIdentitySource`, `SystemClock` and a Windows MIDI transport factory, in the drivers.
+- **Unchanged:** the core loop, admission and recovery rules, export anchors, and the offline `analyze` command.
+
+### Tests (written first; simulated FL Studio and temporary files only)
+
+**Through `main` (argparse and real process exit codes; no transport needed):**
+- registration and `--help` of each subcommand;
+- configuration validation: unknown keys, wrong types, a non-calibrated profile, overlapping roots, a missing file, an evaluation-like key;
+- `start` and `continue` refusing without an implemented decision maker, before opening anything (H1);
+- `status` and `recover` phase 1 over stores produced by the Increment 5 scenarios:
+  - they are byte-identical before and after (file hashes), and no transport is created;
+  - "in use" is shown while another process holds a store.
+
+**Through the composition function, with the fake-host transport and labelled doubles:**
+- `start` to suspension, with the printed export instructions;
+- `continue` to acceptance;
+- duplicate `continue` (exit 4), a busy store (exit 4) and an interrupted run (exit 5);
+- `--accept-current-fader` refusing a mismatched value;
+- budgets and elapsed time continuing across a restart;
+- **`recover`:**
+  - phase 1 shows the target and options;
+  - phase 2 with a stale fingerprint is refused;
+  - each permitted operation performs exactly one recorded effect;
+  - `close` never restores;
+  - an operation that is not permitted is refused;
+  - `--orphans` over an FL journal with an orphaned confirmed write offers restore, and adopts nothing.
+
+**Process-unique IDs:** two processes starting runs produce distinct tokens and FL inspection IDs (subprocess). A restarted `continue` never collides with journaled IDs.
+
+**Architecture:**
+- the drivers import no `evaluation`;
+- only drivers import adapters to compose them;
+- the inventories cover the new modules.
+
+**Mutation probes:**
+- `status` taking ownership or writing;
+- phase 2 skipping the fingerprint check;
+- `recover` performing more than one operation;
+- `close` restoring;
+- the manifest including undeclared files;
+- `--accept-current-fader` within tolerance;
+- the composition root accepting a test double from configuration.
+
+### Decisions for review
+
+- **H1. Decision and diagnosis.**
+  - **Recommended:** wire only implemented adapters. `start` and `continue` refuse in production until `decision_agent` exists; tests use the composition function.
+  - **Alternative:** an operator decision-file baseline under its own requirement and ADR.
+- **H2. Configuration format.**
+  - **Recommended:** an explicit JSON schema v1 parsed into records.
+  - **Alternative:** codec-tagged records. They are exact but hard to write by hand.
+- **H3. Manifest.**
+  - **Recommended:** built from the declared output names, with a required attestation flag.
+  - **Alternative:** an operator-written manifest file.
+- **H4. Status ownership.**
+  - **Recommended:** a read-only open that takes no lock (new adapter methods).
+  - **Alternative:** status takes ownership, which conflicts with "read-only by default".
+- **H5. Recover workflow.**
+  - **Recommended:** two phases, a state fingerprint, one operation per invocation, and each authorization recorded in the trace.
+- **H6. Charges for operator restorations.**
+  - **Recommended:** charged and recorded as `RECOVERY_OPERATION`, but not limited by the run's exhausted budget, because the operator's explicit authorization is the limit.
+  - **Alternative:** a separate operator recovery budget in configuration.
+- **H7. `close`.**
+  - **Recommended:** it records facts only. Final state `UNKNOWN` unless recorded evidence establishes a VERIFIED rollback or the committed state's integrity. The reason comes from the interruption code: `DAW_COMMAND_UNRESOLVED`, `REQUIRED_RECOVERY_NOT_PERFORMED` or `ACCEPTANCE_COMMIT_UNCERTAIN`.
+- **H8. Exit codes:** as in the table above.
+- **H9. First-session confirmed fader.**
+  - **Recommended:** on an empty FL journal, the operator repeats the inspected value exactly, and it becomes the declared initial state.
+  - **Alternative:** require a separate calibration-time anchor.
+
+### Open questions
+
+- **Q1:** whether `daw recover --orphans` needs its own operator log beyond the FL journal's authorization records.
+- **Q2:** whether `status` should also verify the retained audio's integrity, which is read-only but costs file reads.
+- **Q3:** Windows-only MIDI. Other platforms are out of scope, as for the existing transport.
+
+## Increment 6 outcome (2026-11-20; uncommitted for review)
+
+**Operator tooling ready; autonomous runs unavailable.** `daw status` and the operator-authorized `daw recover` work. `daw start` and `daw continue` refuse before opening anything, because no `DecisionMaker` or `DiagnosisSource` implementation exists yet. No live FL Studio trial has been run.
+
+**Implemented** per the owner's choice of H1, recorded in [ADR-040](../../decisions/0040-operator-cli-for-the-daw-path.md) (Proposed, with implementation notes and the deviations from this plan):
+- **Runtime:** the production clock (Ctrl+C cancels) and process-unique UUID identities and FL inspection IDs;
+- **Configuration:** a validated JSON schema 1 for operator tooling;
+- **Read-only store opens;**
+- **`daw status`,** read-only;
+- **`daw recover`:**
+  - phase 1 is read-only and shows the state, the proposed and saved targets with exact equality, the permitted options and a fingerprint;
+  - phase 2 performs exactly one fingerprint-bound option, with the authorization recorded in the trace;
+  - `--orphans` covers FL commands no run explains.
+
+**Not built, because the run commands are unavailable:** the run-configuration schema, the manifest built by `continue`, and `start --accept-current-fader`. Saving, exporting and script installation stay manual, and live trials stay separately authorized.
+
+**Evidence:**
+- **Tests:** 15 CLI tests.
+- **Mutation probes:** 10 new, all caught; Increment 5's 15 still caught.
+- **Locked checks:**
+
+  | Check | Result |
+  | --- | --- |
+  | Focused suites, warnings as errors | 2,070 passed |
+  | Full suite | 6,351 passed, 4 skipped |
+  | `ruff check` | clean |
+  | `ruff format --check` | clean |
+  | CLI help, including `daw --help` | runs |
+  | `uv lock --check` | clean |
+  | `git diff --check` | clean |
+
+### Increment 6 review fixes (2026-11-20)
+
+1. **Operator recovery could undo an accepted edit.** Codex reproduced a crash after an acceptance commit: the authority was at sequence 1, yet recovery offered and executed a restoration from 0.691918 to 0.76.
+   - **Fix:** `operator_recovery_options` excludes every execution that a committed acceptance holds from restoration, and `perform` refuses such a restoration again at execution.
+   - **Regression** (post-commit crash): no restoration is offered, and a forged restoration option is refused with no `restore_gain` dispatched and the accepted fader unchanged.
+2. **Confirmed and off-target orphans were invisible.** `orphan_facts` found roots only through unresolved commands.
+   - **Fix:** a new read-only port method, `apply_roots`, lists every journaled apply root that may have written. Every root that a run store in the directory records is explained, so it is never an orphan, accepted or not. If any run store cannot be read, orphan analysis is refused. Restoration is still offered only where the lineage is the latest.
+   - **Regressions:**
+     - a confirmed orphan and an off-target orphan, each shown with its journaled target and one restore option, read-only;
+     - a run's own accepted root is never shown;
+     - orphan analysis is refused while a run store is held.
+
+**Checks.**
+- **Mutation probes:** five new, all caught. The Increment 6 set is now 15 of 15.
+- **Locked checks:**
+
+  | Check | Result |
+  | --- | --- |
+  | Focused suites, warnings as errors | 2,083 passed |
+  | Full suite | 6,356 passed, 4 skipped |
+  | `ruff check` | clean |
+  | `ruff format --check` | clean |
+  | CLI help | runs |
+  | `uv lock --check` | clean |
+  | `git diff --check` | clean |

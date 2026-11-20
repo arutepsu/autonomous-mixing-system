@@ -829,3 +829,11 @@ class FlStudioParameterController:
                 return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
             validate_daw_latest_state(result)
             return result
+
+    def apply_roots(self) -> PortResult[tuple[str, ...]]:
+        """Every journaled apply that may have written, journal-only (ADR-040 orphan discovery); never sends."""
+        with self._lock:
+            try:
+                return Success(self.journal.apply_roots())
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
