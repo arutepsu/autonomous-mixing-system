@@ -20,7 +20,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from autonomous_mixing.adapters.fl_studio.serialization import load_grant, load_outcome, outcome_json
+from autonomous_mixing.adapters.fl_studio.serialization import (
+    load_apply_request,
+    load_grant,
+    load_outcome,
+    outcome_json,
+)
 from autonomous_mixing.core.records.budgets import BudgetOperation
 from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import (
@@ -33,8 +38,13 @@ from autonomous_mixing.core.records.daw_control import (
 from autonomous_mixing.core.records.daw_recovery import (
     DawCommandKind,
     DawControlState,
+    DawLedgerEntry,
+    DawLedgerKind,
+    DawLineageRestoration,
     DawRecoveryCharge,
+    DawRecoveryLineage,
     DawRestoreConfirmed,
+    DawRootStatus,
     DawTargetBasis,
     DawUnresolvedCommand,
 )
@@ -559,6 +569,49 @@ class SqliteCommandJournal:
 
     # --- recovery ----------------------------------------------------------------------------------------------------
 
+    def recovery_lineage(self, root_id: str) -> DawRecoveryLineage:
+        """Everything journaled about one root apply and after it, from one locked read pass (ADR-038).
+
+        Unlike ``state_anchor`` it describes the root whatever its outcome: confirmed, off target, uncertain or
+        pending. Refused (``JournalRefusal``): an unknown or unreserved root, and a refused root (nothing written).
+        It never changes the journal; export anchors keep their own, confirmed-only rule.
+        """
+        with self._lock:
+            rows, ledger = self._rows(), self._ledger()
+            root = self._root(rows, root_id)
+            if isinstance(root.outcome, DawWriteRefused):
+                raise JournalRefusal("no_target", "a refused apply wrote nothing: it has no recovery lineage")
+            status = {DawWriteConfirmed: DawRootStatus.CONFIRMED, DawWriteOffTarget: DawRootStatus.OFF_TARGET,
+                      DawWriteUncertain: DawRootStatus.UNCERTAIN, type(None): DawRootStatus.PENDING}[type(root.outcome)]  # fmt: skip
+            restorations = sorted((row for row in rows if row.kind == "restore" and row.root == root.command_id),
+                                  key=lambda row: row.attempt)  # fmt: skip
+            members = {root.command_id, *(row.command_id for row in restorations)}
+            kinds = {"RESERVED": DawLedgerKind.RESERVED, "RECONCILED": DawLedgerKind.RECONCILED,
+                     "RESOLVED": DawLedgerKind.RESOLVED}  # fmt: skip
+            findings, foreign = [], []
+            for seq, kind, entry_id, subject, _ in ledger:
+                if kind not in kinds:
+                    continue
+                entry = DawLedgerEntry(entry_id, kinds[kind], subject, seq)
+                if kind != "RESERVED" and subject in members:
+                    findings.append(entry)
+                elif kind != "RECONCILED" and seq > root.reserved_seq and subject not in members:
+                    foreign.append(entry)
+            reserved = max((seq for seq, kind, *_ in ledger if kind == "RESERVED"), default=0)
+            resolved = max((seq for seq, kind, *_ in ledger if kind == "RESOLVED"), default=0)
+            top = max((seq for seq, *_ in ledger), default=0)
+            blocked = frozenset(
+                row.conversion for row in rows if row.kind == "apply" and isinstance(row.outcome, DawWriteOffTarget)
+            )
+            return DawRecoveryLineage(
+                load_apply_request(root.request_json), status, root.outcome, root.reserved_seq,
+                self._recorded_start(root), root.conversion in blocked,
+                tuple(DawLineageRestoration(row.command_id, row.attempt, row.reserved_seq, row.outcome)
+                      for row in restorations),
+                tuple(findings), tuple(foreign), tuple(row.command_id for row in self._unresolved(rows, ledger)),
+                reserved, resolved, top,
+            )  # fmt: skip
+
     def _root(self, rows, root_id):
         row = next((row for row in rows if row.command_id == root_id), None)
         if row is None or row.kind != "apply" or row.reserved_seq is None:
@@ -583,7 +636,8 @@ class SqliteCommandJournal:
 
         Refused (``JournalRefusal``, nothing written, nothing charged): a used recovery or authorization ID; an
         unknown or refused root; any disagreement with the root's binding, profile, conversion or recomputed
-        target; an unresolved command of another lineage.
+        target; an unresolved command of another lineage; and, for an ``own_lineage_only`` request, any reservation
+        or resolution outside the root's lineage after the root (``foreign_history``, ADR-038).
         """
         data, _, _ = _identity(command_id, request_json, command_json, "restore")
         restore = data["restore"]
@@ -618,6 +672,18 @@ class SqliteCommandJournal:
                 raise JournalRefusal(
                     "unresolved_other", "commands of another lineage are unresolved: " + ", ".join(foreign)
                 )
+            if restore.get("own_lineage_only"):  # review fix 2026-11-20 (ADR-038): the lineage rule, atomically
+                members = {root.command_id} | {
+                    row.command_id for row in rows if row.kind == "restore" and row.root == root.command_id
+                }
+                later = [
+                    entry_id for seq, kind, entry_id, subject, _ in self._ledger()
+                    if kind in ("RESERVED", "RESOLVED") and seq > root.reserved_seq and subject not in members
+                ]  # fmt: skip
+                if later:
+                    raise JournalRefusal(
+                        "foreign_history", "entries outside this lineage follow its root: " + ", ".join(later)
+                    )
             attempt = 1 + sum(1 for row in rows if row.kind == "restore" and row.root == root.command_id)
             self._connection.execute(
                 "INSERT INTO commands (command_id,request_json,command_json,fingerprint,outcome_json,kind,"

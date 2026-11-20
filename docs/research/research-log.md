@@ -1887,3 +1887,61 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Mutation probes:** two new, both caught; all earlier sets still caught.
   - **Locked checks:** `uv run --locked pytest -q -W error` on the focused DAW, coordinator, loop, run-record and architecture suites, 1,876 passed. The full suite: 6,213 passed, 4 skipped. `ruff check .` and `ruff format --check src tests` clean, CLI help runs, `uv lock --check` and `git diff --check` clean.
 - No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-19 — Coordinator DAW path: Increment 4 plan proposed (Claude Code)
+- **Plan:** the Increment 4 recovery-routing plan is in the coordinator-integration plan, for review. Nothing is implemented.
+- **What it replaces:** the interim "recovery not attempted" stops, with one recovery routine.
+- **What it uses:** the existing journal-backed targets, recovery gate, recovery charges, reconciliation and resolution.
+- **Rollback rule:** VERIFIED rollback only with exact, bound and ordered fader evidence from a final coherent snapshot, plus retained-audio integrity.
+- **Continuation rule:** only a rejected candidate with a VERIFIED rollback continues; everything else terminates by an explicit precedence.
+- **Findings from inspection, recorded as conflicts or decisions (D1–D6):**
+  - the restore target is the journaled start, which may differ from the saved target within the start tolerance;
+  - a restoration that is not confirmed stays unresolved in the FL journal, which amends the earlier expectation for a refused restoration;
+  - a DAW write reserves one recovery slot, but a rollback needs two;
+  - cancellation and the elapsed limit block recovery;
+  - no record carries a rollback receipt before a candidate exists.
+- No code, no installation and no live calls.
+
+## 2026-11-19 — Coordinator DAW path: Increment 4 plan, revision 1 (Claude Code)
+- **Review gaps (Codex), each confirmed in the code, corrected in the plan in place:**
+  1. **An off-target root cannot be anchored.** `state_anchor` refuses it as `not_confirmed`. Replaced, for recovery, by a new journal-backed recovery-lineage query and a coherent recovery snapshot (R7). Export-anchor semantics are unchanged.
+  2. **Two recovery slots are not enough.** The authority query after an unknown commit is charged as a `RECOVERY_OPERATION`, so D2 now reserves three slots (query, restoration, integrity). A minimum-budget test is planned.
+  3. **The `EXACT_RESTORE` evidence used the historical restoration reading.** The final snapshot's fresh reading must now equal both that reading and the saved target exactly. A test with the fader moved after the restoration is planned.
+- **Owner decisions:**
+  - **Agreed:** D1, D3, D5 and the standalone rollback receipt.
+  - **Revised:** D2 and D6.
+  - **D4:** the reuse of render reasons is kept and explicitly documented.
+- No code, no installation and no live calls. Not yet approved.
+
+## 2026-11-19 — Coordinator DAW path, Increment 4: authorized recovery routing (Claude Code)
+- **Implemented** tests-first per the approved plan (revision 1, D1–D6), recorded in ADR-038 (Proposed).
+- **What changed:**
+  - **Interim stops replaced.** Off-target and uncertain writes, preparation failures, rejected imports and unaccepted candidates now go through authorized recovery.
+  - **Recovery lineage.** A new journal-backed recovery-lineage query and snapshot serve recovery, including off-target roots. Export anchors are unchanged.
+  - **Three recovery slots.** A DAW write reserves query, restoration and integrity. It is pinned at the minimum budget.
+  - **Fresh evidence.** VERIFIED rollback needs the final fresh reading to equal the saved target and the confirmed restoration's reading exactly, plus retained-audio integrity. A fader moved after the restoration is pinned.
+- **Findings recorded as deviations:**
+  - an off-target write with a lost restoration reply ends `DAW_CONVERSION_BLOCKED`, not `DAW_COMMAND_UNRESOLVED`, because the restoration is reconciled and resolved;
+  - `AMBIGUOUS` cannot be produced by an admissible write under the calibrated profile;
+  - replay charge reuse is not reachable in-process.
+- **Checks:**
+  - **Mutation probes:** 17 new, all caught; four earlier probes superseded.
+  - **Focused suites, warnings as errors:** 1,936 passed.
+  - **Full suite:** 6,273 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- No live calls and no installs. Left uncommitted for review.
+
+## 2026-11-20 — Coordinator DAW path, Increment 4: review fixes (Claude Code)
+- **Findings (Codex), each with regressions written first that failed before the fix:**
+  1. **Foreign history after the lineage check could still be overwritten.**
+     - **Fix:** the own-lineage rule is now enforced atomically when the FL journal reserves the restoration (`DawRestoreRequest.own_lineage_only`). The refusal writes and charges nothing.
+     - **Unchanged:** export anchors and ADR-032 behaviour without the flag.
+  2. **Resolving a restoration left a stale exception marker.**
+     - **Fix:** every validated resolution now settles the remaining facts and the marker before it is recorded.
+- **ADR-038** (Proposed) is revised in place.
+- **Checks:**
+  - **Mutation probes:** four new, all caught; earlier sets still caught.
+  - **Focused suites, warnings as errors:** 1,939 passed.
+  - **Full suite:** 6,276 passed, 4 skipped.
+  - **Remaining checks:** ruff, format, CLI, lock and diff checks clean.
+- No live calls and no installs. Left uncommitted for review.

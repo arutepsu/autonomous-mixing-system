@@ -57,17 +57,26 @@ from autonomous_mixing.core.records.daw_export import (
 )
 from autonomous_mixing.core.records.daw_recovery import (
     DawControlState,
+    DawLineageQuery,
     DawReconcileRequest,
     DawReconciliation,
+    DawRecoveryDecision,
+    DawRecoveryLineage,
+    DawRecoverySnapshot,
     DawResolutionRecorded,
     DawResolutionRefused,
     DawResolutionRequest,
     DawRestoreConfirmed,
     DawRestoreMismatch,
+    DawRestoreNoWrite,
+    DawRestorePermitted,
     DawRestoreRefused,
+    DawRestoreRejected,
     DawRestoreRequest,
+    DawRestoreTarget,
     DawRestoreUncertain,
 )
+from autonomous_mixing.core.records.daw_rollback import DawRollbackRecord
 from autonomous_mixing.core.records.decision import DecisionResponse, Situation
 from autonomous_mixing.core.records.decision_gate import (
     DeclineAction,
@@ -126,6 +135,7 @@ StageRequest = (
     | DawRestoreRequest
     | DawResolutionRequest
     | DawStateQuery
+    | DawLineageQuery
     | DawExportRequest
     | DawImportRequest
 )
@@ -140,7 +150,7 @@ _REQUEST_TYPES = {
     OperationKind.DAW_INSPECT: DawInspectRequest,
     OperationKind.DAW_APPLY: DawApplyRequest,
     OperationKind.DAW_RECOVERY: (DawReconcileRequest, DawRestoreRequest, DawResolutionRequest),
-    OperationKind.DAW_STATE: DawStateQuery,
+    OperationKind.DAW_STATE: (DawStateQuery, DawLineageQuery),  # lineage queries: Increment 4 (ADR-038)
     OperationKind.EXPORT_PREPARE: DawExportRequest,
     OperationKind.EXPORT_IMPORT: DawImportRequest,
 }
@@ -211,6 +221,13 @@ class DispatchIntent:
                 raise ValueError("DAW apply intent requires call, attempt and the request's execution IDs")
             if action.expected_revision != self.accepted.state.revision:
                 raise ValueError("DAW apply intent must act on exactly the accepted state")
+        elif self.operation is OperationKind.DAW_RECOVERY:  # Increment 4 (ADR-038): always one attempt's recovery
+            if self.call_id is None or self.attempt_id is None or self.execution_id is None:
+                raise ValueError("DAW recovery intent requires call, attempt and execution IDs")
+            if isinstance(self.request, DawRestoreRequest) and (
+                self.request.authorization.execution_id != self.execution_id
+            ):
+                raise ValueError("a restoration intent names its authorization's execution")
         elif self.operation in (OperationKind.EXPORT_PREPARE, OperationKind.EXPORT_IMPORT):
             export = self.request if isinstance(self.request, DawExportRequest) else self.request.awaiting.request
             if self.call_id is None or self.attempt_id is None or self.execution_id != export.execution_id:
@@ -272,6 +289,8 @@ OperationOutcome = (
     | DawResolutionRefused
     | DawStateAnchor
     | DawContinuitySnapshot
+    | DawRecoveryLineage
+    | DawRecoverySnapshot
     | DawExportAwaiting
     | DawExportPreparationFailure
     | DawFilesVerified
@@ -297,7 +316,13 @@ _RESPONSE_TYPES = {
         DawResolutionRecorded,
         DawResolutionRefused,
     ),
-    OperationKind.DAW_STATE: (DawStateAnchor, DawContinuitySnapshot, PortFailure),
+    OperationKind.DAW_STATE: (
+        DawStateAnchor,
+        DawContinuitySnapshot,
+        DawRecoveryLineage,
+        DawRecoverySnapshot,
+        PortFailure,
+    ),  # fmt: skip
     OperationKind.EXPORT_PREPARE: (DawExportAwaiting, DawExportPreparationFailure),
     OperationKind.EXPORT_IMPORT: (DawFilesVerified, DawImportRejected),
 }
@@ -391,6 +416,13 @@ RunTracePayload = (
     | DawImportVerified
     | DawImportRejected
     | DawContinuationFinished
+    # Increment 4 (ADR-038): the recovery decision, the journaled restore target and a receipt-less rollback
+    | DawRecoveryDecision
+    | DawRestoreTarget
+    | DawRestorePermitted
+    | DawRestoreNoWrite
+    | DawRestoreRejected
+    | DawRollbackRecord
 )
 
 
@@ -424,9 +456,15 @@ class RunTraceEvent:
             run_id = payload.run.run_id
             if payload.run.usage != self.usage:
                 raise ValueError("terminal event usage differs from the snapshot")
+        elif isinstance(payload, DawRollbackRecord):
+            run_id = payload.run_id
         elif isinstance(payload, DispatchIntent):
             if isinstance(payload.request, (Situation, AcceptanceQuery)):
                 run_id = payload.request.run_id
+            if isinstance(payload.request, DawRestoreRequest) and (
+                payload.request.authorization.budget_grant.usage_after_charge != self.usage
+            ):
+                raise ValueError("a restoration intent's usage is exactly its authorization's recovery charge")
         if run_id is not None and run_id != self.run_id:
             raise ValueError("trace payload belongs to a different run")
 

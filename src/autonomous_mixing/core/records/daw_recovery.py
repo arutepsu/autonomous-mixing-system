@@ -14,6 +14,7 @@ from enum import Enum
 from autonomous_mixing.core.records.budgets import BudgetGrant, BudgetOperation
 from autonomous_mixing.core.records.daw_binding import DawFaderReading, DawTrackBinding
 from autonomous_mixing.core.records.daw_control import (
+    DawApplyRequest,
     DawControlProfile,
     DawInspection,
     DawInspectRequest,
@@ -125,9 +126,13 @@ class DawRestoreRequest:
     binding: DawTrackBinding
     profile: DawControlProfile
     inspection: DawInspection
+    # Review fix 2026-11-20 (ADR-038): when True, the journal reserves the restoration only if no reservation or
+    # resolution outside the root's lineage follows the root, decided atomically inside the reservation transaction.
+    own_lineage_only: bool = False
 
     def __post_init__(self) -> None:
         _require_id(self.recovery_command_id, "DawRestoreRequest.recovery_command_id")
+        _require_bool(self.own_lineage_only, "DawRestoreRequest.own_lineage_only")
         require_instance(self.authorization, DawRecoveryAuthorization, "DawRestoreRequest.authorization")
         require_instance(self.binding, DawTrackBinding, "DawRestoreRequest.binding")
         require_instance(self.profile, DawControlProfile, "DawRestoreRequest.profile")
@@ -557,3 +562,283 @@ class DawResolutionRefused:
 
 
 DawResolutionOutcome = DawResolutionRecorded | DawResolutionRefused
+
+
+# --- recovery lineage, recovery snapshots and recovery decisions (coordinator Increment 4, ADR-038) ---------------
+
+
+class DawRootStatus(Enum):
+    """What the journal holds for a root apply that wrote, or may have written, the fader."""
+
+    CONFIRMED = "confirmed"
+    OFF_TARGET = "off_target"
+    UNCERTAIN = "uncertain"
+    PENDING = "pending"  # reserved, no outcome recorded
+
+
+_STATUS_OUTCOME = {
+    DawRootStatus.CONFIRMED: DawWriteConfirmed,
+    DawRootStatus.OFF_TARGET: DawWriteOffTarget,
+    DawRootStatus.UNCERTAIN: DawWriteUncertain,
+    DawRootStatus.PENDING: type(None),
+}
+
+
+class DawLedgerKind(Enum):
+    RESERVED = "reserved"
+    RECONCILED = "reconciled"
+    RESOLVED = "resolved"
+
+
+@dataclass(frozen=True)
+class DawLedgerEntry:
+    """One journal ledger entry as a recovery lineage reports it: its ID, kind, subject command and sequence."""
+
+    entry_id: str
+    kind: DawLedgerKind
+    subject_command_id: str
+    seq: int
+
+    def __post_init__(self) -> None:
+        _require_id(self.entry_id, "DawLedgerEntry.entry_id")
+        require_instance(self.kind, DawLedgerKind, "DawLedgerEntry.kind")
+        _require_id(self.subject_command_id, "DawLedgerEntry.subject_command_id")
+        _require_seq(self.seq, "DawLedgerEntry.seq")
+        if self.kind is DawLedgerKind.RESERVED and self.entry_id != self.subject_command_id:
+            raise ValueError("a reservation's entry is its own command")
+
+
+@dataclass(frozen=True)
+class DawLineageRestoration:
+    """One restoration of a lineage's root: its stable ID, attempt number, reservation and outcome (None: pending)."""
+
+    command_id: str
+    attempt: int
+    reserved_seq: int
+    outcome: "DawRestoreConfirmed | DawRestoreMismatch | DawRestoreRefused | DawRestoreUncertain | None"
+
+    def __post_init__(self) -> None:
+        _require_id(self.command_id, "DawLineageRestoration.command_id")
+        _require_seq(self.attempt, "DawLineageRestoration.attempt")
+        _require_seq(self.reserved_seq, "DawLineageRestoration.reserved_seq")
+        if self.outcome is not None:
+            require_instance(self.outcome, (DawRestoreConfirmed, DawRestoreMismatch, DawRestoreRefused,
+                                            DawRestoreUncertain), "DawLineageRestoration.outcome")  # fmt: skip
+            if self.outcome.recovery_command_id != self.command_id:
+                raise ValueError("a restoration outcome answers another command")
+
+
+def _require_entries(items: object, field: str) -> tuple:
+    if not isinstance(items, tuple) or not all(isinstance(item, DawLedgerEntry) for item in items):
+        raise ValueError(f"{field} must be a tuple of DawLedgerEntry")
+    seqs = [item.seq for item in items]
+    if any(a >= b for a, b in zip(seqs, seqs[1:])):
+        raise ValueError(f"{field} must be strictly ordered by seq")
+    return items
+
+
+@dataclass(frozen=True)
+class DawRecoveryLineage:
+    """Journal-backed facts about one root apply and everything recorded after it, read in one locked pass.
+
+    Unlike a ``DawStateAnchor`` it describes a root whatever its outcome (confirmed, off target, uncertain or
+    pending), so recovery can decide whether the run's own lineage is still the latest. ``apply`` is the exact
+    journaled request; ``recorded_start`` the restore target (outcome ``before`` when recorded, else the request's
+    inspected reading). ``findings`` are the lineage's reconciliations and resolutions; ``foreign_after`` every
+    reservation or resolution outside the lineage after the root; ``unresolved`` every unresolved command of the
+    journal, in ledger order. It proves nothing about the fader's current reading, which only a fresh inspection does.
+    """
+
+    apply: DawApplyRequest
+    status: DawRootStatus
+    outcome: DawWriteConfirmed | DawWriteOffTarget | DawWriteUncertain | None
+    root_seq: int
+    recorded_start: DawFaderReading
+    conversion_blocked: bool
+    restorations: tuple[DawLineageRestoration, ...]
+    findings: tuple[DawLedgerEntry, ...]
+    foreign_after: tuple[DawLedgerEntry, ...]
+    unresolved: tuple[str, ...]
+    reservation_watermark: int
+    resolution_watermark: int
+    ledger_watermark: int
+
+    def __post_init__(self) -> None:
+        require_instance(self.apply, DawApplyRequest, "DawRecoveryLineage.apply")
+        require_instance(self.status, DawRootStatus, "DawRecoveryLineage.status")
+        if not isinstance(self.outcome, _STATUS_OUTCOME[self.status]):
+            raise ValueError(f"a {self.status.name} root needs a matching apply outcome")
+        if self.outcome is not None and self.outcome.command_id != self.apply.command_id:
+            raise ValueError("the root outcome answers another command")
+        _require_seq(self.root_seq, "DawRecoveryLineage.root_seq")
+        require_instance(self.recorded_start, DawFaderReading, "DawRecoveryLineage.recorded_start")
+        before = getattr(self.outcome, "before", None)
+        if self.recorded_start != (before if before is not None else self.apply.inspection.fader):
+            raise ValueError("the recorded start follows the basis rule: outcome before, else the request inspection")
+        _require_bool(self.conversion_blocked, "DawRecoveryLineage.conversion_blocked")
+        if self.status is DawRootStatus.OFF_TARGET and not self.conversion_blocked:
+            raise ValueError("an off-target root blocks its conversion")
+        if not isinstance(self.restorations, tuple) or not all(
+            isinstance(item, DawLineageRestoration) for item in self.restorations
+        ):
+            raise ValueError("DawRecoveryLineage.restorations must be a tuple of DawLineageRestoration")
+        if [item.attempt for item in self.restorations] != list(range(1, len(self.restorations) + 1)):
+            raise ValueError("a lineage's restorations are its attempts 1..n in order")
+        seqs = [self.root_seq, *(item.reserved_seq for item in self.restorations)]
+        if any(a >= b for a, b in zip(seqs, seqs[1:])):
+            raise ValueError("restorations follow their root in ledger order")
+        members = {self.root_command_id, *(item.command_id for item in self.restorations)}
+        for item in _require_entries(self.findings, "DawRecoveryLineage.findings"):
+            if (
+                item.kind is DawLedgerKind.RESERVED
+                or item.subject_command_id not in members
+                or item.seq <= self.root_seq
+            ):
+                raise ValueError("lineage findings are reconciliations or resolutions of its members after the root")
+        for item in _require_entries(self.foreign_after, "DawRecoveryLineage.foreign_after"):
+            if item.kind is DawLedgerKind.RECONCILED or item.seq <= self.root_seq:
+                raise ValueError("foreign entries are reservations or resolutions after the root")
+            if item.subject_command_id in members or item.entry_id in members:
+                raise ValueError("a foreign entry is outside the lineage")
+        if not isinstance(self.unresolved, tuple) or len(set(self.unresolved)) != len(self.unresolved):
+            raise ValueError("DawRecoveryLineage.unresolved must be a tuple of distinct command IDs")
+        for command_id in self.unresolved:
+            _require_id(command_id, "DawRecoveryLineage.unresolved")
+        resolved_root = any(item.kind is DawLedgerKind.RESOLVED and item.subject_command_id == self.root_command_id
+                            for item in self.findings)  # fmt: skip
+        open_root = self.status in (DawRootStatus.UNCERTAIN, DawRootStatus.PENDING) and not resolved_root
+        if open_root != (self.root_command_id in self.unresolved):
+            raise ValueError("the root is unresolved exactly while it is uncertain or pending without a resolution")
+        for name in ("reservation_watermark", "resolution_watermark", "ledger_watermark"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"DawRecoveryLineage.{name} must be a non-negative built-in int")
+        reservations = [*seqs, *(i.seq for i in self.foreign_after if i.kind is DawLedgerKind.RESERVED)]
+        resolutions = [i.seq for i in (*self.findings, *self.foreign_after) if i.kind is DawLedgerKind.RESOLVED]
+        if self.reservation_watermark < max(reservations) or self.resolution_watermark < max(resolutions, default=0):
+            raise ValueError("the watermarks cover every reported reservation and resolution")
+        every = [*reservations, *(i.seq for i in self.findings), *(i.seq for i in self.foreign_after)]
+        if self.ledger_watermark < max(every) or self.ledger_watermark < max(
+            self.reservation_watermark, self.resolution_watermark
+        ):
+            raise ValueError("the ledger watermark covers every reported entry")  # fmt: skip
+
+    @property
+    def root_command_id(self) -> str:
+        return self.apply.command_id
+
+    @property
+    def binding(self) -> DawTrackBinding:
+        return self.apply.resolution.state.binding
+
+    @property
+    def profile(self) -> DawControlProfile:
+        return self.apply.profile
+
+    @property
+    def members(self) -> frozenset[str]:
+        return frozenset({self.root_command_id, *(item.command_id for item in self.restorations)})
+
+    def own_latest(self) -> bool:
+        """No foreign reservation or resolution after the root, and every unresolved command is this lineage's."""
+        return not self.foreign_after and all(command_id in self.members for command_id in self.unresolved)
+
+    def restoration(self, command_id: str) -> DawLineageRestoration | None:
+        return next((item for item in self.restorations if item.command_id == command_id), None)
+
+
+@dataclass(frozen=True)
+class DawRecoverySnapshot:
+    """One coherent capture for recovery: the lineage, one fresh inspection of its fader and the control state.
+
+    Port obligation (``DawRecoveryController.recovery_snapshot``): the adapter holds its lock across the capture and
+    reads the lineage and control state before and after the inspection, returning a snapshot only when both reads
+    agree. The record checks that the inspection answers the lineage's own binding and profile and that the lineage
+    and the control state report the same unresolved commands and block.
+    """
+
+    lineage: DawRecoveryLineage
+    inspection: DawInspection
+    control_state: DawControlState
+
+    def __post_init__(self) -> None:
+        require_instance(self.lineage, DawRecoveryLineage, "DawRecoverySnapshot.lineage")
+        require_instance(self.inspection, DawInspection, "DawRecoverySnapshot.inspection")
+        require_instance(self.control_state, DawControlState, "DawRecoverySnapshot.control_state")
+        lineage = self.lineage
+        if self.inspection.request != DawInspectRequest(lineage.binding, lineage.profile):
+            raise ValueError("DawRecoverySnapshot inspection answers another binding or profile than its lineage")
+        if tuple(item.command_id for item in self.control_state.unresolved) != lineage.unresolved:
+            raise ValueError("DawRecoverySnapshot lineage and control state report different unresolved commands")
+        if (lineage.profile.conversion in self.control_state.blocked_conversions) != lineage.conversion_blocked:
+            raise ValueError("DawRecoverySnapshot lineage and control state disagree about the conversion block")
+
+
+@dataclass(frozen=True)
+class DawLineageQuery:
+    """A journal-only recovery-lineage query (``fresh_inspection=False``) or a coherent recovery snapshot (True)."""
+
+    root_command_id: str
+    fresh_inspection: bool
+
+    def __post_init__(self) -> None:
+        _require_id(self.root_command_id, "DawLineageQuery.root_command_id")
+        _require_bool(self.fresh_inspection, "DawLineageQuery.fresh_inspection")
+
+
+class DawRecoveryEntry(Enum):
+    """How a DAW attempt reaches recovery: what its root apply is known to have done."""
+
+    CONFIRMED_WRITE = "confirmed_write"
+    OFF_TARGET = "off_target"
+    UNCERTAIN_WRITE = "uncertain_write"
+
+
+class DawRecoveryPlan(Enum):
+    RESTORE = "restore"  # a known write: one exact restoration
+    RESOLVE_THEN_RESTORE = "resolve_then_restore"  # at the recorded start: resolve, then restore only if not exact
+    RESTORE_THEN_RESOLVE = "restore_then_resolve"  # possibly moved: restore, then resolve citing the restoration
+    NONE = "none"  # the reading is not of the bound insert: nothing may be restored or resolved
+
+
+_PLAN_FOR_FINDING = {
+    DawReconcileFinding.AT_RECORDED_START: DawRecoveryPlan.RESOLVE_THEN_RESTORE,
+    DawReconcileFinding.AT_COMMANDED: DawRecoveryPlan.RESTORE_THEN_RESOLVE,
+    DawReconcileFinding.NEITHER: DawRecoveryPlan.RESTORE_THEN_RESOLVE,
+    DawReconcileFinding.AMBIGUOUS: DawRecoveryPlan.RESTORE_THEN_RESOLVE,
+    DawReconcileFinding.IDENTITY_UNVERIFIED: DawRecoveryPlan.NONE,
+}
+
+
+@dataclass(frozen=True)
+class DawRecoveryDecision:
+    """The recorded result of ``daw_recovery_decision``: which recovery steps the evidence permits (G15).
+
+    A known write (confirmed or off target) is restored without a reconciliation. An uncertain write is decided
+    by exactly one reconciliation of its root, through the fixed finding-to-plan mapping. A decision is permission
+    to try; the restore gate and the journal still decide each step.
+    """
+
+    entry: DawRecoveryEntry
+    root_command_id: str
+    plan: DawRecoveryPlan
+    reconciliation_id: str | None
+    finding: DawReconcileFinding | None
+
+    def __post_init__(self) -> None:
+        require_instance(self.entry, DawRecoveryEntry, "DawRecoveryDecision.entry")
+        _require_id(self.root_command_id, "DawRecoveryDecision.root_command_id")
+        require_instance(self.plan, DawRecoveryPlan, "DawRecoveryDecision.plan")
+        if self.entry is DawRecoveryEntry.UNCERTAIN_WRITE:
+            _require_id(self.reconciliation_id, "DawRecoveryDecision.reconciliation_id")
+            require_instance(self.finding, DawReconcileFinding, "DawRecoveryDecision.finding")
+            if self.plan is not _PLAN_FOR_FINDING[self.finding]:
+                raise ValueError(f"a {self.finding.name} finding permits only {_PLAN_FOR_FINDING[self.finding].name}")
+        elif self.reconciliation_id is not None or self.finding is not None or self.plan is not DawRecoveryPlan.RESTORE:
+            raise ValueError("a known write is restored without a reconciliation")
+
+
+def daw_recovery_plan_for(finding: DawReconcileFinding) -> DawRecoveryPlan:
+    """The fixed mapping from a root's reconciliation finding to the recovery steps it permits."""
+    require_instance(finding, DawReconcileFinding, "finding")
+    return _PLAN_FOR_FINDING[finding]

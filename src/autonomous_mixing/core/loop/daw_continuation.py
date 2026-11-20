@@ -25,15 +25,16 @@ in the FL journal, and the final state is UNKNOWN.
 
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 from autonomous_mixing.core.admission.daw_export import assess_daw_import
 from autonomous_mixing.core.loop.acceptance_flow import finish_acceptance
+from autonomous_mixing.core.loop.daw_recovery import recover_daw
 from autonomous_mixing.core.loop.daw_transitions import (
     daw_execution_receipt,
     derive_daw_candidate_state,
     validate_daw_acceptance_event,
 )
-from autonomous_mixing.core.loop.feedback import add_feedback
 from autonomous_mixing.core.loop.observation import analysis_bindings, analyze, evidence_for, inspect
 from autonomous_mixing.core.loop.runtime import (
     _invalid,
@@ -53,6 +54,7 @@ from autonomous_mixing.core.ports.acceptance import (
 )
 from autonomous_mixing.core.ports.analysis import AudioAnalyzer
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
+from autonomous_mixing.core.ports.daw import DawParameterController
 from autonomous_mixing.core.ports.daw_export import DawExportHandoff, validate_daw_files_verified
 from autonomous_mixing.core.ports.daw_recovery import DawRecoveryController, validate_daw_continuity_snapshot
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
@@ -68,7 +70,6 @@ from autonomous_mixing.core.records.acceptance import (
     AcceptanceQuery,
     AcceptedReference,
 )
-from autonomous_mixing.core.records.actions import ExecutionStatus, RollbackReceipt, RollbackScope, RollbackStatus
 from autonomous_mixing.core.records.artifacts import ArtifactKind
 from autonomous_mixing.core.records.budgets import BudgetOperation
 from autonomous_mixing.core.records.coordinator_progress import (
@@ -92,11 +93,11 @@ from autonomous_mixing.core.records.daw_export import (
     DawImportRequest,
     DawImportVerified,
 )
-from autonomous_mixing.core.records.feedback import ActionFeedback, ActionFeedbackDisposition, FeedbackStage
+from autonomous_mixing.core.records.daw_recovery import DawRecoveryEntry
+from autonomous_mixing.core.records.feedback import FeedbackStage
 from autonomous_mixing.core.records.identifiers import AcceptanceId, CheckpointId, VerificationResultId
 from autonomous_mixing.core.records.integrity import ArtifactRootBinding, IntegrityStatus
 from autonomous_mixing.core.records.results import PortFailure, Success
-from autonomous_mixing.core.records.run import AttemptDisposition, CorrectionAttempt
 from autonomous_mixing.core.records.run_trace import OperationKind, TerminalSnapshot
 from autonomous_mixing.core.records.termination import TerminationReason
 from autonomous_mixing.core.records.verification import AssessmentMode
@@ -122,9 +123,13 @@ def continue_daw(
     journal: RunJournal,
     recovery_controller: DawRecoveryController,
     export_handoff: DawExportHandoff,
+    daw_controller: DawParameterController,
     on_progress: Callable[[RuntimeProgress], None],
 ) -> tuple[RuntimeProgress, Stop | None]:
-    """None: the candidate was accepted and another decision round follows. A stop ends the run."""
+    """None: the candidate was accepted, or rejected and rolled back VERIFIED, and another decision round follows.
+
+    A stop ends the run. Every failure after the confirmed write goes through ``recover_daw`` (ADR-038).
+    """
     ctx = PreparedCorrection(suspended.call_id, suspended.before, suspended.decision, suspended.attempt_id,
                              suspended.plan)  # fmt: skip
     awaiting, source = suspended.awaiting, suspended.awaiting.request.anchor.source_id
@@ -132,14 +137,14 @@ def continue_daw(
     rec = dict(identities=identities, journal=journal, on_progress=on_progress)
     ids = dict(call=ctx.call_id, attempt=ctx.attempt_id, execution=ctx.execution_id, **env)
 
+    recover = partial(recover_daw, expected=suspended.accepted, apply=suspended.apply, clock=clock,
+                      identities=identities, integrity_inspector=integrity_inspector, journal=journal,
+                      daw_controller=daw_controller, recovery_controller=recovery_controller,
+                      on_progress=on_progress)  # fmt: skip
+
     def ended(progress, reason, explanation):
-        """Before any receipt: no candidate exists; possibly away from the selected state, nothing claimed."""
-        outcome = ActionFeedback(ctx.action, ctx.attempt_id, ctx.execution_id, ActionFeedbackDisposition.UNRESOLVED,
-                                 FeedbackStage.RENDER, ExecutionStatus.UNCERTAIN, None, None, reason.value,
-                                 f"{explanation}; {_NOT_ATTEMPTED}", ())  # fmt: skip
-        progress, _ = add_feedback(progress, ctx.call_id, ctx.before, outcome, decision_id=ctx.decision.decision_id,
-                                   **rec)  # fmt: skip
-        return (progress, (reason, f"{explanation}; {_NOT_ATTEMPTED}"))
+        """Before any receipt: no candidate exists; recover the confirmed write (standalone rollback record)."""
+        return recover(progress, ctx, DawRecoveryEntry.CONFIRMED_WRITE, (reason, explanation))
 
     def snapshot(progress, when):
         query = DawStateQuery(source, True)
@@ -167,7 +172,7 @@ def continue_daw(
     progress, (intent_id, _, stop, _) = gate(progress, OperationKind.EXPORT_IMPORT, lambda c: import_request, None,
                                              **ids)  # fmt: skip
     if stop:
-        return ended(progress, _RECOVERY, f"the export import was not dispatched ({stop[0].value}: {stop[1]})")
+        return ended(progress, stop[0], f"the export import was not dispatched ({stop[1]})")
     files = export_handoff.import_files(import_request)
     try:
         validate_daw_files_verified(import_request, files)
@@ -178,7 +183,7 @@ def continue_daw(
     if files is None:
         return ended(progress, TerminationReason.EXPORT_IMPORT_REJECTED, "the export import response was invalid")
     if stop:
-        return ended(progress, _RECOVERY, f"the export import could not be recorded ({stop[0].value})")
+        return ended(progress, stop[0], "the export import could not be recorded")
     progress, after_import, problem = snapshot(progress, "after-import")
     if after_import is None:
         return ended(progress, TerminationReason.DAW_CONTINUITY_FAILED, problem)
@@ -191,100 +196,95 @@ def continue_daw(
             progress, reason, f"the export import was rejected ({assessed.code.value}: {assessed.explanation})"
         )
     if stop:
-        return ended(progress, _RECOVERY, f"the import assessment could not be recorded ({stop[0].value})")
+        return ended(progress, stop[0], "the import assessment could not be recorded")
     return _assess_candidate(progress, ctx, suspended, assessed, analyzer=analyzer,
-                             integrity_inspector=integrity_inspector, **env)  # fmt: skip
+                             integrity_inspector=integrity_inspector, recover=recover, **env)  # fmt: skip
 
 
 def _assess_candidate(progress, ctx, suspended, verified: DawImportVerified, *, analyzer, integrity_inspector,
-                      clock, identities, journal, on_progress):  # fmt: skip
-    """The DAW receipt and candidate, one analysis, the ATTEMPT verification and its route (no offline recovery)."""
+                      recover, clock, identities, journal, on_progress):  # fmt: skip
+    """The DAW receipt and candidate, one analysis, the ATTEMPT verification and its route (DAW recovery only)."""
     env = dict(clock=clock, identities=identities, journal=journal, on_progress=on_progress)
-    rec = dict(identities=identities, journal=journal, on_progress=on_progress)
+    rec = dict(recover=recover)
     before, apply, session = ctx.before, suspended.apply, progress.request.daw_session
     progress, checkpoint_id = fresh(progress, CheckpointId, identities=identities, on_progress=on_progress)
     if checkpoint_id is None:
-        return _unaccepted(progress, ctx, None, None, None, identity_failure("checkpoint ID")[1],
+        return _unaccepted(progress, ctx, None, None, None, identity_failure("checkpoint ID"),
                            FeedbackStage.RECORDING, **rec)  # fmt: skip
     try:
         receipt = daw_execution_receipt(before, verified, apply)
         candidate = derive_daw_candidate_state(before, verified, apply, checkpoint_id, progress.last.utc)
     except ValueError as error:
-        return _unaccepted(progress, ctx, None, None, None, f"the verified export does not form a candidate ({error})",
-                           FeedbackStage.RENDER, **rec)  # fmt: skip
-    progress, stop = record(progress, receipt, **rec)
+        return _unaccepted(progress, ctx, None, None, None, (TerminationReason.EXPORT_IMPORT_REJECTED,
+                           f"the verified export does not form a candidate ({error})"), FeedbackStage.RENDER, **rec)  # fmt: skip
+    progress, stop = record(progress, receipt, identities=identities, journal=journal, on_progress=on_progress)
     if stop:
-        return _unaccepted(progress, ctx, receipt, candidate, None, "the receipt could not be recorded",
-                           FeedbackStage.RECORDING, **rec)  # fmt: skip
+        return _unaccepted(progress, ctx, receipt, candidate, None, stop, FeedbackStage.RECORDING, **rec)
     produced = tuple(ArtifactRootBinding(a.artifact_id, session.export_root_key) for a in receipt.candidate_artifacts)
     progress, (observations, stop) = analyze(
         progress, candidate, TerminationReason.CANDIDATE_ANALYSIS_FAILED,
         bindings=analysis_bindings(candidate, progress.roots, produced), analyzer=analyzer, **env,
     )  # fmt: skip
     if observations is None or stop:
-        cause = f"the candidate analysis failed ({stop[1] if stop else 'no observations'})"
+        cause = stop or (TerminationReason.CANDIDATE_ANALYSIS_FAILED, "the candidate analysis returned nothing")
         return _unaccepted(progress, ctx, receipt, candidate, None, cause, FeedbackStage.VERIFICATION, **rec)
     progress, result_id = fresh(progress, VerificationResultId, identities=identities, on_progress=on_progress)
     if result_id is None:
-        return _unaccepted(progress, ctx, receipt, candidate, None, "no verification ID", FeedbackStage.VERIFICATION,
-                           **rec)  # fmt: skip
+        return _unaccepted(progress, ctx, receipt, candidate, None, identity_failure("verification ID"),
+                           FeedbackStage.VERIFICATION, **rec)  # fmt: skip
     bundles = (evidence_for(progress, candidate), evidence_for(progress, before),
                evidence_for(progress, progress.request.initial_state))  # fmt: skip
     try:
         assessment = VerificationAssessment(result_id, AssessmentMode.ATTEMPT, progress.request.configuration.criteria,
                                             progress.request.measurements, *bundles)  # fmt: skip
     except ValueError as error:
-        return _unaccepted(progress, ctx, receipt, candidate, None, f"candidate evidence is inconsistent ({error})",
-                           FeedbackStage.VERIFICATION, **rec)  # fmt: skip
+        return _unaccepted(progress, ctx, receipt, candidate, None, (TerminationReason.RUNTIME_CONTRACT_FAILED,
+                           f"candidate evidence is inconsistent ({error})"), FeedbackStage.VERIFICATION, **rec)  # fmt: skip
     verification = assess_verification(assessment)
-    progress, stop = record(progress, assessment, **rec)
+    recorded = dict(identities=identities, journal=journal, on_progress=on_progress)
+    progress, stop = record(progress, assessment, **recorded)
     if not stop:
-        progress, stop = record(progress, verification, **rec)
+        progress, stop = record(progress, verification, **recorded)
     if stop:
-        return _unaccepted(progress, ctx, receipt, candidate, verification, "the verification could not be recorded",
-                           FeedbackStage.RECORDING, **rec)  # fmt: skip
+        return _unaccepted(progress, ctx, receipt, candidate, verification, stop, FeedbackStage.RECORDING, **rec)
     actx = AssessedCorrection(ctx.call_id, before, ctx.decision, ctx.attempt_id, ctx.plan, receipt, candidate,
                               assessment, verification)  # fmt: skip
     route = route_verification(verification, progress.request.configuration.criteria)
     match route:
         case VerificationRoute.COMMIT_THEN_FINISH | VerificationRoute.COMMIT_THEN_ITERATE:
-            return accept_daw(progress, actx, route, verified, apply, integrity_inspector=integrity_inspector, **env)
+            return accept_daw(progress, actx, route, verified, apply, integrity_inspector=integrity_inspector,
+                              recover=recover, **env)  # fmt: skip
         case VerificationRoute.RESTORE_THEN_CONSIDER_ITERATION:
-            return _unaccepted(progress, ctx, receipt, candidate, verification, "the candidate was rejected by "
-                               "verification", FeedbackStage.VERIFICATION, **rec)  # fmt: skip
+            return _unaccepted(progress, actx, receipt, candidate, verification, (TerminationReason.RESTORATION_FAILED,
+                               "the candidate was rejected by verification"), FeedbackStage.VERIFICATION,
+                               iterate=True, **rec)  # fmt: skip
         case VerificationRoute.RECONCILE_THEN_FINISH_INCONCLUSIVE:
-            return _unaccepted(progress, ctx, receipt, candidate, verification, "the candidate verification is "
-                               "inconclusive", FeedbackStage.VERIFICATION, **rec)  # fmt: skip
+            return _unaccepted(progress, actx, receipt, candidate, verification, (
+                TerminationReason.VERIFICATION_INCONCLUSIVE, "the candidate verification is inconclusive"),
+                FeedbackStage.VERIFICATION, **rec)  # fmt: skip
         case _:
             raise ValueError(f"an ATTEMPT verification cannot take route {route.name}")
 
 
-def _unaccepted(progress, ctx, receipt, candidate, verification, cause, stage, *, identities, journal, on_progress):
-    """The interim handler for an unaccepted DAW candidate: recovery not attempted, nothing restored or claimed."""
-    rec = dict(identities=identities, journal=journal, on_progress=on_progress)
-    explanation = f"{cause}; {_NOT_ATTEMPTED} (recovery routing is Increment 4)"
-    progress = replace(progress, verified=None, pending_effect=_RECOVERY)
-    on_progress(progress)
-    if receipt is None:
-        outcome = ActionFeedback(ctx.action, ctx.attempt_id, ctx.execution_id, ActionFeedbackDisposition.UNRESOLVED,
-                                 FeedbackStage.RENDER, ExecutionStatus.UNCERTAIN, None, None, _RECOVERY.value,
-                                 explanation, ())  # fmt: skip
-    else:
-        rollback = RollbackReceipt(ctx.execution_id, ctx.before.audio.checkpoint_id, RollbackStatus.UNCERTAIN, None,
-                                   explanation, RollbackScope.SELECTED_STATE_WITH_FADER, RollbackStatus.UNCERTAIN, ())  # fmt: skip
-        attempt = CorrectionAttempt(ctx.attempt_id, progress.request.run_id, ctx.decision.decision_id,
-                                    ctx.action.action_id, ctx.before, receipt, candidate, verification, rollback,
-                                    AttemptDisposition.UNRESOLVED)  # fmt: skip
-        progress, _ = record(progress, attempt, **rec)
-        unresolved_stage = stage if stage in (FeedbackStage.VERIFICATION, FeedbackStage.ACCEPTANCE) else (
-            FeedbackStage.RECOVERY)  # fmt: skip
-        outcome = ActionFeedback(ctx.action, ctx.attempt_id, ctx.execution_id, ActionFeedbackDisposition.UNRESOLVED,
-                                 unresolved_stage, ExecutionStatus.CANDIDATE_READY, None, RollbackStatus.UNCERTAIN,
-                                 _RECOVERY.value, explanation, ())  # fmt: skip
-    progress, _ = add_feedback(progress, ctx.call_id, ctx.before, outcome, decision_id=ctx.decision.decision_id,
-                               candidate=None if receipt is None else ctx.candidate_revision, selected=None,
-                               **rec)  # fmt: skip
-    return (progress, (_RECOVERY, explanation))
+def _unaccepted(progress, ctx, receipt, candidate, verification, original, stage, *, recover, iterate=False):
+    """An unaccepted DAW candidate, or a failure before one exists: authorized recovery (ADR-038).
+
+    Reached only while the attempt's before reference is the known authoritative one: never after an established
+    acceptance, and never while the acceptance authority is unknown (``recover_daw`` refuses both).
+    """
+    bundles = ctx.bundles if isinstance(ctx, AssessedCorrection) and verification is not None else ()
+    return recover(
+        progress,
+        ctx,
+        DawRecoveryEntry.CONFIRMED_WRITE,
+        original,
+        receipt=receipt,
+        candidate=candidate,
+        verification=verification,
+        bundles=bundles,
+        stage=stage,
+        iterate=iterate,
+    )
 
 
 def promote_daw(progress: RuntimeProgress, reference: AcceptedReference, actx: AssessedCorrection, *,
@@ -320,30 +320,37 @@ def _established(progress, reference, *, on_progress, committed=None):
     return progress
 
 
+def _time_stop(progress, stop, when):
+    if stop:
+        return stop
+    if progress.last.cancelled:
+        return (TerminationReason.USER_CANCELLED, f"cancelled {when}")
+    return (TerminationReason.ELAPSED_TIME_LIMIT, f"time ran out {when}")
+
+
 def accept_daw(progress, actx: AssessedCorrection, route, verified: DawImportVerified, apply, *, clock, identities,
-               integrity_inspector, journal, on_progress):  # fmt: skip
-    """DAW acceptance (amendment A1): no offline recovery on any branch."""
+               integrity_inspector, journal, on_progress, recover):  # fmt: skip
+    """DAW acceptance (amendment A1): DAW recovery (ADR-038) only while the previous reference stays authoritative."""
     rec = dict(identities=identities, journal=journal, on_progress=on_progress)
-    unaccepted = dict(stage=FeedbackStage.ACCEPTANCE, **rec)
+    unaccepted = dict(stage=FeedbackStage.ACCEPTANCE, recover=recover)
     args = (actx, actx.receipt, actx.candidate_state, actx.verification)
     progress, stop = checkpoint(progress, clock=clock, on_progress=on_progress)
     limit = progress.request.configuration.budget_limits.max_elapsed_seconds
     if stop or progress.last.cancelled or progress.usage.elapsed_seconds >= limit:
-        cause = stop[1] if stop else "cancelled or out of time before the acceptance commit"
-        return _unaccepted(progress, *args, cause, **unaccepted)
+        return _unaccepted(progress, *args, _time_stop(progress, stop, "before the acceptance commit"), **unaccepted)
     progress, acceptance_id = fresh(progress, AcceptanceId, identities=identities, on_progress=on_progress)
     if acceptance_id is None:
-        return _unaccepted(progress, *args, "no acceptance ID", **unaccepted)
+        return _unaccepted(progress, *args, identity_failure("acceptance ID"), **unaccepted)
     event = AcceptanceEvent(acceptance_id, progress.request.run_id, actx.attempt_id, actx.decision.decision_id,
                             progress.accepted, actx.action, actx.receipt, actx.assessment, actx.verification)  # fmt: skip
     validate_daw_acceptance_event(event, verified, apply)
     progress, stop = record(progress, event, **rec)
     if stop:
-        return _unaccepted(progress, *args, "the acceptance event could not be recorded", **unaccepted)
+        return _unaccepted(progress, *args, stop, **unaccepted)
     progress, stop = checkpoint(progress, clock=clock, on_progress=on_progress)
     if stop or progress.last.cancelled or progress.usage.elapsed_seconds >= limit:
-        return _unaccepted(progress, *args, "cancelled or out of time after recording the acceptance event; not "
-                           "committed", **unaccepted)  # fmt: skip
+        return _unaccepted(progress, *args, _time_stop(progress, stop, "after recording the acceptance event; not "
+                           "committed"), **unaccepted)  # fmt: skip
     # Immediately before the commit call: the authority is unknown until a definitive answer (amendment A1).
     progress = replace(progress, authority_known=False, verified=None,
                        pending_effect=TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN)  # fmt: skip
@@ -364,7 +371,8 @@ def accept_daw(progress, actx: AssessedCorrection, route, verified: DawImportVer
         progress = replace(progress, authority_known=True, pending_effect=_RECOVERY)
         on_progress(progress)
         progress, _ = record(progress, response, **rec)
-        return _unaccepted(progress, *args, f"the acceptance was not committed ({response.explanation})", **unaccepted)
+        return _unaccepted(progress, *args, (TerminationReason.RECORDING_FAILED,
+                           f"acceptance not committed: {response.explanation}"), **unaccepted)  # fmt: skip
     progress, _ = record(progress, response, **rec)
     progress, result = reconcile_daw_acceptance(progress, actx, event, clock=clock, identities=identities,
                                                 integrity_inspector=integrity_inspector, journal=journal,
@@ -372,14 +380,16 @@ def accept_daw(progress, actx: AssessedCorrection, route, verified: DawImportVer
     if result == "accepted":
         return finish_acceptance(progress, actx, route, **rec)
     if result == "absent":
-        return _unaccepted(progress, *args, "the acceptance was confirmed absent after a lost reply", **unaccepted)
+        return _unaccepted(progress, *args, (TerminationReason.RECORDING_FAILED,
+                           "acceptance confirmed absent after a lost commit reply"), **unaccepted)  # fmt: skip
     return (progress, result)
 
 
 def reconcile_daw_acceptance(progress, actx, event, *, clock, identities, integrity_inspector, journal, on_progress):
     """One authority query after an unknown commit (amendment A1).
 
-    Returns ``"accepted"`` (found, intact and promoted), ``"absent"`` (confirmed not committed; never a restoration),
+    Returns ``"accepted"`` (found, intact and promoted), ``"absent"`` (confirmed not committed: the absence restores
+    nothing itself; DAW recovery follows, ADR-038),
     or a stop: unknown authority, or the found acceptance's integrity failed or could not be established.
     """
     rec = dict(identities=identities, journal=journal, on_progress=on_progress)

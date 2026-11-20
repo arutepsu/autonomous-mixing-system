@@ -32,6 +32,7 @@ ALLOWED_RECORD_IMPORTS = {
     "daw": {"identifiers", "invariants", "actions", "daw_binding"},
     "daw_control": {"identifiers", "invariants", "daw", "daw_binding", "admission"},  # DAW control contract, 2026-11-18
     "daw_recovery": {"identifiers", "invariants", "daw_binding", "daw_control", "budgets"},  # recovery plan, 2026-11-18
+    "daw_rollback": {"actions", "identifiers", "invariants", "project"},  # coordinator Increment 4 (ADR-038)
     "daw_export": {  # export handoff plan, 2026-11-18 (revision 3)
         "identifiers",
         "invariants",
@@ -168,6 +169,7 @@ ALLOWED_RECORD_IMPORTS = {
         "daw_correction",
         "daw_export",
         "daw_recovery",
+        "daw_rollback",  # Increment 4 (ADR-038): the standalone DAW rollback record
         "acceptance",
         "actions",
         "admission",
@@ -301,7 +303,20 @@ INVENTORY = {
         "DawResolutionRecorded",
         "DawResolutionRefused",
         "DawResolutionOutcome",
+        # coordinator Increment 4 (ADR-038): the recovery lineage, recovery snapshots and recovery decisions
+        "DawRootStatus",
+        "DawLedgerKind",
+        "DawLedgerEntry",
+        "DawLineageRestoration",
+        "DawRecoveryLineage",
+        "DawRecoverySnapshot",
+        "DawLineageQuery",
+        "DawRecoveryEntry",
+        "DawRecoveryPlan",
+        "DawRecoveryDecision",
+        "daw_recovery_plan_for",
     ),
+    "daw_rollback": ("DawRollbackRecord",),  # coordinator Increment 4 (ADR-038)
     "coordinator_progress": ("RuntimeProgress", "PreparedCorrection", "AssessedCorrection", "Stop"),
     "identifiers": (
         "ProjectId",

@@ -554,6 +554,7 @@ def test_daw_recovery_contract_signatures_unions_and_codes():
         ("profile", keyword, Parameter.empty, DawControlProfile),
         ("recovery_command_id", keyword, Parameter.empty, str),
         ("control_state", keyword, Parameter.empty, DawControlState),
+        ("own_lineage_only", keyword, False, bool),  # coordinator Increment 4 review fix (ADR-038)
         ("return", DawRestoreGateResult),
     ]
     assert [f.value for f in DawReconcileFinding] == [

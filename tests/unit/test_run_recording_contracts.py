@@ -682,7 +682,9 @@ def make_intent(operation):
         OperationKind.EXPORT_PREPARE: export_request(),
         OperationKind.EXPORT_IMPORT: DawImportRequest(awaiting(), manifest(awaiting())),
     }
-    effects = (OperationKind.RENDER, OperationKind.DAW_APPLY, OperationKind.EXPORT_PREPARE, OperationKind.EXPORT_IMPORT)
+    # Increment 4 (ADR-038): a DAW recovery intent always belongs to one attempt, like an effect
+    effects = (OperationKind.RENDER, OperationKind.DAW_APPLY, OperationKind.EXPORT_PREPARE, OperationKind.EXPORT_IMPORT,
+               OperationKind.DAW_RECOVERY)  # fmt: skip
     call = DecisionCallId("call") if operation in (OperationKind.DECIDE, *effects) else None
     attempt = AttemptId("attempt") if operation in effects else None
     execution = workspace.execution_id if operation is OperationKind.RENDER else None

@@ -35,6 +35,7 @@ _PENDING_EFFECT_REASONS = frozenset({
     TerminationReason.DAW_CONVERSION_BLOCKED,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
     TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN,  # Increment 3 (A1): set immediately before a DAW commit
+    TerminationReason.RESTORATION_UNCERTAIN,  # Increment 4 (ADR-038): restored, rollback not yet established
 })  # fmt: skip
 
 

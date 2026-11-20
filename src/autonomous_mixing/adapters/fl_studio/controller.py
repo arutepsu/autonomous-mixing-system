@@ -26,6 +26,8 @@ from autonomous_mixing.core.ports.daw import validate_daw_apply_outcome, validat
 from autonomous_mixing.core.ports.daw_recovery import (
     validate_daw_continuity_snapshot,
     validate_daw_reconciliation,
+    validate_daw_recovery_lineage,
+    validate_daw_recovery_snapshot,
     validate_daw_resolution,
     validate_daw_restore_outcome,
     validate_daw_state_anchor,
@@ -51,6 +53,8 @@ from autonomous_mixing.core.records.daw_recovery import (
     DawReconcileFinding,
     DawReconcileRequest,
     DawReconciliation,
+    DawRecoveryLineage,
+    DawRecoverySnapshot,
     DawResolutionKind,
     DawResolutionOutcome,
     DawResolutionRecorded,
@@ -93,6 +97,7 @@ def _replay(outcome):
 _RESTORE_JOURNAL_REFUSALS = {
     "duplicate_id_conflict": DawRefusalCode.DUPLICATE_ID_CONFLICT,
     "unresolved_other": DawRefusalCode.UNAVAILABLE,
+    "foreign_history": DawRefusalCode.UNAVAILABLE,  # ADR-038 review fix: refused before reservation
     "agreement": DawRefusalCode.UNSUPPORTED,
     "unknown_root": DawRefusalCode.UNSUPPORTED,
     "no_target": DawRefusalCode.UNSUPPORTED,
@@ -758,4 +763,52 @@ class FlStudioParameterController:
                 return PortFailure(PortFailureCode.UNAVAILABLE, "the journal changed during the capture", True)
             result = Success(DawContinuitySnapshot(closing, read.value, closing_state))
             validate_daw_continuity_snapshot(source_id, result)
+            return result
+
+    # --- recovery lineage and coherent recovery snapshots (coordinator Increment 4, ADR-038) ---------------------
+
+    def recovery_lineage(self, root_command_id: str) -> PortResult[DawRecoveryLineage]:
+        """Journal-backed facts about one root apply, whatever its outcome; nothing is sent to the DAW."""
+        with self._lock:
+            if not isinstance(root_command_id, str) or not _SOURCE_ID.fullmatch(root_command_id):
+                return PortFailure(PortFailureCode.INVALID_INPUT, "invalid root command ID", False)
+            try:
+                result = Success(self.journal.recovery_lineage(root_command_id))
+            except JournalRefusal as error:
+                return PortFailure(PortFailureCode.INVALID_INPUT, str(error), False)
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            validate_daw_recovery_lineage(root_command_id, result)
+            return result
+
+    def recovery_snapshot(self, root_command_id: str) -> PortResult[DawRecoverySnapshot]:
+        """Lineage and control state, one fresh inspection, then both again, all under the controller lock.
+
+        As ``continuity_snapshot``: a snapshot is returned only when the two journal reads agree exactly; a ledger entry
+        of any kind appended in between yields a retryable ``PortFailure``, never a mixed snapshot.
+        """
+        with self._lock:
+            opened = self.recovery_lineage(root_command_id)
+            if isinstance(opened, PortFailure):
+                return opened
+            try:
+                opening_state = self.journal.control_state()
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            lineage = opened.value
+            read = self.inspect(DawInspectRequest(lineage.binding, lineage.profile))
+            if isinstance(read, PortFailure):
+                return read
+            try:
+                closing = self.journal.recovery_lineage(root_command_id)
+                closing_state = self.journal.control_state()
+            except JournalRefusal as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, "the journal changed during the capture: " + str(error),
+                                   True)  # fmt: skip
+            except (JournalError, ValueError) as error:
+                return PortFailure(PortFailureCode.UNAVAILABLE, str(error) or "journal unavailable", False)
+            if (closing, closing_state) != (lineage, opening_state):
+                return PortFailure(PortFailureCode.UNAVAILABLE, "the journal changed during the capture", True)
+            result = Success(DawRecoverySnapshot(closing, read.value, closing_state))
+            validate_daw_recovery_snapshot(root_command_id, result)
             return result

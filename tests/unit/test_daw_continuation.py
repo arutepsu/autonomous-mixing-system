@@ -137,28 +137,33 @@ def test_a_duplicate_after_a_run_ending_continuation_is_already_continued(harnes
     assert h.resume(suspended, other_manifest(manifest)).code is DawContinuationRefusalCode.MANIFEST_CONFLICT
 
 
-# --- candidate failures stop safely, claiming no rollback ------------------------------------------------------
+# --- candidate failures are recovered (Increment 4, ADR-038, superseding the interim stops) -----------------------
 
 
 def assert_stopped_safely(report, reason):
+    """Stopped with ``reason`` after an exact restoration and a VERIFIED selected-state rollback; nothing accepted."""
     assert isinstance(report, RunReport) and report.final_run.termination_reason is reason
-    assert report.final_run.final_project_state is FinalProjectState.UNKNOWN and report.verified is None
+    assert report.final_run.final_project_state is FinalProjectState.RESTORED_TO_LAST_ACCEPTED
+    assert report.verified == report.authoritative and report.authoritative.sequence == 0
     assert not payloads(report, AcceptanceCommitted)
 
 
 @pytest.mark.parametrize("master", [NO_IMPROVEMENT, SILENT])
-def test_a_rejected_or_inconclusive_candidate_stops_with_recovery_not_attempted(harness, master):
-    h = harness(decisions=(propose(0.0),))
+def test_a_rejected_or_inconclusive_candidate_is_restored_with_a_verified_selected_state_rollback(harness, master):
+    h = harness(decisions=(propose(0.0), no_change))
     suspended = suspend(h)
     report = h.resume(suspended, h.operator_export(suspended, master))
-    assert_stopped_safely(report, R.REQUIRED_RECOVERY_NOT_PERFORMED)
+    reason = report.final_run.termination_reason
+    # a rejected candidate continues the loop (here: no change); an inconclusive or failed one terminates
+    assert reason in (R.NO_CHANGE_PROPOSED, R.VERIFICATION_INCONCLUSIVE, R.CANDIDATE_ANALYSIS_FAILED)
+    assert_stopped_safely(report, reason)
     attempt = payloads(report, CorrectionAttempt)[-1]
-    assert attempt.disposition is AttemptDisposition.UNRESOLVED
+    assert attempt.disposition is AttemptDisposition.ROLLED_BACK
     rollback = attempt.rollback
     assert (rollback.status, rollback.scope, rollback.retained_audio) == (
-        RollbackStatus.UNCERTAIN, RollbackScope.SELECTED_STATE_WITH_FADER, RollbackStatus.UNCERTAIN)  # fmt: skip
-    assert "recovery not attempted" in rollback.explanation and rollback.fader_evidence == ()
-    assert not h.sent("restore_gain") and not payloads(report, AcceptanceEvent)
+        RollbackStatus.VERIFIED, RollbackScope.SELECTED_STATE_WITH_FADER, RollbackStatus.VERIFIED)  # fmt: skip
+    assert len(rollback.fader_evidence) == 1 and len(h.sent("restore_gain")) == 1
+    assert not payloads(report, AcceptanceEvent)
 
 
 @pytest.mark.parametrize("problem", ["stray", "hash", "mono"])
@@ -178,7 +183,7 @@ def test_a_fader_moved_during_the_pause_breaks_continuity(harness):
     h.world.host.volumes[2] += 1e-6
     report = h.resume(suspended, h.operator_export(suspended, ACCEPT))
     assert_stopped_safely(report, R.DAW_CONTINUITY_FAILED)
-    assert h.fl_journal.control_state().unresolved == () and not h.sent("restore_gain")
+    assert h.fl_journal.control_state().unresolved == () and len(h.sent("restore_gain")) == 1
 
 
 def test_a_ledger_entry_during_the_pause_breaks_continuity(harness):
@@ -265,7 +270,8 @@ class UnknownCommit(Wrapped):
     "write, answer, reason, final",
     [
         (True, None, R.CANDIDATE_CRITERIA_MET, FinalProjectState.ACCEPTED_EDITS_RETAINED),  # found: DAW promotion
-        (False, None, R.REQUIRED_RECOVERY_NOT_PERFORMED, FinalProjectState.UNKNOWN),  # absent: never "restored"
+        # absent: the absence restores nothing; DAW recovery then restores exactly (Increment 4, ADR-038)
+        (False, None, R.RECORDING_FAILED, FinalProjectState.RESTORED_TO_LAST_ACCEPTED),
         (True, "unknown", R.ACCEPTANCE_COMMIT_UNCERTAIN, FinalProjectState.UNKNOWN),
     ],
 )
@@ -274,8 +280,8 @@ def test_an_unknown_commit_is_reconciled_without_offline_recovery(harness, write
     suspended = suspend(h)
     report = h.resume(suspended, h.operator_export(suspended, ACCEPT))
     assert (report.final_run.termination_reason, report.final_run.final_project_state) == (reason, final)
-    assert report.final_run.final_project_state is not FinalProjectState.RESTORED_TO_LAST_ACCEPTED
-    assert not h.sent("restore_gain")
+    restored = final is FinalProjectState.RESTORED_TO_LAST_ACCEPTED
+    assert len(h.sent("restore_gain")) == (1 if restored else 0)  # never after a found or unknown acceptance
 
 
 class RefuseCommittedRecord(Wrapped):
@@ -408,7 +414,7 @@ def test_baselines_with_other_export_settings_are_refused_before_any_write(harne
 
 
 def test_an_off_target_curve_is_not_part_of_this_increment(harness):
-    """Guard: the off-target and uncertain paths still end before any export (Increment 2), unchanged here."""
+    """Guard: an off-target write still ends before any export; since Increment 4 it is restored first."""
     h = harness(decisions=(propose(0.0),))
     h.world.host.curve = lambda v: live_curve(v) + (0.0 if v == 0.76 else 0.2)
     report = h.start()

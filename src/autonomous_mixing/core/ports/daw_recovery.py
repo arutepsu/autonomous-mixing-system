@@ -17,7 +17,13 @@ uncertain):
   reads every watermark in one journal pass (export plan 2026-11-18, revision 3);
 - ``continuity_snapshot`` holds the adapter's lock across the whole capture, queries the anchor and the control
   state before and after one fresh inspection of the anchor's binding and profile, and returns the snapshot only
-  when both queries agree; otherwise a ``PortFailure`` (never a partially consistent snapshot).
+  when both queries agree; otherwise a ``PortFailure`` (never a partially consistent snapshot);
+- ``recovery_lineage`` (coordinator Increment 4, ADR-038) describes one root apply whatever its outcome, from one
+  locked journal pass: its exact journaled request and outcome, its restorations, reconciliations and resolutions,
+  every reservation or resolution outside the lineage after it, the unresolved commands and the watermarks. It
+  refuses a refused root (nothing was written) and never changes the journal. Export anchors are unaffected;
+- ``recovery_snapshot`` holds the lock across the lineage and control state read before and after one fresh
+  inspection of the lineage's binding and profile, returning the snapshot only when both reads agree.
 
 Restoring one fader proves only that fader's readings, never routing, plugins, the project or audio.
 """
@@ -30,6 +36,8 @@ from autonomous_mixing.core.records.daw_recovery import (
     DawControlState,
     DawReconcileRequest,
     DawReconciliation,
+    DawRecoveryLineage,
+    DawRecoverySnapshot,
     DawResolutionOutcome,
     DawResolutionRecorded,
     DawResolutionRefused,
@@ -62,6 +70,10 @@ class DawRecoveryController(Protocol):
     def state_anchor(self, source_id: str) -> PortResult[DawStateAnchor]: ...
 
     def continuity_snapshot(self, source_id: str) -> PortResult[DawContinuitySnapshot]: ...
+
+    def recovery_lineage(self, root_command_id: str) -> PortResult[DawRecoveryLineage]: ...
+
+    def recovery_snapshot(self, root_command_id: str) -> PortResult[DawRecoverySnapshot]: ...
 
 
 def validate_daw_restore_outcome(request: DawRestoreRequest, outcome: DawRestoreOutcome) -> None:
@@ -136,3 +148,21 @@ def validate_daw_continuity_snapshot(source_id: str, result: PortResult[DawConti
         raise ValueError("a continuity response must be Success(DawContinuitySnapshot) or a PortFailure")
     if result.value.anchor.source_id != source_id:
         raise ValueError("the snapshot answers another source")
+
+
+def validate_daw_recovery_lineage(root_command_id: str, result: PortResult[DawRecoveryLineage]) -> None:
+    if isinstance(result, PortFailure):
+        return
+    if not isinstance(result, Success) or not isinstance(result.value, DawRecoveryLineage):
+        raise ValueError("a recovery-lineage response must be Success(DawRecoveryLineage) or a PortFailure")
+    if result.value.root_command_id != root_command_id:
+        raise ValueError("the lineage answers another root")
+
+
+def validate_daw_recovery_snapshot(root_command_id: str, result: PortResult[DawRecoverySnapshot]) -> None:
+    if isinstance(result, PortFailure):
+        return
+    if not isinstance(result, Success) or not isinstance(result.value, DawRecoverySnapshot):
+        raise ValueError("a recovery-snapshot response must be Success(DawRecoverySnapshot) or a PortFailure")
+    if result.value.lineage.root_command_id != root_command_id:
+        raise ValueError("the recovery snapshot answers another root")

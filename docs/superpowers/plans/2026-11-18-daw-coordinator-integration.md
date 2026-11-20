@@ -774,3 +774,451 @@ Implemented as planned with amendment A and the approval's constraints, recorded
    - **Regressions:** substituted budget, criteria and DAW-session settings are each refused with no FL call, import or append, and the recorded request then still continues.
 
 **Mutation probes.** Two new, both caught: recording the answer before establishing it, and dropping the recorded-request check. All earlier sets are still caught.
+
+## Increment 4 plan: authorized DAW recovery routing (proposed 2026-11-19; not started)
+
+**Status:** for owner and Codex review. Nothing is implemented. The ADR (ADR-038, "Coordinator DAW recovery routing") is written with the implementation, tests first, as in earlier increments.
+
+**Revision 1 (2026-11-19, after review).** The review found three gaps, each corrected in place below:
+1. An off-target root cannot be anchored, because `state_anchor` refuses it as `not_confirmed`. A new journal-backed recovery-lineage query (F8, R7) takes its place for recovery. The export-anchor semantics are unchanged.
+2. Two recovery slots are not enough. On the unknown-commit path, the authority query already charges one (F9), so D2 now reserves three.
+3. A historical restoration reading could stand in for the final snapshot. Now the final snapshot's fresh reading must equal both the confirmed restoration's reading and the saved target exactly (F10).
+
+**The owner agreed** to D1, D3, D5 and the standalone rollback receipt. D2 and D6 are revised. D4's reuse of render-related reasons is now explicitly documented.
+
+**Goal.** Replace the interim stops that end a run with "recovery not attempted" by authorized, journal-backed recovery. Today these stops are `unresolved()` and `after_write()` in `execute_daw`, and `ended()` and `_unaccepted()` in `core.loop.daw_continuation`. Recovery covers:
+- off-target and uncertain writes;
+- failed export preparation, and every other failure between a confirmed write and the checkpoint;
+- rejected imports;
+- unaccepted candidates.
+
+**Out of scope:**
+- durable restart (Increment 5);
+- CLI wiring and `daw recover` (Increment 6);
+- installation and live FL Studio calls;
+- the offline commit-exception task.
+
+### Existing contracts used unchanged
+- **Targets:** `DawRecoveryController.restore_target(root)`. The target is the root apply's journaled recorded start: its outcome `before`, or else its request inspection.
+- **Gate:** `gate_daw_restore`, with its checks of lineage, identity, build, conversion and range, and `DawRestoreNoWrite` on an exact reading.
+- **Authorization:** `DawRecoveryAuthorization` carries a `RECOVERY_OPERATION` `BudgetGrant` from `check_budget`. The FL journal persists the charge (`RECOVERY_CHARGED`) in the same transaction as the reservation, once per recovery command ID.
+- **Reconciliation and resolution:** `reconcile` takes a fresh read and clears nothing; `classify_reconciliation` classifies it; `resolve` records a resolution. The journal enforces subject-specific, latest evidence, and no reservation after the evidence (Amendment R).
+- **Anchors and snapshots:** `state_anchor` and `continuity_snapshot`, both unchanged. An anchor is refused while anything is unresolved, and it is superseded by any later reservation or resolution.
+  - **No longer used by recovery** for its precondition or its evidence. That role passes to the recovery-lineage query and snapshot (R7) *(revision 1, 2026-11-19, after review)*.
+  - **Export anchors** keep requiring a confirmed source.
+- **Rollback records:** `RollbackReceipt` with scope `SELECTED_STATE_WITH_FADER`, `DawRollbackFaderEvidence` and `daw_rollback_evidence_problem`. Together they require exact equality in both coordinates (signed zeros distinguished), the complete binding, and ordering after the latest relevant reservation.
+- **Integrity:** `recover_saved` performs the retained-audio integrity inspection.
+- **Run machinery:** `recovery_stop`, `pending_effect`, the classify-before-record rule (Increment 2 and 3 review fixes), and `_PRESERVED_ON_RECORDING_FAILURE`.
+
+### Findings from inspection that the plan must respect
+Several of these conflict with earlier sections of this plan. Each conflict is named here rather than resolved silently.
+
+- **F1. The restore target is the recorded start, not the saved target.**
+  - `gate_daw_apply` admits a start that lies within the profile's start tolerances of the selected state's confirmed fader. The journaled `before` can therefore differ from the saved target by that drift.
+  - ADR-032 allows restoration only to the journaled target. Whenever `restore_target(root).reading` is not exactly the saved target, no recovery can give VERIFIED selected-state rollback.
+  - The restoration still runs, because it undoes the run's own write. The rollback is `FAILED`, with an explanation that the pre-write start differed from the saved target. See decision D1.
+- **F2. A reserved restoration that is not confirmed stays unresolved in the FL journal.**
+  - `_unresolved` treats a restore row as open unless its outcome is `DawRestoreConfirmed`. This applies to a mismatch, an uncertain outcome and a device refusal after reservation alike.
+  - **Conflict:** "Rollback evidence", coordinator-level steps 4 and 5, expects device script v1's refusal of `restore_gain` to give `RESTORATION_FAILED`. Under the precedence below it gives `DAW_COMMAND_UNRESOLVED`, unless a reconciliation of the restoration supports a resolution. That expectation is amended here.
+- **F3. A DAW write reserves one recovery slot, but a verified DAW rollback after a restoration charges two.**
+  - `check_budget` requires one free `RECOVERY_OPERATION` slot for `DAW_WRITE`. A rollback charges the restoration and then the integrity inspection.
+  - Without a change, the count limit can be reached between the two. See decision D2.
+- **F4. Cancellation and the elapsed limit block every dispatch.**
+  - `gate` checks both for uncharged operations too, such as inspection and reconciliation, so a cancelled or timed-out run cannot recover.
+  - This is the existing offline behaviour as well. See decision D3.
+- **F5. No record carries a rollback receipt before a candidate exists.**
+  - Before an execution receipt exists (preparation failure, import rejection, off-target, uncertain write), no `CorrectionAttempt` exists either. A `RollbackReceipt` and its fader evidence have nowhere to be recorded.
+  - **Proposed:** a standalone `RollbackReceipt` trace payload in those cases (R4).
+- **F6. Conflict: off-target termination.**
+  - Section 3 of this plan says an off-target write terminates with `DAW_CONVERSION_BLOCKED` "whatever the restoration result". That conflicts with an unresolved restoration of the off-target root.
+  - **Proposed:** the precedence below, in which `DAW_COMMAND_UNRESOLVED` comes first. The block itself is still never cleared.
+- **F7. Refinement: the source of observation evidence.**
+  - Section 7 allows the reconciliation's own exact reading as `EXACT_OBSERVATION`.
+  - This plan instead takes all fader evidence from one final coherent `continuity_snapshot`, taken after the last recovery step. The snapshot is locked and fresh, and its watermarks give the ordering.
+  - This is stricter, so the section 7 rule is refined, not relaxed.
+
+- **F8. An off-target root has no anchor** *(revision 1, 2026-11-19, after review)*.
+  - **Cause:** `state_anchor` accepts only a confirmed apply or a confirmed restoration. `FlStudioCommandJournal.state_anchor` refuses everything else as `not_confirmed`, and it refuses any state while a command is unresolved.
+  - **What this breaks:** an `OFF_TARGET` root, and an `UNCERTAIN_WRITE` root, therefore can never satisfy the precondition, and an off-target root after `NoWrite` cannot be the final snapshot's source.
+  - **Resolution:** the anchor is not weakened. Recovery instead uses a recovery-lineage query (R7), which describes a root's lineage whatever its outcome.
+- **F9. On the unknown-commit path, the authority query already charges one recovery slot** *(revision 1, 2026-11-19, after review)*.
+  - **Cause:** `reconcile_daw_acceptance` charges its `QUERY_ACCEPTANCE` as a `RECOVERY_OPERATION`.
+  - **Worst case:** unknown commit, then the query (1), then confirmed absent, then the restoration (1), then the integrity inspection (1). That is three.
+  - **Bound:** no recovery path issues more than one restoration (Q1). The found-acceptance integrity inspection is uncharged and never leads to recovery. Three is therefore the maximum for one attempt.
+- **F10. A historical restoration reading is not current evidence** *(revision 1, 2026-11-19, after review)*.
+  - **The gap:** `DawRestoreConfirmed.after` shows where the fader was when the restoration was confirmed. A later manual move, which leaves no ledger entry, would not show in it.
+  - **The rule:** evidence must rest on the final snapshot's fresh reading.
+
+### Entry kinds and the guard
+One routine, `recover_daw(progress, ctx, entry, cause, *, collaborators)`, goes in a new module `core/loop/daw_recovery.py` and replaces the four interim handlers.
+
+| Entry | Raised from | Root apply in the FL journal |
+| --- | --- | --- |
+| `CONFIRMED_WRITE` | **`execute_daw`, after a confirmed write:** anchor failure, export-request failure, `prepare` failure, checkpoint failure, recording failure, cancellation or time.<br>**`continue_daw`:** snapshot failure, import not dispatched or not recorded, file or continuity rejection.<br>**Unaccepted candidates:** derivation refused, analysis failed, verification rejected or inconclusive, acceptance not committed or confirmed absent, cancellation or time before the commit. | confirmed, not unresolved |
+| `OFF_TARGET` | `DawWriteOffTarget` | known write; the conversion is blocked |
+| `UNCERTAIN_WRITE` | `DawWriteUncertain`, or a write reply that fails validation | unresolved |
+
+**Guard: established acceptance stays authoritative.**
+- **When recovery may run:** only while `progress.authority_known` holds and `progress.accepted` is the attempt's own before reference. For a continuation that is the checkpoint's `accepted`; in `execute_daw` it is the reference of `ctx.before`.
+- **Otherwise:** a `ValueError` (a wiring error).
+- **Post-acceptance failures never reach it:** promotion, recording of the commit, accepted-state integrity and `finish_acceptance` stops all keep the established reference and the existing accepted-state reasons.
+- **`ACCEPTANCE_COMMIT_UNCERTAIN` never reaches it either:** the authority is unknown, so the previous state is never restored. That case ends as today.
+- **Dedicated regression:** a committed acceptance followed by a promotion failure and a recording failure. No reconciliation, restoration or integrity recovery is dispatched, and `accepted` is the new reference.
+
+**Precondition: the run's own lineage must be the latest** *(revision 1, 2026-11-19, after review)*. This applies to every entry, from one `recovery_lineage(root)` query (R7), uncharged and recorded under `DAW_STATE`. The lineage must show all of the following:
+- **The right root:** the root is this attempt's apply (the same command ID and the exact journaled request, compared with `ctx`'s apply request by exact equality).
+- **The right outcome:** its status matches the entry: `CONFIRMED`, `OFF_TARGET`, or `UNCERTAIN` or `PENDING`.
+- **Nothing foreign:** no reservation or resolution outside the lineage after the root (`foreign_after` is empty), and every unresolved command belongs to the lineage.
+- **If the query fails or is invalid:** nothing is dispatched (row 3, or row 1 when the root is unresolved).
+- **Otherwise recovery is withheld.** The fader's later history is not this run's to undo, for example after a foreign write during the operator pause.
+  - This is the only remaining "recovery not attempted" case.
+  - The rollback is `UNCERTAIN` with no fader evidence, and its explanation reads "recovery withheld: another command followed this run's write".
+
+### Recovery steps
+Every dispatch is gated and recorded as a `DispatchIntent` first. Its reply is validated and classified before the observation is recorded.
+
+**1. Reconcile the root (`UNCERTAIN_WRITE` only).**
+- **Reconciliation:** `reconcile(DawReconcileRequest(rec-<token>-a1, root, binding, profile))`, under `DAW_RECOVERY` and uncharged.
+- **Decision:** the pure rule `daw_recovery_decision(entry, control_state, reconciliation)` (G15, in `core.admission`) decides:
+  - `AT_RECORDED_START`: resolve `NOT_APPLIED_OR_REVERTED`, citing the reconciliation, then step 2. The gate decides whether a write is needed.
+  - `AT_COMMANDED`, `NEITHER` or `AMBIGUOUS`: step 2, then resolve the root as `RESTORED_TO_RECORDED_START`, citing the confirmed restoration.
+  - `IDENTITY_UNVERIFIED`: no restoration and no resolution.
+- **Fail-closed edge (kept):** `AMBIGUOUS` with an exact reading gives `DawRestoreNoWrite`. No resolution kind is supported, so the root stays unresolved.
+
+**2. Restoration (all entries, when the decision calls for it).**
+1. `restore_target(root)`, recorded as a new trace payload (R3) and checked to name the root;
+2. one `check_budget(RECOVERY_OPERATION)` proposal and its grant;
+3. `DawRecoveryAuthorization(rauth-<token>-1, execution, policy reference, target, grant)`;
+4. a fresh `inspect` (`DAW_INSPECT`, uncharged), then `control_state()`, then `gate_daw_restore(..., recovery_command_id = rst-<token>-1)`;
+5. the gate's result:
+   - **`Permitted`:** the `DAW_RECOVERY` intent, charged with the same grant, then `restore`.
+   - **`NoWrite`:** nothing is dispatched or charged.
+   - **`Rejected`:** no restoration. The rollback is `FAILED`, since the fresh inspection shows the fader is not at the target.
+6. **Charge check:** afterwards, `control_state().recovery_charges` must hold exactly one charge for `rst-<token>-1`, with the run's grant. Otherwise the run ends with `RUNTIME_CONTRACT_FAILED`.
+
+**3. A restoration that is not confirmed** (a mismatch, an uncertain outcome or a device refusal):
+- one `reconcile` of the restoration (`rec-<token>-r1`);
+- a resolution of the restoration only where its finding supports one: `AT_COMMANDED` gives `APPLIED_AS_COMMANDED`, and `AT_RECORDED_START` gives `NOT_APPLIED_OR_REVERTED`;
+- no second restoration in this increment (Q1);
+- an `UNCERTAIN_WRITE` root can be resolved only by its own confirmed restoration, so it stays unresolved.
+
+**4. Fader evidence: one final coherent recovery snapshot** *(revision 1, 2026-11-19, after review)*.
+- **The snapshot:** `recovery_snapshot(root)` (R7) holds the lineage, one fresh inspection and the control state. It is captured under the controller lock with the same obligation as `continuity_snapshot`: lineage and control state read before and after the inspection, and returned only when the two reads agree.
+- **It applies to every entry,** an off-target root included, and needs no anchorable source.
+- **It is taken after the last recovery step.**
+- **Required before any evidence is built:**
+  - the lineage still satisfies the precondition;
+  - nothing is unresolved;
+  - the lineage's binding equals the selected state's DAW track binding exactly, as complete records.
+- **The fresh reading decides.** Let `reading` be the snapshot inspection's fader. Evidence exists only if `reading` equals the saved target exactly, in both coordinates with signed zeros distinguished:
+
+  | Kind | When | `reading` | `evidence_seq` | `latest_reservation_seq` |
+  | --- | --- | --- | --- | --- |
+  | `EXACT_RESTORE` | this attempt's restoration `rst-<token>-1` is confirmed, is the lineage's latest reservation (its seq equals `reservation_watermark`), **and** `DawRestoreConfirmed.after` equals `reading` exactly | the snapshot's fresh reading | the restoration's reservation seq, from the lineage | `lineage.reservation_watermark` |
+  | `EXACT_OBSERVATION` | no restoration was dispatched (`NoWrite`) | the snapshot's fresh reading | `lineage.ledger_watermark` | `lineage.reservation_watermark` |
+
+- **No other combination is evidence.** A confirmed restoration whose historical `after` differs from the fresh reading means the fader moved after the restoration. That gives no evidence, and the rollback is `FAILED`, because the fresh reading is known and differs from the target.
+  - Since ADR-032 requires a confirmed restoration's `after` to equal its target exactly, a fresh reading equal to the target is also equal to `after`. The double equality is kept anyway, so that the evidence never rests on the historical reading alone.
+- *Superseded:* the first version took `reading` from `DawRestoreConfirmed.after` and built evidence from a `continuity_snapshot` anchor.
+
+- **Never evidence:** a resolution, a reconciliation finding, or any comparison within tolerance. `daw_rollback_evidence_problem` decides.
+- **Snapshot failure:** if the snapshot fails or anything is still unresolved, there is no fader evidence, and the rollback is `UNCERTAIN`.
+
+**5. Retained-audio integrity.**
+- **When it runs:** `recover_saved` (unchanged, charged as one `RECOVERY_OPERATION`) runs only when the fader evidence passes. Otherwise `retained_audio` is `UNCERTAIN` ("not inspected").
+- **VERIFIED:** exact fader evidence and verified integrity, through `RollbackReceipt`'s existing invariant.
+- **`FAILED`:** a known miss: the restoration was rejected or mismatched, F1 applies, or integrity failed.
+- **`UNCERTAIN`:** everything else.
+
+**6. Records.**
+- **With an execution receipt:** a `CorrectionAttempt`, either `ROLLED_BACK` with a `SELECTED_STATE_WITH_FADER` receipt, or `UNRESOLVED`.
+- **Without one:** the standalone `RollbackReceipt` payload (R4), then feedback.
+- **Feedback dispositions:**
+  - `CONFIRMED_WRITE` with a VERIFIED rollback: `ROLLED_BACK`, with status `FAILED` before an execution receipt and `CANDIDATE_READY` after it;
+  - `OFF_TARGET` with a VERIFIED rollback: `ROLLED_BACK` with status `FAILED`;
+  - `UNCERTAIN_WRITE`: always `UNRESOLVED` with status `UNCERTAIN`, per the existing feedback invariant, even after a VERIFIED rollback;
+  - any rollback that is not VERIFIED: `UNRESOLVED`.
+- **Never "not executed":** a report never says so after a write.
+
+### Outcomes: which continue and which terminate
+**Another decision round** follows only one case: a candidate rejected by verification (`RESTORE_THEN_CONSIDER_ITERATION`) whose rollback is VERIFIED, with nothing unresolved and the conversion not blocked.
+- **Progress:** `verified` is the accepted reference, `restored_last=True` and `pending_effect=None`. Stems, mix and roots are unchanged.
+- **The next round:** its capability view starts from the selected state's confirmed fader, which the evidence shows is exactly re-established.
+- **Same as offline:** `restore_after_rejection` iterates, and every other recovered failure terminates.
+
+**Everything else terminates,** with the first reason that applies:
+
+| # | Condition after recovery | Terminal reason |
+| --- | --- | --- |
+| 1 | Any command unresolved in the FL journal (a root or a restoration) | `DAW_COMMAND_UNRESOLVED` |
+| 2 | The session's conversion is blocked | `DAW_CONVERSION_BLOCKED`; the block is never cleared |
+| 3 | Recovery withheld (foreign lineage, decided by the lineage query), or nothing dispatched (cancellation, time, budget, an intent not recorded, an identity failure, a failed or invalid lineage query) | `REQUIRED_RECOVERY_NOT_PERFORMED`, or `DAW_CONTINUITY_FAILED` when the entry was a continuity rejection |
+| 4 | The rollback is `FAILED`, including a final fresh reading that differs from the saved target or from the confirmed restoration's reading (F10) | `RESTORATION_FAILED` |
+| 5 | The rollback is `UNCERTAIN`, including a resolution without exact evidence | `RESTORATION_UNCERTAIN` |
+| 6 | The rollback is VERIFIED | **The original cause, as offline:** `EXECUTION_PREPARATION_FAILED`, `EXPORT_IMPORT_REJECTED`, `DAW_CONTINUITY_FAILED`, `CANDIDATE_ANALYSIS_FAILED`, `VERIFICATION_INCONCLUSIVE`, `RECORDING_FAILED`, `USER_CANCELLED` or `ELAPSED_TIME_LIMIT`.<br>**`UNCERTAIN_WRITE`:** `RENDER_FAILED`, or `INVALID_RENDER_RESPONSE` for an invalid reply (D4).<br>**The rejected candidate:** another round. |
+
+- **Final state:** `RESTORED_TO_LAST_ACCEPTED` only with a VERIFIED rollback, and `UNKNOWN` otherwise.
+- **Relation to `recovery_stop`:** rows 3 to 5 match it; rows 1 and 2 extend it with DAW facts.
+
+### Pending effect and exceptions
+**Markers.** `pending_effect` always names what an unexpected exception would leave behind. It is set from the validated reply before that reply is recorded:
+
+| Point | `CONFIRMED_WRITE` | `OFF_TARGET` | `UNCERTAIN_WRITE` |
+| --- | --- | --- | --- |
+| Entry | `REQUIRED_RECOVERY_NOT_PERFORMED` | `DAW_CONVERSION_BLOCKED` | `DAW_COMMAND_UNRESOLVED` |
+| Immediately before the `restore` call | `DAW_COMMAND_UNRESOLVED` | `DAW_COMMAND_UNRESOLVED` | `DAW_COMMAND_UNRESOLVED` |
+| Restoration confirmed | `RESTORATION_UNCERTAIN` (newly permitted, R1) | `DAW_CONVERSION_BLOCKED` | `DAW_COMMAND_UNRESOLVED` until the root's resolution is validated, then `RESTORATION_UNCERTAIN` |
+| Root resolution validated (`AT_RECORDED_START`) | not applicable | not applicable | `RESTORATION_UNCERTAIN` |
+| Rollback VERIFIED | `None` | `DAW_CONVERSION_BLOCKED` | `None` |
+
+**Exceptions** never trigger recovery; finalization only records the marker's reason.
+- An exception from `restore`, `reconcile` or `resolve` leaves the marker that was set before the call.
+- An exception while recording a reply leaves the marker already updated from that reply.
+- An exception from the integrity inspector leaves `RESTORATION_UNCERTAIN`.
+
+**Recording failures.**
+- **A failed intent append:** nothing is dispatched. The run ends under row 3, or row 1 when something is already unresolved.
+- **A failed observation append:** it stops the recovery after the reply is classified. No later step runs, and no VERIFIED rollback is claimed without its records.
+- **No new reasons needed:** `RESTORATION_UNCERTAIN` is already preserved on a lost terminal append.
+
+### Budget
+**Charges.**
+- **Restoration:** each dispatched restoration charges one `RECOVERY_OPERATION`. The run grant, the authorization's grant and the FL journal's `RECOVERY_CHARGED` record are the same record.
+- **Integrity inspection:** charged once, as offline.
+- **Uncharged:** reconciliations, resolutions, inspections and snapshots, as for the other DAW reads. Their number is bounded by structure: per attempt, at most two reconciliations, two resolutions, two inspections and one snapshot.
+
+**Replays.**
+- **When they occur:** only as a transport retry inside the controller with the same ID. The coordinator issues at most one restoration per root, with a stable ID.
+- **Not charged twice:** if `control_state().recovery_charges` already lists `rst-<token>-1`, its grant is reused and nothing new is charged. Increment 5 depends on this rule.
+
+**Exhaustion.**
+- **Recovery slots** *(revision 1, 2026-11-19, after review)*: with D2, a DAW write is refused before dispatch (`RECOVERY_CAPACITY_LIMIT`) unless **three** recovery slots are free.
+  - **Why three:** the worst complete path is the authority query, then the restoration, then the integrity inspection (F9).
+  - **Consequence:** the count limit can never be reached inside one attempt's recovery.
+  - **Tests:** the minimum permitted budget runs that whole path (test 15).
+  - *Superseded:* the first version reserved two slots.
+- **Time and cancellation:** the elapsed limit and cancellation block recovery (F4, row 3).
+
+### IDs
+- **Derivation:** deterministic, from the attempt's execution token (the token of `apply-<token>`) and a fixed role, within the 8–64-character ID rule:
+
+  | Role | IDs |
+  | --- | --- |
+  | Reconciliations | `rec-<token>-a1`, `rec-<token>-r1` |
+  | Restoration authorization | `rauth-<token>-1` |
+  | Restoration | `rst-<token>-1` |
+  | Resolution authorizations | `rsa-<token>-a1`, `rsa-<token>-r1` |
+  | Resolutions | `res-<token>-a1`, `res-<token>-r1` |
+
+- **Unchanged:** the apply command ID.
+- **Never cleared by the coordinator:** unresolved commands, except through `resolve` with admissible evidence; and blocked conversions, at all.
+- **Length:** a test pins the maximum token length against the rule.
+
+### Record and contract changes (each pinned by a test; ADR-038)
+- **R1:** `RESTORATION_UNCERTAIN` joins the permitted `pending_effect` values.
+- **R2:** two new trace payloads in `core.records.daw_recovery`:
+  - `DawRecoveryEntry` (`CONFIRMED_WRITE`, `OFF_TARGET`, `UNCERTAIN_WRITE`);
+  - `DawRecoveryDecision`, the recorded result of `daw_recovery_decision`, holding the finding, the reconciliation ID and the planned steps.
+- **R3:** `DawRestoreTarget` becomes a trace payload.
+- **R4:** a standalone `RollbackReceipt` trace payload, for attempts without an execution receipt. It is validated against the attempt's before state, as `CorrectionAttempt` does.
+- **R5:** a `DispatchIntent` check for `DAW_RECOVERY`. Call, attempt and execution IDs are required. For a restoration, the execution ID must equal the authorization's, and the grant must equal the intent's charge.
+- **R6 (D2, revised):** `check_budget` requires three free `RECOVERY_OPERATION` slots for `DAW_WRITE`. This is a named constant, documented as query + restoration + integrity. `RENDER_CALL` keeps one, so the offline path is unchanged.
+- **R7 (new, F8): the recovery-lineage query.**
+  - **Port:** `DawRecoveryController` gains `recovery_lineage(root_command_id) -> PortResult[DawRecoveryLineage]` and `recovery_snapshot(root_command_id) -> PortResult[DawRecoverySnapshot]`.
+  - **Validation:** `validate_daw_recovery_lineage` and `validate_daw_recovery_snapshot`.
+  - **Trace request:** `DawLineageQuery(root_command_id, fresh_inspection)` under `DAW_STATE`.
+  - **`DawRecoveryLineage`, in `core.records.daw_recovery`,** read in one locked journal pass:
+    - the root command ID and its exact journaled apply request;
+    - the root status: `CONFIRMED`, `OFF_TARGET`, `UNCERTAIN` or `PENDING`. A refused root is refused by the query, because nothing was written;
+    - the root's reservation seq;
+    - the complete journaled binding and profile;
+    - the conversion, and whether it is blocked;
+    - the recorded start, which equals `restore_target(root).reading`;
+    - the lineage's restorations: ID, attempt, reservation seq and outcome;
+    - the lineage's reconciliations and resolutions: ID, subject and seq;
+    - `foreign_after`, the reservations and resolutions outside the lineage whose seq exceeds the root's, as (ID, kind, seq);
+    - the unresolved command IDs;
+    - the reservation, resolution and ledger watermarks.
+  - **Invariants:** ordered seqs; every lineage member belongs to the root; the watermarks are at least every listed seq.
+  - **`DawRecoverySnapshot`:** the lineage, a `DawInspection` answering the lineage's binding and profile, and the `DawControlState`.
+  - **FL adapter:** `FlStudioCommandJournal.recovery_lineage(root_id)` and the controller's two methods, using the existing lock pattern of `continuity_snapshot`.
+  - **Unchanged:** `state_anchor`, `continuity_snapshot`, the export-anchor rules and device script v2.
+- **Not changed:** device script v2, `state_anchor`, `continuity_snapshot`, the offline recovery functions, `RollbackReceipt`'s invariants, and `TerminationReason` (D4). *(Revision 1: the FL adapter now changes, by R7's additions only.)*
+
+### Tests (written first)
+**Setup:** the real FL controller and SQLite journal against device script v2 on the fake host; the real `FileExportHandoff`, `FileAudioAnalyzer` and `FileStateIntegrityInspector` over temporary synthetic WAVs; labelled doubles only for decisions and diagnosis.
+
+1. **Rejected candidate:** restored exactly and cited as `EXACT_RESTORE`; integrity VERIFIED; `ROLLED_BACK`. The next round's capability view and gate start from the restored fader, and a second write in that round succeeds.
+2. **Unaccepted candidate, terminating:** analysis failure, inconclusive verification, acceptance not committed, and acceptance confirmed absent. In each case the candidate is restored with a VERIFIED rollback, and the run ends with its original reason and `RESTORED_TO_LAST_ACCEPTED`.
+3. **Before an execution receipt:** preparation failure, file rejection, and continuity rejection (fader drift during the pause, with the run's own lineage still the latest). Each is restored, the standalone receipt is recorded, and the run ends with its original reason.
+4. **Foreign reservation during the pause:** recovery is withheld and nothing is restored. `DAW_CONTINUITY_FAILED`, with an `UNCERTAIN` rollback.
+5. **Off-target:**
+   - restored with a VERIFIED rollback; `DAW_CONVERSION_BLOCKED`, and the block persists in the FL journal;
+   - with the restoration made uncertain (lost reply): `DAW_COMMAND_UNRESOLVED`.
+6. **Uncertain write, one test per finding:**
+   - `AT_COMMANDED` and `NEITHER`: restored, then resolved `RESTORED_TO_RECORDED_START`; VERIFIED; `RENDER_FAILED`;
+   - `AT_RECORDED_START`, exact reading: resolved, `NoWrite`, `EXACT_OBSERVATION`, VERIFIED;
+   - `AMBIGUOUS`, restoration permitted: restored, then resolved;
+   - `AMBIGUOUS`, exact reading: `NoWrite`, the root stays unresolved, `DAW_COMMAND_UNRESOLVED`;
+   - `IDENTITY_UNVERIFIED`: nothing restored, `DAW_COMMAND_UNRESOLVED`;
+   - invalid reply: `INVALID_RENDER_RESPONSE`.
+7. **The "Rollback evidence" regression,** amended by F2 and D2.
+   - **Setup:** a lost apply reply, with the host fader at the start plus an offset that is within tolerance but non-zero, in both normalized and dB. The finding is `AT_RECORDED_START`, and the resolution is recorded.
+   - **Restoration made impossible in three ways:**
+     - (a) the elapsed limit is reached after the resolution: `UNCERTAIN`, `RESTORATION_UNCERTAIN`;
+     - (b) device script v1 refuses `restore_gain`: the restoration stays unresolved, `DAW_COMMAND_UNRESOLVED`, not VERIFIED;
+     - (c) the recovery count limit: with two free slots, the write is refused before dispatch (D2, revised).
+   - **Assert in every case:** the resolution succeeded, and the rollback is never VERIFIED.
+   - **Control:** the same setup with recovery available restores exactly, giving `EXACT_RESTORE` and VERIFIED.
+8. **F1:** the pre-write start has drifted from the confirmed fader, within tolerance. The restoration is confirmed to the journaled start; the rollback is `FAILED` with `RESTORATION_FAILED`, and nothing is claimed as VERIFIED.
+9. **Restoration mismatch:** the fake host lands one ULP off. The restoration is reconciled and resolved; there is no fader evidence; the rollback is `FAILED` or `UNCERTAIN` according to the finding.
+10. **Exceptions, one per marker row:** `restore` raises; recording the confirmed restoration raises; `resolve` raises; recording the resolution raises; the integrity inspector raises. Each ends with the reason in the marker table, and nothing is claimed as VERIFIED.
+11. **Recording failures:**
+    - the restoration intent is not recorded: nothing is dispatched or charged;
+    - the observation is not recorded: the recovery stops.
+12. **Budget and IDs:**
+    - the charge agrees across the run, the authorization and the FL journal, exactly once per ID, including after a controller-level replay;
+    - a `DAW_WRITE` with one or two free recovery slots is refused (revision 1);
+    - the IDs are stable and within the length rule.
+13. **Post-acceptance guard:** a committed acceptance, then each of: a promotion failure, a commit-recording failure, an accepted-state integrity failure, and a found acceptance whose recording raises. In each, nothing is dispatched for recovery and `accepted` is the new reference. A direct `recover_daw` call with an established new reference raises `ValueError`.
+14. **Offline path and inventories:** the offline suites behave byte-identically; `RENDER_CALL` still reserves one slot; the architecture inventories cover the new module and records (revision 1: and R7's records and port methods).
+15. **Minimum permitted budget for the complete path** *(revision 1, 2026-11-19, after review)*.
+    - **Setup:** `max_recovery_operations = 3`, with nothing used. Then a verified import, an unknown commit, the authority query (1), confirmed absent, a confirmed restoration (1) and integrity (1).
+    - **Expected:** a VERIFIED rollback with usage at exactly 3, and the run's grants, the authorization grant and the FL charge all agree.
+    - **The same with 2:** the write is refused before dispatch. Nothing is written or charged, and the feedback is `REJECTED` or `NOT_EXECUTED` at preflight.
+    - **A second iteration:** after a rolled-back rejection, which uses 2, a limit of 5 admits the next write and a limit of 4 refuses it.
+16. **The fader moved after a confirmed restoration** *(revision 1, 2026-11-19, after review)*: the fake host's fader is set to another reading after `DawRestoreConfirmed` and before the final recovery snapshot.
+    - **Expected:** no fader evidence, the rollback not VERIFIED (`FAILED`, `RESTORATION_FAILED`), and no integrity inspection charged.
+    - **Variant:** the fader is moved away and back to the exact target before the snapshot. The evidence is still accepted only because the fresh reading equals both the restoration's `after` and the target, and the test pins that this is the rule.
+17. **The recovery-lineage query and snapshot (adapter level, real SQLite journal)** *(revision 1, 2026-11-19, after review)*:
+    - **One case per root status:** confirmed, off-target, uncertain, pending, and refused (the query is refused);
+    - **a restoration, a reconciliation and a resolution of the lineage;**
+    - **a foreign reservation, and a foreign resolution, after the root;**
+    - **watermarks** read in one locked pass;
+    - **snapshot disagreement:** a ledger entry between the two reads makes the snapshot fail;
+    - **anchors unchanged:** `state_anchor` still refuses an off-target root (`not_confirmed`), so export anchors are unchanged;
+    - **coordinator level:** an off-target write is recovered through the lineage with a VERIFIED rollback, and a foreign reservation after an off-target root withholds recovery.
+
+### Mutation probes
+Each probe is reverted byte-identically, and every earlier probe set is rerun:
+- accept a resolution as fader evidence;
+- compare within tolerance instead of exactly;
+- drop the integrity half;
+- take evidence from the reconciliation instead of the final snapshot;
+- skip the binding equality;
+- skip the ordering against the reservation watermark;
+- let a post-acceptance failure enter `recover_daw`;
+- drop the own-lineage precondition;
+- set the marker after recording instead of before;
+- continue the loop after a VERIFIED rollback of a non-rejection cause;
+- swap rows 1 and 2 of the precedence;
+- charge a replayed restoration twice;
+- reserve two slots instead of three for `DAW_WRITE` (revision 1);
+- take the evidence reading from `DawRestoreConfirmed.after` instead of the fresh snapshot reading (revision 1);
+- drop the equality of the restoration's `after` with the fresh reading (revision 1);
+- ignore `foreign_after` in the lineage precondition (revision 1);
+- accept an off-target source in `state_anchor`. The adapter-level test must catch this, since export anchors must stay confirmed-only (revision 1).
+
+### Decisions for review
+**Owner answers, 2026-11-19:**
+- **Agreed:** D1, D3 and D5, and the standalone rollback receipt (R4).
+- **Revised:** D2 and D6, below.
+- **D4:** stays, with explicit documentation.
+
+- **D1 (F1).** *Agreed.*
+  - **Recommended:** keep `gate_daw_apply`'s start tolerance and the journaled restore target, and report `FAILED` (never VERIFIED) when the recorded start differs from the saved target.
+  - **Alternative:** require an exact start at the apply gate. This changes ADR-030 behaviour and rejects benign drift before any write.
+- **D2 (F3, F9), revised.**
+  - **Recommended:** a `DAW_WRITE` needs **three** free recovery slots, so the complete worst path can always be charged: the authority query after an unknown commit, the restoration and the integrity inspection. It is pinned at the minimum permitted budget by test 15.
+  - *Superseded:* two slots, which missed the authority query.
+  - **Alternative:** stop charging the DAW integrity inspection, which departs from the offline accounting.
+- **D3 (F4).** *Agreed.*
+  - **Recommended:** cancellation and the elapsed limit keep blocking recovery, failing closed (row 3). The report then states that the fader is not restored.
+  - **Alternative:** a bounded recovery allowance that exempts one attempt's recovery dispatches from both. This changes the shared `gate` and needs its own ADR.
+- **D4.** Reuse `RENDER_FAILED` and `INVALID_RENDER_RESPONSE` for a recovered uncertain or invalid DAW write, as G12 reuses existing reasons where they fit.
+  - **Kept, with explicit documentation** *(revision 1, 2026-11-19, after review)*: ADR-038 records the reuse, and that on the DAW path these reasons mean "the DAW fader write (the render stage) had an uncertain or invalid outcome", not an offline render.
+  - **The terminal explanation** begins "DAW write:", so a report cannot read it as an offline render.
+  - **A test** pins both reasons and the explanation prefix.
+  - **Alternative:** a new reason, `DAW_WRITE_UNCERTAIN`.
+- **D5.** *Agreed.*
+  - **Recommended:** a recovered uncertain write terminates rather than iterating. The write's outcome was never evaluated, and the channel misbehaved.
+  - **Alternative:** iterate within the `DAW_WRITE` budget.
+- **D6 (F2, F6), revised.** Adopt the precedence table. This amends the "Rollback evidence" expectation for a refused restoration, and the off-target sentence in section 3.
+  - **Corrections** *(revision 1, 2026-11-19, after review)*:
+    - row 3 includes "the lineage query or the recovery snapshot failed or was invalid before any dispatch", and "recovery withheld" is decided by the lineage (`foreign_after` or a foreign unresolved command), not by an anchor;
+    - row 4 includes "the final snapshot's fresh reading differs from the saved target or from the confirmed restoration's reading";
+    - row 5 includes "the final recovery snapshot failed after a dispatched restoration".
+
+### Open questions (not decided here)
+- **Q1:** a bounded second restoration after a mismatched or uncertain restoration, under its own ID and charge. Excluded in this increment.
+- **Q2:** whether a recovery withheld after a foreign reservation should be offered to the operator through `daw recover` (Increment 6).
+- **Q3:** corrected manifests after a file rejection. Still excluded, unchanged from Increment 3.
+
+## Increment 4 outcome (2026-11-19, tests-first; uncommitted for review)
+
+**Implemented as revision 1 of the plan**, recorded in [ADR-038](../../decisions/0038-coordinator-daw-recovery-routing.md) (Proposed), with D1–D6 as approved.
+- **Routine:** `recover_daw` (`core.loop.daw_recovery`) replaces every interim stop.
+- **Lineage:** the recovery-lineage query and snapshot (R7) serve recovery. `state_anchor` and `continuity_snapshot` are unchanged.
+- **Budget:** a DAW write reserves three recovery slots.
+- **Evidence:** it rests only on the final fresh reading, compared exactly.
+
+**Additions beyond the plan's text, each test-pinned:**
+- **Effective entry:** an uncertain or invalid reply takes its effective entry from the journal's lineage. An invalid reply whose write the journal records as confirmed is restored as a confirmed write, and still ends with `INVALID_RENDER_RESPONSE`.
+- **Gate verdicts:** the restore-gate verdicts are recorded as trace payloads.
+- **Recovery IDs:** a token that cannot carry all recovery IDs is refused before any write.
+- **Performed recovery:** exact final evidence counts as a performed recovery step for the pending marker. Without this, an integrity exception after a `NoWrite` restoration would read "not performed".
+- **Contract failure:** a journal charge that disagrees with the run's grant is `RUNTIME_CONTRACT_FAILED`. It sits after rows 1–3 of the precedence, and ADR-038 lists the full order.
+
+**Deviations from the plan's expectations:**
+- **Test 5 (off-target, lost restoration reply):** the plan expected `DAW_COMMAND_UNRESOLVED`. Step 3 reconciles and resolves that restoration, so the run ends `DAW_CONVERSION_BLOCKED` with an `UNCERTAIN` rollback and no fader evidence. The unresolved-and-blocked case is pinned instead by a lost restoration reply with the fader moved to neither reference, which also pins precedence rows 1 and 2.
+- **`AMBIGUOUS` (test 6):** the finding cannot be produced by an admissible write under the calibrated profile. The smallest advertised cut (0.1 dB) exceeds the start dB tolerance (0.05 dB), and the normalized tolerance (0.001) is tighter than the curve. A test pins this. The decision rule's `AMBIGUOUS` mapping is pinned at contract level, and its fail-closed `NoWrite` edge through a restore-then-resolve plan whose gate finds the exact start.
+- **Binding and ordering checks in the evidence step:** these are kept, but they are implied by the exact lineage-apply equality and the own-lineage precondition, so no probe can isolate them.
+- **Replay charge reuse:** the reuse of an already journaled restoration charge cannot occur in-process. A controller-level replay is tested and charged once, and the reuse branch is left for Increment 5.
+
+**Superseded tests and probes:**
+- **Tests:** the interim-stop tests of Increments 2 and 3 (off-target, uncertain write, failed preparation, failed or disagreeing anchor, rejected or inconclusive candidate, rejected import, continuity failures, absent acceptance) now expect recovery.
+- **Unchanged tests:** the lost-terminal-append test keeps its purpose through a failing lineage query.
+- **Superseded probes:** four earlier probes target code that no longer exists (the one-slot reserve, the off-target interim stop, the unaccepted-candidate `UNCERTAIN` claim, confirmed-absent as a restoration). Increment 4 probes replace them.
+
+**Evidence:**
+- **Tests:** 41 recovery tests and 14 lineage and contract tests.
+- **Mutation probes:** 17 new, all caught. The earlier sets are all caught apart from the four superseded probes.
+- **Locked checks:**
+
+  | Check | Result |
+  | --- | --- |
+  | Focused suites, warnings as errors | 1,936 passed |
+  | Full suite | 6,273 passed, 4 skipped |
+  | `ruff check` | clean |
+  | `ruff format --check` | clean |
+  | CLI help | runs |
+  | `uv lock --check` | clean |
+  | `git diff --check` | clean |
+- **Not live FL evidence:** none of this is, and nothing was installed.
+
+### Increment 4 review fixes (2026-11-20)
+
+1. **A later foreign reservation could be overwritten by recovery.** The own-lineage check ran before restoration preparation, and the reservation checked only foreign unresolved commands. Codex reproduced a foreign reservation made after the check: `restore_gain` was still sent, and only the final snapshot noticed.
+   - **Fix:** `DawRestoreRequest.own_lineage_only`, set by the coordinator. The FL journal refuses such a reservation (`foreign_history`) inside its transaction whenever a reservation or resolution outside the root's lineage follows the root. A refusal with no journaled charge counts as withheld.
+   - **Unchanged:** the early lineage check stays and withholds before any recovery read. It is pinned by asserting that neither a restore target nor a recovery intent is recorded.
+   - **Regressions:**
+     - coordinator level: foreign history appearing during preparation leads to no restoration dispatch, no recovery charge, withheld, and `REQUIRED_RECOVERY_NOT_PERFORMED`;
+     - adapter level: the journal refuses an own-lineage restoration after foreign history, and requests without the flag are unchanged.
+2. **Resolving a restoration left a stale exception marker.** The facts and marker were settled before recording only for root resolutions. Codex reproduced an off-target write with a lost restoration reply, a successful resolution of that restoration, and then an exception while recording it: the reason was `DAW_COMMAND_UNRESOLVED` with nothing unresolved.
+   - **Fix:** every validated resolution settles the remaining facts and the marker before it is recorded.
+   - **Regression:** the reproduced case now ends `DAW_CONVERSION_BLOCKED`, with the FL journal holding no unresolved command and the block intact.
+
+**Checks.**
+- **Mutation probes:** four new, all caught: the own-lineage flag not requested, not enforced at the reservation, a pre-reservation refusal treated as reserved, and stale resolution facts. All earlier sets are still caught.
+- **Pinned contract test:** the public-contract test of `gate_daw_restore`'s signature now lists the new keyword.
+- **Locked checks:**
+
+  | Check | Result |
+  | --- | --- |
+  | Focused suites, warnings as errors | 1,939 passed |
+  | Full suite | 6,276 passed, 4 skipped |
+  | `ruff check` | clean |
+  | `ruff format --check` | clean |
+  | CLI help | runs |
+  | `uv lock --check` | clean |
+  | `git diff --check` | clean |

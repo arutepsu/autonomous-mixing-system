@@ -14,6 +14,12 @@ from autonomous_mixing.core.records.budgets import (
 )
 from autonomous_mixing.core.records.invariants import require_finite, require_instance
 
+# Free RECOVERY_OPERATION slots an effect needs before dispatch. A render's recovery is one integrity inspection. A DAW
+# write's worst complete recovery path (coordinator Increment 4, ADR-038, D2 revised) is the acceptance-authority query
+# after an unknown commit, one exact restoration and one integrity inspection: three.
+RENDER_RECOVERY_RESERVE = 1
+DAW_WRITE_RECOVERY_RESERVE = 3
+
 
 def check_budget(
     operation: BudgetOperation,
@@ -67,10 +73,9 @@ def check_budget(
 
     if count >= limit:
         return BudgetBlock(operation, reason, observed)
-    if (
-        operation in (BudgetOperation.RENDER_CALL, BudgetOperation.DAW_WRITE)
-        and usage.recovery_operations >= limits.max_recovery_operations
-    ):
+    reserve = {BudgetOperation.RENDER_CALL: RENDER_RECOVERY_RESERVE,
+               BudgetOperation.DAW_WRITE: DAW_WRITE_RECOVERY_RESERVE}.get(operation, 0)  # fmt: skip
+    if reserve and usage.recovery_operations + reserve > limits.max_recovery_operations:
         return BudgetBlock(operation, BudgetBlockReason.RECOVERY_CAPACITY_LIMIT, observed)
 
     match operation:

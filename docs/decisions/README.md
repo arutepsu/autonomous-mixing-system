@@ -41,6 +41,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [035](0035-coordinator-daw-execution-path.md) | Coordinator DAW execution path: contracts (Increment 1) | 2026-11-19 | Proposed |
 | [036](0036-coordinator-daw-write-path-to-suspension.md) | Coordinator DAW write path up to the export suspension (Increment 2) | 2026-11-19 | Proposed |
 | [037](0037-coordinator-daw-continuation.md) | Coordinator DAW continuation: import, verification and acceptance (Increment 3) | 2026-11-19 | Proposed |
+| [038](0038-coordinator-daw-recovery-routing.md) | Coordinator DAW recovery routing (Increment 4) | 2026-11-19 | Proposed |
 
 ## Template
 

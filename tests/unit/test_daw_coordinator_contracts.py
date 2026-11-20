@@ -486,7 +486,7 @@ def test_a_daw_rollback_can_never_be_a_complete_project_rollback():
 # --- budget, run state, termination and trace additions ------------------------------------------------------------------
 
 
-LIMITS = BudgetLimits(3, 2, 2, 2, 60.0, max_daw_writes=1)
+LIMITS = BudgetLimits(3, 2, 2, 3, 60.0, max_daw_writes=1)  # three recovery slots: a DAW write's reserve (ADR-038)
 
 
 def test_daw_writes_have_their_own_budget():
@@ -503,7 +503,7 @@ def test_daw_writes_have_their_own_budget():
 
 
 def test_a_daw_write_needs_an_unused_recovery_slot_like_a_render():
-    exhausted = BudgetUsage(0, 1, 0, 2, 1.0)  # both recovery slots used
+    exhausted = BudgetUsage(0, 1, 0, 1, 1.0)  # only two of the three reserved recovery slots are free (ADR-038)
     block = check_budget(BudgetOperation.DAW_WRITE, limits=LIMITS, usage=exhausted, elapsed_seconds=2.0)
     assert isinstance(block, BudgetBlock) and block.reason is BudgetBlockReason.RECOVERY_CAPACITY_LIMIT
 

@@ -29,13 +29,18 @@ from autonomous_mixing.core.records.daw_control import (
 )
 from autonomous_mixing.core.records.daw_recovery import (
     DawControlState,
+    DawReconciliation,
     DawRecoveryAuthorization,
+    DawRecoveryDecision,
+    DawRecoveryEntry,
+    DawRecoveryPlan,
     DawRestoreGateCode,
     DawRestoreGateResult,
     DawRestoreNoWrite,
     DawRestorePermitted,
     DawRestoreRejected,
     DawRestoreRequest,
+    daw_recovery_plan_for,
 )
 from autonomous_mixing.core.records.identifiers import ExecutionId, VersionRef
 from autonomous_mixing.core.records.invariants import require_finite, require_finite_result, require_instance
@@ -267,6 +272,7 @@ def gate_daw_restore(
     profile: DawControlProfile,
     recovery_command_id: str,
     control_state: DawControlState,
+    own_lineage_only: bool = False,
 ) -> DawRestoreGateResult:
     """Decide before dispatch whether an authorized exact restoration may be sent.
 
@@ -302,7 +308,29 @@ def gate_daw_restore(
     reading = target.reading
     if not (profile.normalized_range.contains(reading.normalized) and profile.fader_db_range.contains(reading.db)):
         return DawRestoreRejected(DawRestoreGateCode.TARGET_OUT_OF_RANGE, "the target lies outside the tested range")
-    request = DawRestoreRequest(recovery_command_id, authorization, binding, profile, inspection)
+    request = DawRestoreRequest(recovery_command_id, authorization, binding, profile, inspection, own_lineage_only)
     if inspection.fader == reading:
         return DawRestoreNoWrite(request)
     return DawRestorePermitted(request)
+
+
+def daw_recovery_decision(
+    entry: DawRecoveryEntry, root_command_id: str, reconciliation: DawReconciliation | None
+) -> DawRecoveryDecision:
+    """Which recovery steps the evidence permits (G15, coordinator Increment 4, ADR-038).
+
+    A known write (confirmed or off target) is restored exactly, with no reconciliation. An uncertain write is decided
+    by one fresh reconciliation of its own root: at the recorded start it is resolved first (and restored only if the
+    gate finds the reading inexact); at the commanded value, at neither or ambiguously it is restored and then resolved
+    citing that restoration; an unverified identity permits nothing. A tolerance match never establishes rollback.
+    """
+    require_instance(entry, DawRecoveryEntry, "entry")
+    if entry is not DawRecoveryEntry.UNCERTAIN_WRITE:
+        if reconciliation is not None:
+            raise ValueError("a known write is restored without a reconciliation")
+        return DawRecoveryDecision(entry, root_command_id, DawRecoveryPlan.RESTORE, None, None)
+    require_instance(reconciliation, DawReconciliation, "reconciliation")
+    if reconciliation.subject_command_id != root_command_id:
+        raise ValueError("the reconciliation answers another command than the uncertain root")
+    return DawRecoveryDecision(entry, root_command_id, daw_recovery_plan_for(reconciliation.finding),
+                               reconciliation.reconciliation_id, reconciliation.finding)  # fmt: skip

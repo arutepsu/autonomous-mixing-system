@@ -34,7 +34,13 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
-    "admission.daw": ("resolve_daw_gain", "daw_gain_bounds", "gate_daw_apply", "gate_daw_restore"),  # 2026-11-18
+    "admission.daw": (
+        "resolve_daw_gain",
+        "daw_gain_bounds",
+        "gate_daw_apply",
+        "gate_daw_restore",  # 2026-11-18
+        "daw_recovery_decision",
+    ),  # coordinator Increment 4 (ADR-038)  # fmt: skip
     "admission.daw_export": ("assess_daw_import",),  # export handoff plan, 2026-11-18 (revision 3)
     "admission.daw_correction": ("preflight_daw_correction",),  # coordinator Increment 2 (ADR-036)
     "loop.daw_execution": ("daw_track_state", "daw_capabilities", "prepare_daw", "execute_daw"),  # ADR-036
@@ -45,6 +51,7 @@ BEHAVIOR_INVENTORY = {
         "reconcile_daw_acceptance",
         "admit_continuation",
     ),
+    "loop.daw_recovery": ("recovery_ids", "require_recovery_authority", "recover_daw"),  # Increment 4 (ADR-038)
     "loop.acceptance_flow": ("accept", "finish_acceptance"),
     "loop.daw_transitions": (  # coordinator-integration Increment 1 (ADR-035)
         "daw_execution_receipt",
@@ -95,6 +102,8 @@ BEHAVIOR_INVENTORY = {
         "validate_daw_control_state",
         "validate_daw_state_anchor",  # export handoff plan, 2026-11-18 (revision 3)
         "validate_daw_continuity_snapshot",
+        "validate_daw_recovery_lineage",  # coordinator Increment 4 (ADR-038)
+        "validate_daw_recovery_snapshot",
     ),
     "ports.daw_export": ("DawExportHandoff", "validate_daw_export_preparation", "validate_daw_files_verified"),
     "ports.acceptance": (

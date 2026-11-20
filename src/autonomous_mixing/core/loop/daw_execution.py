@@ -25,6 +25,7 @@ from dataclasses import replace
 
 from autonomous_mixing.core.admission.daw import daw_gain_bounds, gate_daw_apply
 from autonomous_mixing.core.admission.daw_correction import preflight_daw_correction
+from autonomous_mixing.core.loop.daw_recovery import recover_daw, recovery_ids
 from autonomous_mixing.core.loop.feedback import _rejection, add_feedback
 from autonomous_mixing.core.loop.runtime import _invalid, fresh, gate, identity_failure, observed, record
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
@@ -35,6 +36,7 @@ from autonomous_mixing.core.ports.daw_recovery import (
     validate_daw_control_state,
     validate_daw_state_anchor,
 )
+from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
 from autonomous_mixing.core.ports.run_journal import RunJournal
 from autonomous_mixing.core.records.actions import ExecutionStatus
 from autonomous_mixing.core.records.admission import AdmittedAction, PreflightRejected
@@ -53,6 +55,7 @@ from autonomous_mixing.core.records.daw_control import (
 )
 from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended, DawSessionConfig, DawStateQuery
 from autonomous_mixing.core.records.daw_export import DawExportAwaiting, DawExportRequest, DawStateBasis
+from autonomous_mixing.core.records.daw_recovery import DawRecoveryEntry
 from autonomous_mixing.core.records.decision import Decision, Situation
 from autonomous_mixing.core.records.feedback import ActionFeedback, ActionFeedbackDisposition, FeedbackStage
 from autonomous_mixing.core.records.identifiers import ArtifactId, AttemptId, DecisionCallId, ExecutionId, Revision
@@ -78,6 +81,15 @@ def daw_capabilities(state: ProjectState, session: DawSessionConfig) -> Renderer
     bounds = daw_gain_bounds(profile=session.profile, state=daw_track_state(state, session),
                              permission=session.permission)  # fmt: skip
     return RendererCapabilities(session.profile.reference, bounds)
+
+
+def _recovery_ids_fit(token: str) -> bool:
+    """Every recovery ID of the attempt must fit the ID rule before any write (ADR-038)."""
+    try:
+        recovery_ids(token)
+    except ValueError:
+        return False
+    return True
 
 
 def prepare_daw(
@@ -109,6 +121,7 @@ def prepare_daw(
         or token in progress.tokens
         or not _ID.fullmatch(command_id)
         or not _ID.fullmatch(f"export-{token}")
+        or not _recovery_ids_fit(token)
     ):
         return (progress, identity_failure("DAW execution identity"))
     progress = replace(progress, tokens=progress.tokens | {token})
@@ -141,10 +154,16 @@ def execute_daw(
     daw_controller: DawParameterController,
     recovery_controller: DawRecoveryController,
     export_handoff: DawExportHandoff,
+    integrity_inspector: StateIntegrityInspector,
     on_progress: Callable[[RuntimeProgress], None],
 ) -> tuple[RuntimeProgress, Stop | RunTraceEvent | None]:
-    """None: another decision round follows. A stop ends the run. A ``RunTraceEvent``: the recorded suspension."""
+    """None: another decision round follows. A stop ends the run. A ``RunTraceEvent``: the recorded suspension.
+
+    Every outcome that leaves the fader moved, or possibly moved, goes through ``recover_daw`` (Increment 4,
+    ADR-038): authorized, journal-backed recovery with the terminal reason chosen by its precedence.
+    """
     session, plan, state, action = progress.request.daw_session, ctx.plan, ctx.before, ctx.action
+    expected = progress.accepted  # the attempt's before reference: recovery may restore only to it
     ids = dict(call=ctx.call_id, attempt=ctx.attempt_id, execution=plan.execution_id, clock=clock,
                identities=identities, journal=journal, on_progress=on_progress)  # fmt: skip
     rec = dict(identities=identities, journal=journal, on_progress=on_progress)
@@ -157,18 +176,18 @@ def execute_daw(
         progress, feedback_stop = feedback(progress, outcome)
         return (progress, stop or feedback_stop)
 
-    def unresolved(progress, reason, explanation):
-        """Interim termination (ADR-036): possibly written, not restored, nothing cleared, no rollback claimed."""
-        outcome = ActionFeedback(action, ctx.attempt_id, plan.execution_id, ActionFeedbackDisposition.UNRESOLVED,
-                                 FeedbackStage.RENDER, ExecutionStatus.UNCERTAIN, None, None, reason.value, explanation,
-                                 ())  # fmt: skip
-        progress, _ = feedback(progress, outcome)
-        return (progress, (reason, explanation))
+    def recover(progress, entry, original):
+        return recover_daw(progress, ctx, entry, original, expected=expected, apply=request, clock=clock,
+                           identities=identities, integrity_inspector=integrity_inspector, journal=journal,
+                           daw_controller=daw_controller, recovery_controller=recovery_controller,
+                           on_progress=on_progress)  # fmt: skip
 
     def after_write(progress, cause):
-        return unresolved(progress, TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
-                          f"the fader write was confirmed but {cause}; the fader is not restored and recovery is "
-                          "not performed in this increment")  # fmt: skip
+        return recover(
+            progress,
+            DawRecoveryEntry.CONFIRMED_WRITE,
+            (TerminationReason.EXECUTION_PREPARATION_FAILED, f"the fader write was confirmed but {cause}"),
+        )
 
     # 1. the FL journal's control state (unresolved commands, blocked conversions)
     preparation = TerminationReason.EXECUTION_PREPARATION_FAILED
@@ -260,11 +279,14 @@ def execute_daw(
         progress, feedback_stop = feedback(progress, outcome)
         return (progress, stop or feedback_stop)
     if isinstance(written, DawWriteOffTarget):
-        return unresolved(progress, TerminationReason.DAW_CONVERSION_BLOCKED,
-                          "the fader landed off target; its conversion is blocked and the fader is not restored")  # fmt: skip
+        return recover(progress, DawRecoveryEntry.OFF_TARGET, (TerminationReason.DAW_CONVERSION_BLOCKED,
+                       "DAW write: the fader landed off target; its conversion is blocked"))  # fmt: skip
     if not isinstance(written, DawWriteConfirmed):
-        return unresolved(progress, TerminationReason.DAW_COMMAND_UNRESOLVED,
-                          "the fader write is uncertain or invalid; the command stays unresolved")  # fmt: skip
+        # D4 (ADR-038): the render-stage reasons, documented as "the DAW fader write had an uncertain/invalid outcome"
+        original = ((TerminationReason.INVALID_RENDER_RESPONSE, "DAW write: the write reply was invalid")
+                    if written is None else (TerminationReason.RENDER_FAILED, "DAW write: the write's outcome is "
+                                             "uncertain"))  # fmt: skip
+        return recover(progress, DawRecoveryEntry.UNCERTAIN_WRITE, original)
     if stop:
         return after_write(progress, f"its outcome could not be recorded ({stop[0].value})")
 

@@ -248,7 +248,8 @@ def run_daw(
         raise ValueError("run_daw() needs a request with a DAW session")
 
     execute = partial(execute_daw, clock=clock, identities=identities, journal=journal, daw_controller=daw_controller,
-                      recovery_controller=recovery_controller, export_handoff=export_handoff)  # fmt: skip
+                      recovery_controller=recovery_controller, export_handoff=export_handoff,
+                      integrity_inspector=integrity_inspector)  # fmt: skip
 
     return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker,
                 integrity_inspector=integrity_inspector, journal=journal, clock=clock, identities=identities,
@@ -429,12 +430,12 @@ def resume_daw(
         )  # fmt: skip
         execute = partial(execute_daw, clock=clock, identities=identities, journal=journal,
                           daw_controller=daw_controller, recovery_controller=recovery_controller,
-                          export_handoff=export_handoff)  # fmt: skip
+                          export_handoff=export_handoff, integrity_inspector=integrity_inspector)  # fmt: skip
         step = partial(_resumed, checkpoint_event=checkpoint_event, manifest=manifest, analyzer=analyzer, clock=clock,
                        decision_maker=decision_maker, diagnosis_source=diagnosis_source, identities=identities,
                        integrity_inspector=integrity_inspector, journal=journal,
                        recovery_controller=recovery_controller, export_handoff=export_handoff,
-                       execute=execute)  # fmt: skip
+                       daw_controller=daw_controller, execute=execute)  # fmt: skip
         return _complete(progress, step, clock=clock, identities=identities, journal=journal)
     finally:
         journal.release_exclusive()
@@ -454,6 +455,7 @@ def _resumed(
     journal: RunJournal,
     recovery_controller: DawRecoveryController,
     export_handoff: DawExportHandoff,
+    daw_controller: DawParameterController,
     execute: Callable,
     on_progress: Callable[[RuntimeProgress], None],
 ) -> tuple[RuntimeProgress, Stop | RunTraceEvent]:
@@ -471,10 +473,15 @@ def _resumed(
     progress, result = continue_daw(
         progress, checkpoint_record, manifest, analyzer=analyzer, clock=clock, identities=identities,
         integrity_inspector=integrity_inspector, journal=journal, recovery_controller=recovery_controller,
-        export_handoff=export_handoff, on_progress=on_progress,
+        export_handoff=export_handoff, daw_controller=daw_controller, on_progress=on_progress,
     )  # fmt: skip
     accepted = progress.authority_known and progress.accepted.sequence > checkpoint_record.accepted.sequence
-    disposition = DawContinuationDisposition.ACCEPTED if accepted else DawContinuationDisposition.ENDED
+    if accepted:
+        disposition = DawContinuationDisposition.ACCEPTED
+    elif result is None:  # rejected and rolled back VERIFIED (ADR-038): the loop continues
+        disposition = DawContinuationDisposition.ROLLED_BACK
+    else:
+        disposition = DawContinuationDisposition.ENDED
     finished = DawContinuationFinished(progress.request.run_id, started_id, export_id, disposition)
     progress, marker_stop = record(progress, finished, **rec)
     if result:

@@ -47,13 +47,14 @@ from autonomous_mixing.adapters.rendering.export_handoff import FileExportHandof
 from autonomous_mixing.adapters.rendering.workspaces import WorkspaceRoot
 from autonomous_mixing.core.loop.coordinator import run, run_daw
 from autonomous_mixing.core.records.acceptance import AcceptanceCommitted, AcceptanceEvent, AcceptedReference
-from autonomous_mixing.core.records.actions import ExecutionReceipt, ExecutionStatus, RollbackReceipt
+from autonomous_mixing.core.records.actions import ExecutionReceipt, ExecutionStatus, RollbackReceipt, RollbackStatus
 from autonomous_mixing.core.records.admission import AdmissionRejectionCode, RejectedAction, TrackGainPermission
 from autonomous_mixing.core.records.artifacts import ArtifactKind
 from autonomous_mixing.core.records.budgets import BudgetLimits
 from autonomous_mixing.core.records.daw_control import DawApplyRejected, DawGateCode, DawNoWrite
 from autonomous_mixing.core.records.daw_correction import DawCorrectionSuspended, DawPlanReady, DawSessionConfig
 from autonomous_mixing.core.records.daw_export import DawExportFormat, DawExportTimeline
+from autonomous_mixing.core.records.daw_rollback import DawRollbackRecord
 from autonomous_mixing.core.records.feedback import ActionFeedback, ActionFeedbackDisposition, DecisionFeedback
 from autonomous_mixing.core.records.identifiers import Revision
 from autonomous_mixing.core.records.project import DawParameterState, DawTrackParameter
@@ -81,7 +82,7 @@ OK_CUT = 0.0  # application gain 0.0 dB: a 2 dB cut from the confirmed 2.0 dB, i
 
 
 def limits(**overrides):
-    fields = dict(max_decision_calls=4, max_attempts=3, max_render_calls=3, max_recovery_operations=2,
+    fields = dict(max_decision_calls=4, max_attempts=3, max_render_calls=3, max_recovery_operations=3,
                   max_elapsed_seconds=60.0, max_daw_writes=2)  # fmt: skip
     fields.update(overrides)
     return BudgetLimits(**fields)
@@ -271,6 +272,15 @@ def test_an_exhausted_daw_write_budget_blocks_before_any_dispatch(harness):
 # --- written or possibly written: terminate safely, claim nothing (interim, before Increment 4) -------------------
 
 
+def assert_recovered(result, reason):
+    """Increment 4 (ADR-038) supersedes the interim stops: the write is restored exactly, rollback VERIFIED."""
+    assert isinstance(result, RunReport) and result.final_run.termination_reason is reason
+    assert result.final_run.final_project_state is FinalProjectState.RESTORED_TO_LAST_ACCEPTED
+    assert result.verified == result.authoritative and not payloads(result, ExecutionReceipt)
+    rollback = payloads(result, DawRollbackRecord)[-1].receipt
+    assert rollback.status is RollbackStatus.VERIFIED and rollback.fader_evidence
+
+
 def assert_safe_unresolved_termination(result, reason):
     assert isinstance(result, RunReport) and result.final_run.termination_reason is reason
     assert result.final_run.final_project_state is FinalProjectState.UNKNOWN and result.verified is None
@@ -280,31 +290,30 @@ def assert_safe_unresolved_termination(result, reason):
         ActionFeedbackDisposition.UNRESOLVED, ExecutionStatus.UNCERTAIN, None)  # fmt: skip
 
 
-def test_an_off_target_write_terminates_with_the_conversion_blocked_and_no_rollback(harness):
+def test_an_off_target_write_is_restored_and_terminates_with_the_conversion_blocked(harness):
     h = harness(decisions=(propose(OK_CUT), no_change))
     h.world.host.curve = lambda v: live_curve(v) + (0.0 if v == 0.76 else 0.2)  # lands, but misses the dB change
     result = h.run()
-    assert_safe_unresolved_termination(result, R.DAW_CONVERSION_BLOCKED)
-    assert PROFILE.conversion in h.fl_journal.control_state().blocked_conversions
-    assert not h.sent("restore_gain") and len(h.decider.situations) == 1  # no further action
+    assert_recovered(result, R.DAW_CONVERSION_BLOCKED)  # superseded the interim stop (Increment 4, ADR-038)
+    assert PROFILE.conversion in h.fl_journal.control_state().blocked_conversions  # the block is never cleared
+    assert len(h.sent("restore_gain")) == 1 and len(h.decider.situations) == 1  # no further action
 
 
-def test_an_uncertain_write_terminates_with_the_command_unresolved_and_no_rollback(harness):
+def test_an_uncertain_write_is_reconciled_restored_and_resolved(harness):
     h = harness(decisions=(propose(OK_CUT), no_change))
     h.world.controller.transport_factory = lambda: LoseApplyReply(h.world)
     result = h.run()
-    assert_safe_unresolved_termination(result, R.DAW_COMMAND_UNRESOLVED)
-    unresolved = h.fl_journal.control_state().unresolved
-    assert [c.command_id for c in unresolved] == [h.sent("set_gain_db")[0]["id"]]
-    assert not h.sent("restore_gain") and len(h.decider.situations) == 1
+    assert_recovered(result, R.RENDER_FAILED)  # D4: the render-stage reason, documented for the DAW write
+    assert result.final_run.termination_explanation.startswith("DAW write:")
+    assert h.fl_journal.control_state().unresolved == () and len(h.decider.situations) == 1
 
 
-def test_a_failed_export_preparation_after_a_confirmed_write_requires_recovery(harness):
+def test_a_failed_export_preparation_after_a_confirmed_write_is_restored(harness):
     h = harness(decisions=(propose(OK_CUT), no_change), exports_exist=False)
     result = h.run()
-    assert_safe_unresolved_termination(result, R.REQUIRED_RECOVERY_NOT_PERFORMED)
+    assert_recovered(result, R.EXECUTION_PREPARATION_FAILED)
     assert "prepar" in result.final_run.termination_explanation
-    assert not payloads(result, DawCorrectionSuspended) and not h.sent("restore_gain")
+    assert not payloads(result, DawCorrectionSuspended) and len(h.sent("restore_gain")) == 1
 
 
 class FailingAnchor:
@@ -320,12 +329,19 @@ class FailingAnchor:
         return PortFailure(PortFailureCode.UNAVAILABLE, "labelled anchor failure", False)
 
 
-def test_a_failed_anchor_after_a_confirmed_write_requires_recovery(harness, tmp_path):
+def test_a_failed_anchor_after_a_confirmed_write_is_restored(harness, tmp_path):
     h = harness(decisions=(propose(OK_CUT), no_change))
-    h.recovery = FailingAnchor(h.world.controller)
+    h.recovery = FailingAnchor(h.world.controller)  # the recovery lineage, not the export anchor, serves recovery
     result = h.run()
-    assert_safe_unresolved_termination(result, R.REQUIRED_RECOVERY_NOT_PERFORMED)
+    assert_recovered(result, R.EXECUTION_PREPARATION_FAILED)
     assert OperationKind.EXPORT_PREPARE not in operations(result)
+
+
+class FailingLineage(FailingAnchor):
+    """Also refuses the recovery lineage, so no recovery can be performed (controlled double)."""
+
+    def recovery_lineage(self, root_command_id):
+        return PortFailure(PortFailureCode.UNAVAILABLE, "labelled lineage failure", False)
 
 
 def test_an_unresolved_reason_survives_a_lost_terminal_append(harness):
@@ -335,8 +351,10 @@ def test_an_unresolved_reason_survives_a_lost_terminal_append(harness):
     h = harness(decisions=(propose(OK_CUT), no_change), journal=lambda inner: FaultyJournal(inner,
                                                                                            append_fault=refuse_terminal))  # fmt: skip
     h.world.controller.transport_factory = lambda: LoseApplyReply(h.world)
+    h.recovery = FailingLineage(h.world.controller)
     result = h.run()
     assert result.final_run.termination_reason is R.DAW_COMMAND_UNRESOLVED
+    assert not h.sent("restore_gain")
 
 
 # --- the offline path is unchanged ------------------------------------------------------------------------------
@@ -369,11 +387,11 @@ class MovedAnchor(FailingAnchor):
         return Success(replace(real, reading=moved))
 
 
-def test_an_anchor_that_disagrees_with_the_confirmed_write_requires_recovery(harness):
+def test_an_anchor_that_disagrees_with_the_confirmed_write_is_restored(harness):
     h = harness(decisions=(propose(OK_CUT), no_change))
     h.recovery = MovedAnchor(h.world.controller)
     result = h.run()
-    assert_safe_unresolved_termination(result, R.REQUIRED_RECOVERY_NOT_PERFORMED)
+    assert_recovered(result, R.EXECUTION_PREPARATION_FAILED)
     assert "anchor" in result.final_run.termination_explanation
     assert OperationKind.EXPORT_PREPARE not in operations(result)  # refused before the operator is asked to export
 

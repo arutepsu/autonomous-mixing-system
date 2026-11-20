@@ -396,14 +396,15 @@ class DawContinuationStarted:
 class DawContinuationDisposition(Enum):
     ACCEPTED = "accepted"  # its candidate's acceptance was established; the run may continue or finish
     ENDED = "ended"  # the continuation ended the run without an established acceptance
+    ROLLED_BACK = "rolled_back"  # Increment 4 (ADR-038): rejected, VERIFIED selected-state rollback; the run continues
 
 
 @dataclass(frozen=True)
 class DawContinuationFinished:
     """Completion evidence of one continuation (amendment A2), recorded exactly once.
 
-    ``ACCEPTED`` is recorded after the accepted attempt's feedback and before any next decision round, so a later
-    write and suspension always follow it; ``ENDED`` is the last event before the terminal snapshot.
+    ``ACCEPTED`` and ``ROLLED_BACK`` are recorded after the attempt's feedback and before any next decision round,
+    so a later write and suspension always follow them; ``ENDED`` is the last event before the terminal snapshot.
     """
 
     run_id: RunId
