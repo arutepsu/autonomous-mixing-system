@@ -1,6 +1,6 @@
 # P1 directional masking: measurement and diagnosis method
 
-**Status:** Method specification accepted by the owner, 2026-11-20. No implementation or calibration run. Acceptance covers this design and its explicit calibration gates; it does not establish missing numerical parameters or empirical results.
+**Status:** Method specification accepted by the owner, 2026-11-20. Updated 2026-11-22: R1 descriptive measurement/support implementation is reviewed and committed at `0242c99`; calibration has not run, qualified support S0 is unavailable and production diagnosis is missing. Design acceptance does not establish numerical policy values or perceptual validity.
 
 **Parent:** [Diagnosis and AI decision adapter plan](../plans/2026-11-20-diagnosis-and-decision-adapter.md).
 
@@ -212,9 +212,9 @@ After review of this specification, R1 can implement descriptive measurement and
 
 A read-only builder check found three data-path gaps: a missing scalar for temporal persistence, a support-manifest lifecycle incompatible with fixed run configuration, and an incorrect claim of an existing counted analysis budget. This draft now exposes the run-duration scalar and proposes a separate persisted preparation phase before run construction, with bounded resources and separately reported timing. These are design proposals, not implemented behavior.
 
-## R1 implementation record (2026-11-20, Claude Code; uncommitted, for Codex review)
+## R1 implementation record (2026-11-20, Claude Code; review completed and committed 2026-11-22 at `0242c99`)
 
-This section records what R1 implemented and where it differs from or makes precise the text above. Sections 1-10 are unchanged. Each "proposed deviation" needs review; none changes a scientific choice, and no calibration value exists.
+This section records what R1 implemented and where it differs from or makes precise the design above. R1 and its four review fixes were reviewed before commit `0242c99`; the implementation decisions below record that descriptive slice. Qualified support, diagnosis and numerical calibration values remain unimplemented/unestablished. Independent focused re-review ran 344 tests with warnings as errors; the full-suite result of 6,517 passed and 4 skipped is the implementer-reported check, not a separate full-suite rerun by the reviewer.
 
 **Implemented (descriptive only).**
 - Records: `core/records/masking_measurement.py`.
@@ -230,7 +230,7 @@ This section records what R1 implemented and where it differs from or makes prec
 - **Capture replay:** probe B `thm`/`en` fed through the production cell selection and margin kernel agree with independent per-cell `10 * (log10 T - log10 E)` to below 1e-9 dB. This is an arithmetic check, not a front-end claim.
 - **Full chain:** `capture/compare_band_margins.py`, unchanged, reports a largest absolute margin difference of 5.552e-03 dB, with no sign change, on the tone pairs and exact-silence controls. This is a finite-corpus observation, not a tolerance or a `delta_M`.
 
-**Proposed deviations and precisions.**
+**Reviewed descriptive-slice decisions and precisions.**
 1. **Preparation produces U only.**
    - Section 4 says preparation "verifies and measures" the initial state and derives S0. With no approved policy, R1 verifies the files (hash, profile) and computes geometry only. No DSP runs during preparation and no S0 exists.
    - The manifest records the uncalibrated status, the support kind, the verified baseline hashes, the geometry, the explicit cell list and the support digests.

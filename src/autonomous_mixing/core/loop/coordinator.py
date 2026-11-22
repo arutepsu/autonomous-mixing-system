@@ -341,15 +341,21 @@ def _complete(
     try:
         progress, stop = step(progress, on_progress=remember)
     except Exception as error:
-        # Phase-aware (review fix 2026-11-19): once a DAW write may have taken effect, the pending reason is kept; the
-        # original exception still propagates, nothing is restored and no journal state is cleared.
+        # Keep unresolved effects (DAW writes or acceptance dispatch) through unexpected errors.
+        # The original exception propagates; no speculative retry or recovery is attempted here.
         reason, explanation = TerminationReason.RUNTIME_CONTRACT_FAILED, "an unexpected error interrupted the run"
         if latest.pending_effect is not None:
             reason = latest.pending_effect
-            explanation = (
-                f"an unexpected error ({type(error).__name__}: {error}) interrupted the run after a DAW write may "
-                "have taken effect; the fader is not restored and no journal state is cleared"
-            )
+            if latest.request.daw_session is None and reason is TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN:
+                explanation = (
+                    f"an unexpected error ({type(error).__name__}: {error}) interrupted the run while acceptance "
+                    "authority is unknown; the commit was not retried and no rollback is claimed"
+                )
+            else:
+                explanation = (
+                    f"an unexpected error ({type(error).__name__}: {error}) interrupted the run after a DAW write may "
+                    "have taken effect; the fader is not restored and no journal state is cleared"
+                )
         try:
             finalize(
                 latest,

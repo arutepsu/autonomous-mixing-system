@@ -20,9 +20,22 @@
 1. Working kick/bass autonomous loop with independent validation and baselines.
 2. Reliable evaluation and thesis writing.
 3. Resonance/buildup (P2) and stereo/phase (P3) as planned research targets; P1 end-to-end is the contingency minimum, not a decision to drop P2/P3 (see `../research/project-scope.md`).
-4. UI is optional. Bounded, operator-assisted FL Studio integration (gain changes and verified manual exports) was adopted on 2026-11-18 as an optional path (D15, [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md), Proposed). It is implemented in the coordinator through Increments 1–6 of the [coordinator-integration plan](../superpowers/plans/2026-11-18-daw-coordinator-integration.md) (ADR-035 to 040, Proposed; status updated 2026-11-20, superseding "not implemented in the coordinator"). The status: operator tooling is ready (`daw status` and authorized `daw recover`); autonomous runs are unavailable until a decision maker and a diagnosis source exist; no live FL Studio trial has been run. It does not displace priorities 1–3. This supersedes "DAW integration and UI are optional".
+4. UI is optional. Bounded, operator-assisted FL Studio integration (gain changes and verified manual exports) was adopted on 2026-11-18 as an optional path (D15, [ADR-034](../decisions/0034-bounded-operator-assisted-fl-studio-integration.md), Proposed). It is implemented in the coordinator through Increments 1–6 of the [coordinator-integration plan](../superpowers/plans/2026-11-18-daw-coordinator-integration.md) (ADR-035 to 040, Proposed; status updated 2026-11-20, superseding "not implemented in the coordinator"). The status (updated 2026-11-22): operator status and authorized recovery are implemented with review fixes committed at `027bed7`; autonomous runs are unavailable until production decision and diagnosis components exist. Live research trials of bridge inspection, gain writes, calibration and dB commands are recorded in the bridge/conversion documents; no live integrated agent trial has been run. It does not displace priorities 1–3. This supersedes "DAW integration and UI are optional".
 
-## Current status
-M0 starter runs descriptive analysis; formal scientific detector and Claude adapter are pending. No features may be reported complete without evidence.
+## Current status — 2026-11-22
+
+This dated checkpoint supersedes the M0-only current-status text. The calendar above is the original planning baseline, not evidence that its milestones were achieved. M4's complete production-agent loop is not yet met; this status correction does not invent revised dates or change the submission date.
+
+| Area | Evidence-backed status |
+| --- | --- |
+| Descriptive measurements | Partial: native-channel level analyzer and mono 44.1 kHz PCM_16 P1 directional measurement/support adapters implemented; R1 reviewed and committed at `0242c99`. No qualified P1 diagnosis. |
+| DAW/coordinator reliability | Partial: bounded control, recovery, export continuation and durable restart implemented/tested against a simulated FL host. Live research bridge/dB trials exist separately; no live integrated agent trial. |
+| Production AI/diagnosis | Planned: production diagnosis source, provider packet/parser/audit and Claude adapter are missing. CLI start/continue still refuse. |
+| Dataset and scientific evaluation | In development by the owner in FL Studio. Calibration has not run; no held-out results. The six-project/three-listener/grid-search study remains optional and unapproved. |
+| Next engineering | R3 packet/parser/audit, then R4 provider adapter; diagnosis mechanics can truthfully report unavailable calibration. Work can progress alongside dataset creation. |
+
+See the [accepted staged plan and owner clarifications](../superpowers/plans/2026-11-20-diagnosis-and-decision-adapter.md). The thesis focuses on agent/tool/loop/verification behavior with trustworthy measurements and defensible mixing claims; no paid listener panel is assumed. P2/P3 remain research targets under the existing scope, not completed capabilities.
+
+### Historical M0 checkpoint (retained)
 
 2026-10-14: M0 "validated WAV reading" is met (input validation with tested error paths; 17 tests pass on a uv-synced Python 3.11 environment). M0 "reproducible feature report" is **partial**: output is deterministic, but the report still lacks part of the provenance metadata (FR-12 in `requirements.md`). M0 remains open.

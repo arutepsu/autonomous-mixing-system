@@ -34,8 +34,10 @@ autonomous_mixing/
                     append-only ledger, plus journal-backed state anchors and coherent continuity snapshots for
                     ADR-033 (ADR-030/031/032/033 Proposed; no driver or export automation); its FL device
                     script v2 lives outside the package in device/fl_studio/ and is never imported
-    journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance)
-    decision_agent/ implements DecisionMaker with Claude (ADR-005 name)
+    journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance); R3 adds the separate
+                    append-only decision-exchange store implementing DecisionAuditTrail
+    decision_agent/ implements DecisionMaker with Claude (ADR-005 name); R3 provides the explicit packet projection
+                    and strict response parser (no provider call yet; DecisionMaker planned for R4)
     baselines/      other DecisionMaker implementations for comparison conditions
   drivers/
     cli.py

@@ -666,7 +666,7 @@ Everything else stands.
 | query answer `AcceptanceAbsent` | `authority_known=True` (the previous reference); **no** `restored_last` and no verified reference, because the fader is not restored | DAW unaccepted handler: `REQUIRED_RECOVERY_NOT_PERFORMED`. No integrity-based restoration claim. |
 | query answer `AcceptanceAuthorityUnknown`, the query not performed (budget, time, recording), or an exception before the answer | the authority stays unknown | `ACCEPTANCE_COMMIT_UNCERTAIN` |
 
-**Offline path.** It has the same latent commit-exception issue: an exception from `commit` is recorded as `RUNTIME_CONTRACT_FAILED` with the authority still known. It is left unchanged here to preserve offline behaviour, and is proposed as a separate follow-up.
+**Offline path (historical Increment 3 finding).** At that increment, an exception from `commit` was recorded as `RUNTIME_CONTRACT_FAILED` with authority still known; the path was deliberately left for a separate follow-up. That follow-up is implemented and verified on 2026-11-22, as recorded in the final section "Offline acceptance-authority exception fix" below. This does not change the historical DAW trial evidence.
 
 **Tests added (written first):**
 - **The commit succeeds, then raises:** a journal stand-in commits to the real journal and then raises. The terminal reason is `ACCEPTANCE_COMMIT_UNCERTAIN`, the authoritative and verified references are `None`, and the final state is `UNKNOWN`. The real journal's acceptance history holds the commit, the original exception propagates, and no restore is sent.
@@ -796,7 +796,7 @@ Implemented as planned with amendment A and the approval's constraints, recorded
 - durable restart (Increment 5);
 - CLI wiring and `daw recover` (Increment 6);
 - installation and live FL Studio calls;
-- the offline commit-exception task.
+- the offline commit-exception task (subsequently implemented/verified 2026-11-22; see the follow-up section at the end).
 
 ### Existing contracts used unchanged
 - **Targets:** `DawRecoveryController.restore_target(root)`. The target is the root apply's journaled recorded start: its outcome `before`, or else its request inspection.
@@ -1959,3 +1959,16 @@ The CLI passes only implemented adapters (H1). Tests pass labelled doubles and a
   | CLI help | runs |
   | `uv lock --check` | clean |
   | `git diff --check` | clean |
+
+## Offline acceptance-authority exception fix — 2026-11-22
+
+This closes the separate offline follow-up identified in Increment 3. It is a correctness fix under the existing acceptance-journal contract, not a new DAW capability, new outcome type or policy change.
+
+- Immediately before offline commit dispatch, mark authority unknown, clear the verified reference and retain `ACCEPTANCE_COMMIT_UNCERTAIN` for unexpected-error finalization.
+- A validated committed reply establishes its authoritative reference before fallible promotion or recording. A validated full-content found reply does so before recording its query observation. A refusal or confirmed absence clears the uncertainty marker before recording.
+- A found reply must match the entire submitted event, not only its run/acceptance IDs. An invalid reply remains unknown; do not promote it or inspect the wrong state.
+- Unexpected exceptions propagate as the same exception object after best-effort terminal recording. No automatic retry, query or speculative rollback is added to the exception handler. Known authority and verified integrity remain separate facts.
+- DAW execution/recovery modules are unchanged. The shared finalizer adds offline-specific acceptance-uncertainty wording while retaining the DAW wording.
+- New tests: `tests/unit/test_offline_acceptance_exceptions.py`, nine cases; seven failed before the production fix and two control cases already passed.
+- Verification: 101 offline coordinator/regression tests; 475 DAW, restart, reconciliation and architecture tests with warnings as errors. Full suite: 6,526 passed, 4 skipped. Four isolated in-memory mutants were caught without mutating source files on disk. Ruff check/format, CLI help, lock consistency and diff checks passed. Independent scoped code review found no actionable findings.
+- No media, provider, live FL Studio, installation or commit operation. Earlier documentation work is preserved; all current changes remain uncommitted for review.

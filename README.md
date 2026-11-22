@@ -4,7 +4,7 @@ Bachelor thesis research prototype: **Autonomous Detection and Correction of Mix
 
 The system detects, corrects and verifies selected technical mixing problems; the AI agent (`decision_agent`, planned) is one decision-making component within it. Naming conventions: [ADR-005](docs/decisions/0005-system-oriented-naming.md).
 
-**Status:** M0 descriptive two-stem analyzer (inputs currently labeled kick/bass, a known deviation under review; see [`docs/architecture/overview.md`](docs/architecture/overview.md)); autonomous corrections and perceptual masking detection are **not implemented**. Official project period: 2026-10-19 to 2027-01-18.
+**Status (2026-11-22):** Partial research prototype. Versioned level/P1 descriptive measurements, bounded gain correction, controlled offline/DAW coordinators, verification/recovery and durable run records are implemented. Production diagnosis and the Claude decision adapter are missing; autonomous CLI start/continue remain unavailable and no live integrated agent trial has run. The legacy `analyze` command still uses kick/bass labels. See [`docs/project/roadmap.md`](docs/project/roadmap.md) for current evidence/limits. Official project period: 2026-10-19 to 2027-01-18.
 
 ## Setup (Windows PowerShell)
 
@@ -30,9 +30,9 @@ Optional future Claude SDK dependencies: `uv sync --group dev --extra agent`. Co
 
 *(2026-11-03, defect correction.)* A report destination that refers to either input file is rejected: after successful analysis and input validation, and before writing, the CLI compares filesystem identity (`os.stat` plus `os.path.samestat`, not path strings), so direct paths and relative/absolute, symbolic-link and hard-link aliases of an input are caught where the platform supports them. Rejection exits with code 2 and a one-line `error: …` message on stderr, without a traceback, and leaves the input bytes unchanged. If an existing destination or an input cannot be inspected, nothing is written; a nonexistent destination is allowed. New reports and replacement of an unrelated existing report work as before; arguments, report schema and extension handling are unchanged. This is a pre-write check, not a lock or race-free protection, and parent directories it created remain if the second check rejects. *(2026-11-03 follow-up.)* If creating the report's parent directory fails with `FileExistsError`, `NotADirectoryError`, `PermissionError` or `FileNotFoundError` (for example, a parent component is an existing file), the CLI exits with code 2 and `error: cannot create report directory …` instead of a traceback; no report is written and inputs and blocking files are unchanged. Other filesystem errors, including errors while writing the report, are not handled by this change, and created parent directories are not cleaned up. Details and evidence: [`docs/architecture/overview.md`](docs/architecture/overview.md#implemented-m0).
 
-## Existing measurements and limitations
+## Legacy analyze-command measurements and limitations
 
-All values are descriptive measurements, **not** a perceptual masking measurement or validated defect detection.
+The following describes the M0 `analyze` command, not the separate versioned level/P1 analyzer components. These values are descriptive proxies, **not** validated perceptual masking or defect detection. The P1 component and its experimental limits are documented in the [accepted method](docs/superpowers/specs/2026-11-20-p1-diagnosis-method.md).
 
 - `rms_dbfs` and `peak_dbfs` are full-scale levels over all channels; silent signals report minus infinity as `null`.
 - `low_band_power_proxy` is the per-frame sum of squared STFT magnitudes (SciPy default `spectrum` scaling, Hann window) in 30–200 Hz, averaged over frames; it is not normalized or calibrated signal power. With 2048-sample frames at 44.1 kHz the band contains only 8 frequency bins (≈21.5 Hz spacing).
@@ -62,10 +62,12 @@ This table is the canonical topic-ownership list; change rules are in [`docs/pro
 
 ## Current development order
 
-1. Validate M0 audio I/O and feature extraction.
-2. Research a published masking-related methodology and define controlled cases.
-3. Define typed detector output and independent evaluation criteria.
-4. Implement bounded, reversible gain/EQ actions.
-5. Introduce Claude as a structured action *proposer*, never as an audio processing tool.
+1. Build R3's provider input projection, strict response parser and exchange audit.
+2. Implement R4's Claude adapter with labelled transport tests before separately authorized live calls.
+3. Develop diagnosis mechanics with explicit incomplete/unavailable policy outcomes; do not invent qualification thresholds.
+4. Continue owner-created FL Studio data and feasible calibration/evaluation planning in parallel.
+5. Compose and evaluate the bounded agent/tool/verification loop once genuine compatible components and evidence exist.
+
+The [accepted staged plan](docs/superpowers/plans/2026-11-20-diagnosis-and-decision-adapter.md) owns this sequence and the owner-approved thesis/workload clarifications.
 
 See `docs/project/roadmap.md`. No FL Studio `.flp` project manipulation is required for the core experiment.

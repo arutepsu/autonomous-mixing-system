@@ -102,6 +102,7 @@ BEHAVIOR_INVENTORY = {
     ),
     "ports.analysis": ("AudioAnalyzer", "validate_analysis_response"),
     "ports.decision": ("DecisionMaker", "validate_decision_response", "validate_decision_references"),
+    "ports.decision_audit": ("DecisionAuditTrail", "permits_dispatch"),  # R3 decision packet/audit, 2026-11-22
     "ports.rendering": ("Renderer", "validate_rendered_candidate"),
     "ports.daw": ("DawParameterController", "validate_daw_inspection", "validate_daw_apply_outcome"),  # 2026-11-18
     "ports.daw_recovery": (  # recovery and reconciliation plan, 2026-11-18

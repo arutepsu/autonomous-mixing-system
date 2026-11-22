@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use superpowers:executing-plans or, when explicitly delegated, superpowers:subagent-driven-development to implement one approved increment at a time. This document authorizes no implementation.
 
-**Status:** Staged plan approved by the owner, 2026-11-20. R0 method draft is [written for separate scientific review](../specs/2026-11-20-p1-diagnosis-method.md); no implementation or calibration has run.
+**Status:** Staged plan and R0 method specification accepted by the owner. R1 descriptive measurements are implemented and committed at `0242c99`. Calibration has not run; production diagnosis and the provider adapter remain unimplemented. Execution order clarified on 2026-11-22 below.
 
 **Goal:** Turn defensible measured evidence into deterministic diagnosis candidates, and let a provider-backed AI propose a bounded correction through the existing coordinator without gaining execution authority.
 
@@ -22,7 +22,41 @@
 - Each increment is separately reviewable and tests-first. Leave work uncommitted for review unless separately instructed.
 - Keep unsupported families explicit. NoChange and an empty candidate list never establish success.
 
-## 1. What exists, and what does not
+## Thesis focus and feasible evaluation — owner clarification, 2026-11-22
+
+The primary contribution is the AI agent system: how it receives evidence and producer intent, chooses permitted tools, uses iteration/feedback, and verifies, accepts or recovers interventions. Measurement correctness and defensible mixing decisions are necessary foundations; a new generally validated psychoacoustic detector is not an additional thesis objective.
+
+Prioritize a complete, bounded agent/tool/verification loop and reproducible comparisons over further optional infrastructure or a large detector-development study. Proposed tasks must state which research question they support and why their effort is proportionate to the bachelor-thesis schedule and available resources. Do not assume funding for paid assessors or access to professional engineers.
+
+Separate three evidence claims:
+
+- **Software correctness:** tested numerical behavior, valid data/provenance, bounded admitted actions and reliable handling of malformed responses, failures and recovery.
+- **Mixing relevance:** an explicitly documented experimental measurement/diagnosis policy, producer intent, relevant technical objectives and guards. A safe command alone does not establish a good correction, and an optimized model score alone does not establish audibility or quality.
+- **Agent evaluation:** controlled comparisons of unprocessed/deterministic/single-pass/iterative conditions, with recorded decisions, failures, regressions and costs. Listening can supplement these results; the owner's judgment is valid producer-intent evidence but is not independent perceptual validation.
+
+Six calibration projects, exactly three listeners and the proposed 36/18 parameter searches were assistant-generated study proposals, not adopted requirements. An extended listener-based detector-calibration study is optional and must be justified separately. Volunteer assessors may support a feasible exploratory listening task; report their experience and claim limits honestly. Paid professionals and a fixed panel size are not prerequisites for software development or the core agent-system contribution.
+
+This clarification does not authorize invented thresholds, fabricated diagnoses, hidden-reference access or claims of general mixing/perceptual superiority. The accepted method's sufficiency checks remain: a missing calibrated/approved policy must be represented truthfully. A smaller operational-policy/evaluation proposal still needs explicit method and claim review; dropping the optional study is not itself approval of new numerical values.
+
+## Execution order clarification — 2026-11-22
+
+The owner is creating the musical dataset in FL Studio, as planned. Dataset completion is not a prerequisite for every software increment. The earlier emphasis on completing calibration registration before further engineering was too broad; this section corrects that dependency without weakening scientific gates.
+
+| Work stream | Can progress while the dataset is developed | Still requires musical data or later approval |
+| --- | --- | --- |
+| R3 packet, parser and audit | Build/test explicit producer-intent and action projection, response validation, provenance and failure records using labelled contract fixtures | No claims about an actual model run or scientific diagnosis from test fixtures |
+| R4 provider adapter | Implement/test transport and failure mapping with a provider stand-in after R3 interfaces are reviewed | Live provider calls remain separately authorized; model performance needs real recorded trials |
+| R2 diagnosis mechanics | Implement method/observation binding, coverage, insufficiency and abstention-compatible behavior, with an explicit missing-policy state | No actionable P1 candidate or qualified support without reviewed calibration and evidence |
+| Numerical verification planning/tooling | Prepare separately reviewed numerical-control tooling and reproducibility checks using analytical test signals | New calibration experiments still require their registration and execution approval; controls are not musical evaluation data |
+| Dataset creation | Owner continues FL Studio projects, source provenance, intended roles and compatible export planning | Musical qualification, policy selection and held-out evaluation wait for eligible data and their respective approvals |
+
+Next engineering order: R3, then R4; R2 mechanics may be scheduled independently with calibration-dependent outcomes disabled. R5 can later test composition and failure/abstention paths; a tested wiring path is not an evidence-qualified autonomous correction trial. Do not enable live runs or claim successful diagnosis merely because adapters exist.
+
+The proposed six-project corpus, listener panel and calibration search are still proposals for separate scientific/workload review. They are not conditions for writing the provider adapter. No software task, live call or experiment is executed or newly approved by this dependency clarification alone; individual implementation reviews remain.
+
+## 1. Original planning-baseline inventory
+
+This table records the baseline at `027bed7`, not the current implementation status. R1 subsequently added descriptive pair measurements/aggregation at `0242c99`; qualified support, calibration and production diagnosis are still missing. Current execution priorities are recorded above.
 
 | Existing contract/component | Consequence for this design |
 | --- | --- |
@@ -193,6 +227,35 @@ The first provider is Claude via the existing optional `agent` dependency group.
 - [ ] Test every response variant plus unknown IDs, stale bindings, extra/duplicate keys, wrong numeric types, multiple outputs and malformed/truncated JSON. Genuine abstention and malformed output must remain distinct.
 - [ ] Test request-before-dispatch ordering, public-response-before-parse ordering, duplicate/conflicting exchange keys, fingerprints, partial writes and pending exchanges after a crash.
 - [ ] Specify the trace reference contract and durable codec additions here, before R5 changes the loop. Schema evolution is explicit; do not silently rewrite existing run stores.
+
+**R3 implementation status (2026-11-22, Claude Code; uncommitted for Codex review).** Implemented per the R3 handoff (`2026-11-22-r3-decision-packet-audit-claude-handoff.md`). No provider call, SDK, network access or coordinator change.
+
+- **Records and port:**
+  - `core/records/decision_exchange.py`: call key, alias bindings, packet and its local binding, the three exchange phases, the completion categories and typed audit results.
+  - `core/ports/decision_audit.py`: `DecisionAuditTrail` (`begin`, `record_response`, `finish`, `read`) and `permits_dispatch`.
+- **Projection:** `adapters/decision_agent/request.py`, with the final signature `build_decision_packet(situation, *, limits: PacketLimits) -> DecisionPacket`.
+  - Packet schema `autonomous_mixing.decision_packet@1`.
+  - The alias strategy is fixed and versioned in the packet (`autonomous_mixing.alias.sha256_run_scoped@1`) rather than injected.
+- **Parser:** `adapters/decision_agent/response.py`, with the final signature `parse_decision_response(public_response: RecordedDecisionResponse, *, request: DecisionExchangeRequest, situation, identities, limits: ResponseLimits) -> PortResult[DecisionResponse]`. *Review fix 2026-11-22: it took `packet=`; it now takes the recorded request.*
+  - Response schema `autonomous_mixing.decision_response@1` (`RESPONSE_JSON_SCHEMA`).
+- **Store:** `adapters/journal/decision_exchange.py`, `SqliteDecisionExchangeStore`: schema 1, one SQLite file per run, append-only.
+- **Trace reference for R5 (specified, not wired):** R5 reads the exchange by `DecisionCallKey(run_id, usage.decision_calls)`. It uses a provider result only when the record is `COMPLETED` with `VALID_DECISION` and its decision equals the returned one. A pending, response-only, failed or missing exchange blocks action.
+  - No run-store schema or record-codec change was needed: the codec registers the new core records automatically.
+- **Deviations to review:**
+  - The parser takes the recorded response record, which enforces "record before parse".
+  - Track display names, free technical text and policy/renderer references are not projected (codes and enums only).
+  - Wiring mismatches between packet and situation raise `ValueError` instead of returning a port failure.
+- **Codex review fixes (2026-11-22), each with a regression written first:**
+  1. **Unavailable reasons and coverage explanations** are no longer sent: the packet carries `"unavailable": true` and the coverage status. The text is kept verbatim in the local binding (`DecisionPacketBinding.withheld`).
+  2. **Wrongly typed `type`, `reason` and `operation` values** are now `INVALID_RESPONSE` instead of a `TypeError`.
+  3. **Content binding:** the parser re-projects the situation and requires the packet's payload and binding to match exactly. Changed criteria, measurements or withheld text behind unchanged IDs are refused.
+  4. **Exchange binding:** the response must name the request's call, exchange ID and full request fingerprint, which is distinct from the packet-data hash. Each check runs before interpretation.
+- **Second review fix (2026-11-22):** bounded JSON that exceeds the decoder's nesting depth, or holds an integer literal beyond the interpreter's digit limit, is now `INVALID_RESPONSE`. Only decoding errors are converted, and no global limit is raised.
+- **Designated public content (no general sanitization claimed):** sent verbatim, with its suppliers responsible for keeping it public:
+  - producer role labels, preferences and assertion sources;
+  - diagnosis evidence statements;
+  - metric, method and unit names;
+  - earlier public decision text.
 
 ### R4: First provider adapter and failure mapping
 

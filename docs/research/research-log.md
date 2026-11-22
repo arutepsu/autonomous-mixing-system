@@ -2127,3 +2127,115 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Mutation probes:** 23 of 24 caught. The two new probes are caught; the known equivalent `k >= 2` mutant survives. Every file was restored byte-identically.
   - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
 - Uncommitted for review.
+
+## 2026-11-22 — Proposed P1 calibration registration (Codex)
+- Owner authorized using the calibration handoff to draft the protocol; documentation only.
+- New: `docs/superpowers/specs/2026-11-22-p1-calibration-registration.md`, revision 1, Proposed, pinned to R1 commit `0242c99dba54abcb59398833cf74b16c0b2fd0e6`.
+- Separates numerical reproduction, quantization qualification, development rule selection and later held-out evaluation. Proposes 36 qualification-gate pairs and 18 sufficiency-rule configurations with fixed caps, score, tie rule, stopping and a no-policy outcome. Values are proposals, not calibration results.
+- Documents corpus gaps: the existing trap pilot is stereo/already development, source-sample rights are not established by its reports, and six development/nine held-out projects remain planning targets without verified manifests. No dataset rows or rights conclusions were invented.
+- Proposes three deciding listeners for a six-project, two-source development pilot; annotation and reference data remain outside runtime roots. Protocol, execution and policy-freeze approvals are separate.
+- Read-only builder review resolved waveform-recipe, musical-domain confirmation and panel-voting ambiguities. Self-review distinguished penalized selection rates from actual diagnoses and future generated-input hashes from preregistered recipes.
+- Checks: local document links, whitespace and declared search/item counts; source check of the primary publisher abstract. Thesis-page verification remains blocked. No audio loaded, generated or auditioned; no numerical experiment, model/DAW call, code/test change, install or commit.
+- Left uncommitted for scientific/Codex review; no registration lock, calibrated threshold or diagnosis readiness is claimed.
+
+## 2026-11-22 — Checkpoint correction 1: dataset and engineering dependencies (Codex)
+- Owner clarified that the FL Studio dataset is under development as planned and asked to address the checkpoint corrections step by step.
+- Corrected the overly broad implication that a finished calibration corpus must precede all further implementation. R3 packet/parser/audit and R4 provider engineering can be scheduled with labelled test fixtures; R2 mechanics may report incomplete evidence until a calibrated policy exists.
+- Updated the staged plan's execution order and factual R0/R1 status. The proposed calibration protocol is revision 2 for dependency clarification only; its scientific values and workload remain unapproved.
+- Dataset-dependent calibration, qualified S0, actionable diagnosis and evaluation remain gated on real evidence. No fabricated diagnoses, live-call authorization or CLI enablement is introduced.
+- Documentation only; no code, tests, dataset files, experiments or live services changed. Broader workload review, remaining stale status documents and the separate offline acceptance issue are not marked resolved by this first correction.
+
+## 2026-11-22 — Checkpoint correction 2: agent-thesis focus and feasible workload (Codex)
+- Owner confirmed that correct mixing decisions and a correct system are required, with agent/tool/loop behavior as the main thesis topics, and stated that paid professional listeners are unavailable.
+- Updated the staged plan with this priority and separated software correctness, mixing relevance and agent evaluation. Numerical trustworthiness and honest scientific claims remain required.
+- Calibration registration revision 3 marks the assistant-proposed six-project/three-listener/36-and-18-grid study as optional and not adopted. Those counts are not prerequisites for implementation or the core contribution. The original handoff carries the superseding clarification.
+- Volunteer listening may supplement a feasible study; owner assessment is producer-intent evidence, not independent perceptual validation. No paid panel or fixed panel size is assumed.
+- No substitute policy/threshold, diagnosis sufficiency, scientific result or live run was approved by this scope correction. A smaller operational-policy proposal still needs explicit review.
+- Documentation only; accepted requirements and ADRs, implementation, dataset and experiments are unchanged. Left uncommitted.
+
+## 2026-11-22 — Checkpoint correction 3: stale implementation status (Codex)
+- Owner authorized correcting stale status documents after the dataset-dependency and thesis-focus clarifications.
+- Requirements: updated only the status cells of FR-03 through FR-13 and FR-19/FR-20. Requirement text, priority, verification criteria and traceability fields are preserved exactly; no requirement adoption or scope change. Relevant statuses remain Partial with named limitations.
+- Roadmap: added a current dated checkpoint, kept the original calendar and historical M0 evidence, and distinguished live research bridge/dB trials from the unperformed live integrated agent run. No new milestone dates or completion claims were invented.
+- P1 specification: corrected the no-implementation/uncommitted-review wording to the reviewed R1 commit `0242c99`; qualified S0, calibration and production diagnosis remain absent. The staged plan's old inventory is explicitly historical.
+- The missing provider/diagnosis components, disabled CLI start/continue, growing FL Studio dataset and optional/unapproved extended listening study are stated consistently. Accepted ADRs and source/evaluation data are unchanged.
+- Checks: status-cell-only comparison, cited test-file existence, document whitespace/local links and git diff check. Documentation only; no implementation tests or experiments rerun. Earlier independent 344-test focused review and implementer-reported full-suite checks are distinguished.
+- The separately documented offline acceptance-commit exception issue remains open; this documentation correction does not fix code. Left uncommitted.
+
+## 2026-11-22 — Checkpoint correction 5: offline acceptance-authority exceptions (Codex)
+- Owner authorized proceeding to the separate offline commit-exception correction after the status-document update. The four R1 findings (checkpoint item 4) were already fixed/reviewed/committed; no R1 code was reopened.
+- Wrote nine labelled coordinator regressions first: seven failed against the previous implementation, with two noncommit controls already passing. They cover exceptions before/after a real commit, failed promotion, failed recording of unknown/found/absent/refused answers, pre-dispatch failure and a found response with changed event contents.
+- Fix: mark acceptance authority unknown before dispatch; preserve `ACCEPTANCE_COMMIT_UNCERTAIN` through unexpected errors; establish validated committed/found authority before fallible work; clear the marker on confirmed noncommit; verify full found-event identity. Original exception objects propagate after best-effort finalization. No speculative retry/recovery is introduced.
+- Changed `core/loop/acceptance_flow.py`, `core/loop/recovery.py`, shared finalizer wording in `core/loop/coordinator.py`, and pending-effect documentation/validation wording in `core/records/coordinator_progress.py`. No record fields or enum values changed. DAW execution/recovery modules and adapters are untouched.
+- Four isolated in-memory mutation probes were caught by the permanent tests; source files were not mutated by those probes. Read-only independent review found no actionable findings.
+- Locked verification: 101 offline tests, 475 DAW/restart/reconciliation/architecture tests with warnings as errors; full suite 6,526 passed, 4 skipped in 113.20 s. Ruff check, format (267 files), CLI help, lock consistency and diff check passed.
+- Requirements FR-10 status and the coordinator plan now record this follow-up as fixed; requirement definitions and accepted ADRs remain unchanged. Previous checkpoint entries are historical and remain intact.
+- No audio/provider/FL Studio call, install, commit or push. All changes are uncommitted, alongside the preserved documentation corrections.
+- Additional correction-3 follow-through during source reading: README, CLAUDE.md and the architecture overview also carried obsolete no-control-loop/M0-only summaries. Updated those current summaries and linked the owning plan/roadmap; the legacy analyze-command behavior and accepted architecture rules are unchanged. Documentation only; no further test rerun needed after these edits.
+
+## 2026-11-22 — R3 decision packet, strict parser and exchange audit (Claude Code)
+- **Scope:** implements `docs/superpowers/plans/2026-11-22-r3-decision-packet-audit-claude-handoff.md` tests-first. No provider call, SDK, network, coordinator injection, CLI enablement, DAW action or experiment. The owner's uncommitted changes are preserved and nothing is committed.
+- **Records and port:** `core/records/decision_exchange.py` and `core/ports/decision_audit.py`.
+  - Call key `(run_id, usage.decision_calls)`.
+  - Outbound packet text and its hash are kept separate from the local binding and alias map.
+  - Three append-only exchange phases bound by call, exchange ID and request fingerprint.
+  - Completion categories: valid decision (with local `DecisionId`/`ActionId`), invalid response, provider failure, recording failure; no synthetic abstention.
+  - `permits_dispatch` is true only for a newly recorded pending request.
+- **Projection:** `adapters/decision_agent/request.py` is an explicit allowlist with schema `decision_packet@1`.
+  - **Opaque aliases:** run-scoped and SHA-256-derived, stable across calls, history growth and restart.
+  - **Projected:** complete criteria and guard semantics, roles with provenance (unknown kept null), protection, producer text as data, current observations and unavailable reasons, unchanged diagnosis statements, absolute application-gain coordinates (never fader values), budgets, and the complete history with historical evidence marked non-current.
+  - **Withheld:** paths, IDs, names, hashes, condition-bearing references and free technical text.
+  - **Size:** an oversize packet is refused, never truncated.
+- **Parser:** `adapters/decision_agent/response.py` (`decision_response@1`).
+  - Bounded strict UTF-8 holding exactly one JSON object; duplicate keys, extra keys, non-finite and boolean numbers are refused.
+  - Exactly one `set_track_gain`; typed alias resolution refuses unknown, duplicate, wrong-kind and historical references.
+  - Local bindings and identities, then `validate_decision_response`. Invalid responses are non-retryable `INVALID_RESPONSE`; a refusal is not an abstention.
+- **Store:** `adapters/journal/decision_exchange.py` is a separate SQLite store per run, schema 1, append-only and fingerprinted, with symmetric byte bounds.
+  - Identical replays are idempotent; conflicts are refused.
+  - Commit-unknown leads to a verified reopen; a pending exchange after a child-process crash is not resent.
+- **Evidence:**
+  - **Tests:** 119 new, including sentinel hidden paths and labels checked in the actual outbound JSON, and exact replay of recorded identities.
+  - **Architecture:** inventories and edges updated; 264 passed.
+  - **Full suite:** 6,648 passed, 4 skipped.
+  - **Remaining checks:** ruff check and format clean.
+  - **Mutation probes:** 13 of 13 caught.
+- **Limits:**
+  - Fixtures are labelled contract data, not model answers.
+  - Aliases are pseudonyms, not secrets.
+  - Producer text is passed verbatim, so secrets placed there are not detected.
+  - Subprocess-crash durability only.
+  - No claim about model performance, diagnosis quality or mixing quality.
+
+## 2026-11-22 — R3 review fixes (Claude Code)
+- **Findings (Codex, four P2) and fixes, with regressions written first:**
+  1. **Path leak:** observation unavailable reasons and diagnosis coverage explanations were copied verbatim.
+     - **Fix:** the packet now carries structured status only, and the text is retained in the local binding's new `withheld` field.
+  2. **Parser crash:** wrongly typed `type`, `reason` or `operation` values raised `TypeError`.
+     - **Fix:** types are checked first, and these cases are now non-retryable `INVALID_RESPONSE`.
+  3. **Binding by ID only:** the binding covered identifiers, not contents.
+     - **Fix:** the parser re-projects the situation and requires an exact payload and binding match, so changed thresholds or measurements behind unchanged IDs are refused.
+  4. **Foreign responses accepted:** a response from another exchange or request was accepted.
+     - **Fix:** the parser takes the recorded request and checks call, exchange ID and full request fingerprint before interpretation.
+- **Checks:**
+  - **Decision tests:** 133 passed (warnings as errors).
+  - **Architecture:** 264 passed.
+  - **Full suite:** 6,662 passed, 4 skipped.
+  - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 19 of 19 caught, including one per fix. An initially surviving binding probe led to a binding-only regression test. Every file was restored byte-identically.
+- No provider or FL Studio calls. Uncommitted for review.
+
+## 2026-11-22 — R3 second review fix (Claude Code)
+- **Finding (Codex, P2):** bounded responses could still crash JSON decoding:
+  - 1,200 nested arrays in 2,478 bytes raised `RecursionError`;
+  - a 5,000-digit gain in 5,523 bytes raised `ValueError`.
+- **Fix, with regressions written first:**
+  - Both are now non-retryable `INVALID_RESPONSE`. Only decoding errors around `json.loads` are converted.
+  - A regression confirms that programming errors still propagate and that no global limit is raised.
+- **Documentation:** the verbatim fields are listed as designated public content in `request.py` and the plan, with no claim of general secret or path sanitization.
+- **Checks:**
+  - **Decision tests:** 138 passed (warnings as errors).
+  - **Architecture:** 264 passed.
+  - **Full suite:** 6,667 passed, 4 skipped.
+  - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 21 of 21 caught, two of them new. Every file was restored byte-identically.
+- No provider or FL Studio calls. Uncommitted for review.

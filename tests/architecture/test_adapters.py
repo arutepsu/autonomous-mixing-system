@@ -24,6 +24,7 @@ RENDERING = f"{ADAPTERS}.rendering"
 ANALYSIS = f"{ADAPTERS}.dsp_analysis"
 JOURNAL = f"{ADAPTERS}.journal"
 AUDIO_IO = f"{ADAPTERS}.audio_io"
+DECISION_AGENT = f"{ADAPTERS}.decision_agent"
 RECORDS = f"{PKG}.core.records"
 PORTS = f"{PKG}.core.ports"
 SRC = Path(__file__).resolve().parents[2] / "src"
@@ -315,7 +316,26 @@ JOURNAL_EDGES = {
         {f"{JOURNAL}.record_codec"} | _r("acceptance", "identifiers", "invariants", "results", "run_trace"),
         set(),
     ),
+    # R3 (2026-11-22): the local append-only decision-exchange store, a separate database; standard library only.
+    "decision_exchange": (
+        {f"{JOURNAL}.record_codec"} | _r("decision_exchange", "identifiers", "invariants", "run_trace"),
+        set(),
+    ),
 }
+# R3 (2026-11-22): explicit provider input projection and strict response parsing; core records and ports only (no
+# admission, loop or other adapter component), standard library only, no provider SDK.
+DECISION_AGENT_EDGES = {
+    "request": (
+        _r("capabilities", "context", "decision", "decision_exchange", "diagnosis", "feedback", "identifiers",
+           "invariants", "observation", "verification"),
+        set(),
+    ),
+    "response": (
+        {f"{DECISION_AGENT}.request", f"{PORTS}.coordinator_runtime", f"{PORTS}.decision"}
+        | _r("actions", "decision", "decision_exchange", "identifiers", "invariants", "results"),
+        set(),
+    ),
+}  # fmt: skip
 
 
 def test_rendering_and_analysis_modules_are_exactly_the_planned_ones():
@@ -323,8 +343,11 @@ def test_rendering_and_analysis_modules_are_exactly_the_planned_ones():
     assert {n for n in MODULES if n.startswith(ANALYSIS + ".")} == {f"{ANALYSIS}.{m}" for m in ANALYSIS_EDGES}
     assert {n for n in MODULES if n.startswith(JOURNAL + ".")} == {f"{JOURNAL}.{m}" for m in JOURNAL_EDGES}
     assert {n for n in MODULES if n.startswith(AUDIO_IO + ".")} == {f"{AUDIO_IO}.{m}" for m in AUDIO_IO_EDGES}
+    assert {n for n in MODULES if n.startswith(DECISION_AGENT + ".")} == {
+        f"{DECISION_AGENT}.{m}" for m in DECISION_AGENT_EDGES
+    }
     adapter_packages = {n for n in MODULES if n.count(".") == 2 and n.startswith(ADAPTERS + ".")}
-    assert adapter_packages == {RENDERING, ANALYSIS, JOURNAL, AUDIO_IO, f"{ADAPTERS}.fl_studio"}
+    assert adapter_packages == {RENDERING, ANALYSIS, JOURNAL, AUDIO_IO, DECISION_AGENT, f"{ADAPTERS}.fl_studio"}
 
 
 @pytest.mark.parametrize("module", sorted(RENDERING_EDGES))
@@ -340,6 +363,11 @@ def test_dsp_analysis_edges_are_exactly_the_permitted_ones(module):
 @pytest.mark.parametrize("module", sorted(JOURNAL_EDGES))
 def test_journal_edges_are_exactly_the_permitted_ones(module):
     assert _edges(f"{JOURNAL}.{module}") == JOURNAL_EDGES[module]
+
+
+@pytest.mark.parametrize("module", sorted(DECISION_AGENT_EDGES))
+def test_decision_agent_edges_are_exactly_the_permitted_ones(module):
+    assert _edges(f"{DECISION_AGENT}.{module}") == DECISION_AGENT_EDGES[module]
 
 
 def test_adapter_package_initializers_contain_only_a_docstring():
