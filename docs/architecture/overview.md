@@ -636,3 +636,10 @@ Limits:
 - Should `scripts/generate_test_audio.py` be removed or retained (and if retained, for which documented purpose)? Requires owner approval.
 - ADR-027 migration follow-ups (2026-11-04): SR-10 acceptance tests for hidden-data fields in runtime inputs and configuration do not exist yet (ledger G12); cycles between modules inside one stage, port or adapter package are not asserted statically (G2); the contract questions of the loop walkthrough (merging `ExecutionRequest` with `ActionAdmissionRequest`, `ExecutionReceipt` with `RenderedCandidate`, dropping `DecisionResponse`, simplifying `RollbackReceipt`, history and problem candidates in `Situation`) are open for the loop work (migration plan, section 5).
 - Domain records (ADR-011): how will units be checked against a future metric catalog? Should artifact time coverage allow a tolerance (tied to D3)? Is any zero-offset timezone acceptable as UTC, as currently implemented?
+
+
+### R4 audited Claude adapter (2026-11-22; implemented, review pending)
+
+`adapters.decision_agent` now contains explicit configuration, a versioned public request, bounded synchronous SDK transport and `ClaudeDecisionMaker`. It implements the existing decision port through the R3 audit collaborator, without importing a concrete journal or coordinator. Requests are recorded before one possible dispatch; response evidence precedes decision interpretation; a usable decision requires an exact completion acknowledgement. Completed replay sends nothing, and incomplete exchanges never automatically resend.
+
+Locked-SDK mock HTTP tests and real temporary exchange-store tests establish implementation behavior only. Structural envelope extraction happens before response persistence; both selected decision-text bytes and the bounded raw provider body/hash are retained. No live model/API capability, musical quality or perceptual-masking result is established. SDK optionality is tested with imports blocked. Native coordinators/CLI are not rewired in R4, and production diagnosis remains missing. See the R4 handoff and implementation note in the diagnosis-and-decision plan for the audit, timeout and byte-bound limitations.

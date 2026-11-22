@@ -325,6 +325,17 @@ JOURNAL_EDGES = {
 # R3 (2026-11-22): explicit provider input projection and strict response parsing; core records and ports only (no
 # admission, loop or other adapter component), standard library only, no provider SDK.
 DECISION_AGENT_EDGES = {
+    "config": (set(), set()),
+    "prompt": (
+        {f"{DECISION_AGENT}.{m}" for m in ("config", "request", "response")}
+        | _r("decision_exchange", "identifiers"), set(),
+    ),
+    "transport": ({f"{DECISION_AGENT}.config"}, {"anthropic", "httpx2"}),
+    "claude": (
+        {f"{DECISION_AGENT}.{m}" for m in ("config", "prompt", "request", "response", "transport")}
+        | {f"{PORTS}.coordinator_runtime", f"{PORTS}.decision_audit"}
+        | _r("decision", "decision_exchange", "results"), set(),
+    ),
     "request": (
         _r("capabilities", "context", "decision", "decision_exchange", "diagnosis", "feedback", "identifiers",
            "invariants", "observation", "verification"),
@@ -538,3 +549,25 @@ def test_run_renderer_loads_no_coordinator_stage_driver_other_adapter_or_provide
     assert _forbidden_layers(loaded) == []
     assert not [n for n in loaded if n.startswith(ANALYSIS) or n.startswith(JOURNAL)]
     assert f"{RENDERING}.state_integrity" not in loaded
+
+
+@pytest.mark.parametrize("module", ["config", "prompt", "transport", "claude"])
+def test_provider_modules_import_without_optional_sdk_or_forbidden_layers(module):
+    loaded = _loaded_after(f"import {DECISION_AGENT}.{module}")
+    assert not _forbidden_layers(loaded)
+    assert not any(n == "httpx2" or n.startswith("anthropic.") for n in loaded)
+
+
+def test_provider_and_cli_import_even_when_sdk_import_is_blocked():
+    script = """
+import sys
+class Block:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in ('anthropic', 'httpx2'):
+            raise AssertionError('optional SDK imported at package startup')
+sys.meta_path.insert(0, Block())
+from autonomous_mixing.adapters.decision_agent.claude import ClaudeDecisionMaker
+from autonomous_mixing.drivers.cli import main
+main(['--help'])
+"""
+    subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)

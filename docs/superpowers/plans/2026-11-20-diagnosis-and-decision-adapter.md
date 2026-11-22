@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use superpowers:executing-plans or, when explicitly delegated, superpowers:subagent-driven-development to implement one approved increment at a time. This document authorizes no implementation.
 
-**Status:** Staged plan and R0 method specification accepted by the owner. R1 descriptive measurements are implemented and committed at `0242c99`. Calibration has not run; production diagnosis and the provider adapter remain unimplemented. Execution order clarified on 2026-11-22 below.
+**Status:** Staged plan and R0 method specification accepted by the owner. R1 descriptive measurements are implemented and committed at `0242c99`. Calibration has not run and production diagnosis remains unimplemented. R3 is committed at `6b08451`; R4 is implemented with simulated provider responses, uncommitted for review. R5 composition remains unimplemented. Execution order clarified on 2026-11-22 below.
 
 **Goal:** Turn defensible measured evidence into deterministic diagnosis candidates, and let a provider-backed AI propose a bounded correction through the existing coordinator without gaining execution authority.
 
@@ -268,6 +268,19 @@ The first provider is Claude via the existing optional `agent` dependency group.
 - [ ] Implement structured output using the locked supported API. Validate the envelope before parsing and run local validation even when provider schema mode succeeds.
 - [ ] Record requested/resolved model, parameters and actual public response/error evidence. Prove secrets are absent and recorded responses can be replayed through validation.
 - [ ] Keep live smoke tests opt-in and separately authorized. A stubbed response demonstrates engineering behavior, not model performance or thesis findings.
+
+**R4 implementation status (2026-11-22, Codex; uncommitted, review pending).** Implemented in `config.py`, `prompt.py`, `transport.py` and `claude.py`, with tests in `test_claude_config.py`, `test_claude_transport.py`, `test_claude_decision_maker.py` and architecture inventory/isolation additions. The existing decision/audit ports and core exchange records are unchanged. Locked Anthropic SDK 1.13.0 / HTTPX2 are exercised through mock HTTP; no provider or DAW call.
+
+- Explicit model/API profile, engineering limits and versioned prompt. Provider schema uses disjoint `anyOf` variants and singleton enums; unsupported length constraints remain enforced by the reviewed R3 parser. The actual transmitted schema is fingerprinted, not silently transformed by a parsing helper. Compatibility is source/mock-tested, not live-server validated for an arbitrary configured model.
+- One SDK public `post(content=...)` request with exact canonical body bytes, retries disabled, fixed API endpoint, no redirects or environment proxies. The final HTTP header allowlist prevents SDK environment headers overriding injected credentials/profile. Credentials are never serialized into the exchange.
+- HTTP bodies are bounded before SDK error buffering, including error statuses. Compressed entities are refused without decoding. Oversize evidence is a limit-plus-one prefix, explicitly incomplete. A timeout bounds blocking I/O operations and a monotonic deadline is checked between chunks; this is not a guaranteed total wall-clock interrupt.
+- **Evidence boundary ruling:** structural envelope/text extraction precedes `record_response` to preserve R3's decision-text body contract. The same record retains the exact bounded provider entity bytes and SHA-256 in metadata. No decision parsing or decision/action identity assignment precedes its acknowledgement. A crash during extraction can leave the request pending without response evidence; it never authorizes resending. No raw TLS/network-capture claim.
+- Only a newly recorded exact pending request permits dispatch. Response and completion acknowledgements must match exactly before a decision is released. Completed calls replay the stored decision/failure and identities; pending/response-only calls refuse resend. Changed public or local bindings/configuration conflict.
+- Transient provider failures retain retryability only after audit completion; refusal, truncation, invalid content and recording failures do not become fabricated abstention. The coordinator still owns separately charged retries. R5 composition and CLI enablement remain unimplemented; production diagnosis/calibration remain unavailable.
+
+**R4 internal review fixes:** regressions first reproduced two P2 findings. SDK-wrapped non-network causes (including a closed HTTP client) now propagate as the original exception, rather than a retryable outage. A supported complete envelope must explicitly have `role="assistant"`; missing, wrong or malformed roles are invalid. The valid mock envelope now includes that role. Seven new regression cases failed before these fixes and pass afterwards.
+
+**Deferred minor:** a numerically enormous integer supplied for a float configuration field can raise `OverflowError` rather than the usual validation `ValueError`; it is rejected before dispatch. Normal finite configuration, non-finite float values and all operational bounds are tested. This does not enable a request or retry.
 
 ### R5: Composition through the existing coordinator
 
