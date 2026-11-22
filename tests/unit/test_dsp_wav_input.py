@@ -28,7 +28,9 @@ from autonomous_mixing.adapters.dsp_analysis.wav_input import (
     Dist10InputError,
     Dist10InputFailureCode,
     Dist10Pcm16Clip,
+    Dist10ReadError,
     pcm16_counts,
+    read_dist10_member,
     read_dist10_pcm16,
 )
 from autonomous_mixing.core.records.artifacts import ArtifactKind, AudioArtifact
@@ -287,3 +289,50 @@ def test_invalid_arguments_raise_before_any_file_access(bad, tmp_path):
 def test_errors_are_value_errors_with_codes():
     error = Dist10InputError(Code.UNSUPPORTED_SUBTYPE, "x")
     assert isinstance(error, ValueError) and str(error) == "unsupported_subtype: x"
+
+
+# --- resolve-and-read helper (P1 R1 handoff, 2026-11-20) ----------------------------------------------------------
+
+
+def _member(tmp_path: Path, samples, **declared) -> AudioArtifact:
+    data = write(
+        tmp_path, "clip.wav", samples, rate=declared.pop("rate", 44100), subtype=declared.pop("subtype", "PCM_16")
+    )
+    return artifact("clip.wav", data, frames=np.asarray(samples).shape[0], **declared)
+
+
+def test_member_read_equals_the_resolved_read(tmp_path):
+    record = _member(tmp_path, counts(3000))
+    clip = read_dist10_member(record, root=str(tmp_path), max_file_bytes=LIMITS.max_file_bytes,
+                              max_decoded_bytes=LIMITS.max_decoded_bytes)  # fmt: skip
+    direct = read_dist10_pcm16(resolve_artifact_location(record, root=str(tmp_path)), limits=LIMITS)
+    assert np.array_equal(clip.samples, direct.samples) and clip.verified_sha256 == direct.verified_sha256
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ({"digest": "0" * 64}, "hash_mismatch"),
+        ({"subtype": "PCM_24"}, "unsupported_subtype"),
+    ],
+)
+def test_member_read_failures_are_one_error_type_with_the_original_code(tmp_path, change, code):
+    record = _member(tmp_path, counts(3000), **change)
+    with pytest.raises(Dist10ReadError) as raised:
+        read_dist10_member(record, root=str(tmp_path), max_file_bytes=LIMITS.max_file_bytes,
+                           max_decoded_bytes=LIMITS.max_decoded_bytes)  # fmt: skip
+    assert raised.value.code == code and raised.value.__cause__ is not None
+
+
+def test_member_outside_its_root_is_refused(tmp_path):
+    inner = tmp_path / "root"
+    inner.mkdir()
+    record = dataclasses.replace(_member(tmp_path, counts(3000)), location="../clip.wav")
+    with pytest.raises(Dist10ReadError):
+        read_dist10_member(record, root=str(inner), max_file_bytes=LIMITS.max_file_bytes,
+                           max_decoded_bytes=LIMITS.max_decoded_bytes)  # fmt: skip
+
+
+def test_member_read_validates_limits(tmp_path):
+    with pytest.raises(ValueError):
+        read_dist10_member(_member(tmp_path, counts(10)), root=str(tmp_path), max_file_bytes=0, max_decoded_bytes=1)

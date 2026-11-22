@@ -254,6 +254,46 @@ ANALYSIS_EDGES = {
         ),
         {"numpy"},
     ),  # fmt: skip
+    # P1 R1 handoff, 2026-11-20: support preparation and its manifest. Reads only through the dist10 input boundary
+    # (wav_input.read_dist10_member); no audio_io edge and no NumPy.
+    "masking_preparation": (
+        {f"{ANALYSIS}.wav_input", f"{PORTS}.coordinator_runtime"}
+        | _r(
+            "artifacts",
+            "coordinator_runtime",
+            "identifiers",
+            "invariants",
+            "masking_measurement",
+            "observation",
+            "results",
+            "verification_evidence",
+        ),
+        set(),
+    ),  # fmt: skip
+    # P1 R1 handoff, 2026-11-20: the directional AudioAnalyzer composes the reviewed kernels (front_end, masking,
+    # bands, the qthr table), reads only through wav_input and verifies plans through masking_preparation.
+    "directional_analysis": (
+        {f"{ANALYSIS}.{m}" for m in ("bands", "front_end", "masking", "masking_preparation", "thresholds", "wav_input")}
+        | {f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
+        | _r(
+            "analysis",
+            "artifacts",
+            "coordinator_runtime",
+            "identifiers",
+            "invariants",
+            "masking_measurement",
+            "observation",
+            "results",
+            "verification_evidence",
+        ),
+        {"numpy"},
+    ),  # fmt: skip
+    # P1 R1 handoff, 2026-11-20: mixed-job dispatch by declared analyzer identity; core port and records only (the
+    # routed analyzers are injected, never imported).
+    "analysis_router": (
+        {f"{PORTS}.analysis"} | _r("analysis", "identifiers", "invariants", "observation", "results"),
+        set(),
+    ),
 }
 # Shared read-only audio component (ADR-028, Proposed): carried over from the former rendering modules.
 AUDIO_IO_EDGES = {

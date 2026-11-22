@@ -29,9 +29,13 @@ from enum import Enum
 
 import numpy as np
 
-from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio, check_resolved_wav_integrity
+from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio, IntegrityError, check_resolved_wav_integrity
 from autonomous_mixing.adapters.audio_io.limits import AudioReadLimits
-from autonomous_mixing.adapters.audio_io.locations import ResolvedArtifactLocation
+from autonomous_mixing.adapters.audio_io.locations import (
+    LocationResolutionError,
+    ResolvedArtifactLocation,
+    resolve_artifact_location,
+)
 from autonomous_mixing.core.records.artifacts import AudioArtifact
 
 PROFILE_SAMPLE_RATE_HZ = 44100
@@ -55,6 +59,19 @@ class Dist10InputError(ValueError):
 
     def __init__(self, code: Dist10InputFailureCode, message: str) -> None:
         super().__init__(f"{code.value}: {message}")
+        self.code = code
+
+
+class Dist10ReadError(ValueError):
+    """A current member could not be resolved under its root, verified, or accepted as profile-v1 input.
+
+    Raised only by ``read_dist10_member``; ``code`` is the underlying failure code's value (location resolution,
+    integrity or ``Dist10InputFailureCode``) and the original error is chained as ``__cause__``. It lets the P1
+    preparation and analysis modules read through this boundary without importing ``adapters.audio_io``.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
         self.code = code
 
 
@@ -159,3 +176,21 @@ def read_dist10_pcm16(location: ResolvedArtifactLocation, *, limits: AudioReadLi
         subtype=audio.subtype,
         verified_sha256=audio.verified_sha256,
     )
+
+
+def read_dist10_member(artifact: AudioArtifact, *, root: str, max_file_bytes: int,
+                       max_decoded_bytes: int) -> Dist10Pcm16Clip:  # fmt: skip
+    """Resolve one current member under its configured physical ``root`` and read it with ``read_dist10_pcm16``.
+
+    Resolution is ``resolve_artifact_location`` (the location must stay inside ``root``); the read is exactly
+    ``read_dist10_pcm16`` with ``AudioReadLimits(max_file_bytes, max_decoded_bytes)``. Expected resolution,
+    integrity and profile failures are raised as ``Dist10ReadError``; argument and limit errors stay ``ValueError``.
+    Added for the P1 R1 handoff (2026-11-20) so that new P1 modules gain no ``audio_io`` edge; behaviour of
+    ``read_dist10_pcm16`` is unchanged.
+    """
+    limits = AudioReadLimits(max_file_bytes, max_decoded_bytes)
+    try:
+        location = resolve_artifact_location(artifact, root=root)
+        return read_dist10_pcm16(location, limits=limits)
+    except (LocationResolutionError, IntegrityError, Dist10InputError) as error:
+        raise Dist10ReadError(error.code.value, str(error)) from error

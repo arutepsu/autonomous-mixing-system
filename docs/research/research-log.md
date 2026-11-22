@@ -2057,3 +2057,73 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Remaining checks:** clean.
 - **Status unchanged:** operator tooling ready; autonomous runs unavailable.
 - Uncommitted, together with the earlier requirements update.
+
+## 2026-11-20 — R0 P1 method draft (Codex)
+- The owner approved the staged diagnosis/provider/composition plan and authorized drafting R0; no implementation was authorized by this documentation step.
+- New specification: `docs/superpowers/specs/2026-11-20-p1-diagnosis-method.md`.
+- Defines mono 44.1 kHz PCM_16 inputs, ordered directions, declared alignment provenance, fixed initial support, quiet-floor treatment, scalar summaries and a limited candidate-rule form.
+- Proposed first frequency-specific diagnosis excludes model band 0 because its reproduced mapping includes high-frequency bins; all bands remain descriptive evidence.
+- Numerical deadbands, low-energy qualification and sufficiency thresholds remain blocked pending a registered development calibration; no values or results were fabricated.
+- A read-only builder check led to an explicit temporal-persistence scalar and separate support preparation before immutable run construction. Preparation cost is recorded separately; there is no existing counted analysis budget.
+- Source provenance: reused the existing thesis equation trace; a fresh readable thesis PDF was unavailable through the browser. The withdrawn related arXiv submission is not used as validation.
+- Planning checks only: documentation whitespace and scope. No implementation tests, experiments, provider calls, installs or live FL Studio actions.
+- The staged plan is marked owner-approved; R0 remains a proposed scientific specification, uncommitted for review.
+
+## 2026-11-20 — R1 P1 descriptive directional measurements (Claude Code)
+- **Scope:** implements the R1 handoff (`docs/superpowers/plans/2026-11-20-p1-r1-claude-handoff.md`) against the R0 method specification. Descriptive measurements and support preparation only; no calibration value, qualified support S0, diagnosis, provider call, coordinator wiring, CLI change, install or live FL Studio action.
+- **New code:**
+  - `core/records/masking_measurement.py`: the ordered pair, alignment provenance, band region (bands 1-20; band 0 refused), preparation request and job, prepared geometric support with recomputed digest, preparation timing, prepared plan and measurement plan. Qualification is only `UNCALIBRATED` and the support kind only `GEOMETRIC`, so no qualified plan can be constructed.
+  - `adapters/dsp_analysis/masking_preparation.py`: verified reads, complete-window geometry and a canonical, content-addressed manifest written atomically. Reload refuses missing, altered, non-canonical, unsupported-schema or self-inconsistent manifests and never regenerates support. Cancellation and time are checked before each read; no budget is charged.
+  - `adapters/dsp_analysis/directional_analysis.py`: whole-clip front end from call 0, the reviewed margin kernel and Q from the qthr table through the existing band mapping.
+    - `p1.raw.*@1` summaries have denominator |U|; the qualified `p1.*@1` IDs are always `Unavailable` (uncalibrated policy).
+    - Raw evidence (all calls, all 21 bands, null for undefined margins, silence and quiet-floor flags) is persisted before success.
+  - `adapters/dsp_analysis/analysis_router.py`: dispatch by declared analyzer identity with no relabeling. The merged response is validated against the original request, with no partial success.
+- **Architecture:** `wav_input.read_dist10_member` (dated note in ADR-029, Proposed) lets the new modules read without any new `audio_io` edge. Inventories are updated in `test_core_records.py` and `test_adapters.py`. No new ADR: no new architecture decision beyond that note.
+- **Evidence:**
+  - Q equals probe B `thm_quiet` exactly.
+  - The quiet-floor flags equal probe B's `thm == thm_quiet`.
+  - Capture-replay arithmetic agrees to below 1e-9 dB.
+  - The unchanged `compare_band_margins.py` reports a largest full-chain margin difference of 5.552e-03 dB with no sign change. This is a finite-corpus observation, not a tolerance.
+- **Proposed deviations** are recorded in the specification's new R1 section:
+  - preparation computes U without DSP;
+  - integral boundaries are equality with the declared frame time;
+  - "known" alignment means a configured set of documented methods;
+  - quiet-floor comparison is exact equality;
+  - evidence is linked by observation ID in memory, and durable linkage is left to R5.
+- **Checks:**
+  - **Focused tests** (`-W error`): 203 passed across the five R1 test files, and 264 with the level-analyzer tests added.
+  - **Architecture:** 261 passed.
+  - **Full suite:** 6,507 passed, 4 skipped.
+  - **Remaining checks:** the fixture verifier, ruff check and format, `uv lock --check`, `git diff --check` and CLI help are all clean.
+  - **Mutation probes:** 18 of 19 caught. The survivor (`k >= 2` lower bound removed) is equivalent, because full-window containment with start >= 0 already implies `k >= 2`. Every file was restored byte-identically.
+- Uncommitted for Codex review.
+
+## 2026-11-20 — R1 P1 measurements: review fixes (Claude Code)
+- **Findings (Codex, P2) and fixes, with regressions written first:**
+  1. **The specification identity was not bound to the prepared support.**
+     - **Fix:** `bound_specification` places the prepared-plan digest in the specification version, and `MaskingMeasurementPlan` refuses an unbound specification or one bound to another digest.
+  2. **The router validated only the merged response.**
+     - **Fix:** each subresponse is validated against its subrequest first. An invalid one is an `INVALID_RESPONSE` attributed to that analyzer, and later analyzers are not called.
+  3. **Preparation did not check cancellation or the time limit at completion.**
+     - **Fix:** the completion reading is checked like the per-read checks, and nothing is written on failure.
+- **Not addressed:** the fourth P2 finding was not visible in the review summary.
+- **Checks:**
+  - **Full suite:** 6,515 passed, 4 skipped.
+  - **Architecture:** 261 passed.
+  - **Mutation probes:** 21 of 22 caught. The survivor is the known equivalent mutant (`k >= 2` bound), and every file was restored byte-identically.
+  - **Remaining checks:** ruff check and format are clean.
+- Uncommitted for review.
+
+## 2026-11-22 — R1 P1 measurements: fourth review fix (Claude Code)
+- **Finding (Codex, P2):** preparation could save and report success for a manifest that `load_prepared_plan` then rejects as too large.
+- **Fix:** the plan is encoded once, and a payload longer than `MAX_MANIFEST_BYTES` returns `UNAVAILABLE` (not retryable) before anything is written.
+- **Regressions, written first:**
+  - an oversized preparation fails and leaves the store empty;
+  - the inclusive boundary: exactly the limit succeeds and reloads, one byte less fails, and the loader agrees at the boundary;
+  - every successful preparation in the tests now reloads under the active limit.
+- **Checks:**
+  - **Full suite:** 6,517 passed, 4 skipped.
+  - **Architecture:** 261 passed.
+  - **Mutation probes:** 23 of 24 caught. The two new probes are caught; the known equivalent `k >= 2` mutant survives. Every file was restored byte-identically.
+  - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
+- Uncommitted for review.

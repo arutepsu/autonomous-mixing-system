@@ -10,3 +10,12 @@
   - `tests/architecture/test_adapters.py` lists the new client edge and the module's exact edges. `tests/architecture/test_shared_audio_access.py` adds allowed and forbidden import cases (private names, package form, rendering, `front_end` and `framing` importing the component) and a fresh-process isolation check (loads the shared reader and soundfile, no other `dsp_analysis` module, adapter or forbidden layer).
   - Producers must export profile-v1 stems as WAV, 44,100 Hz, mono, 16-bit signed integer PCM, with no sample-rate conversion; anything else is rejected with a named code.
   - Pair alignment, directional measurements and analyzer integration are not part of this decision. No requirement status changes.
+
+## Implementation note (2026-11-20, P1 R1 handoff; Proposed, for Codex review)
+- **Addition:** `read_dist10_member(artifact, *, root, max_file_bytes, max_decoded_bytes)` resolves one current member under its configured root (`resolve_artifact_location`) and calls `read_dist10_pcm16` unchanged.
+- **Errors:** its expected resolution, integrity and profile failures are raised as one `Dist10ReadError` carrying the original code, with the original error chained. `read_dist10_pcm16` itself still propagates `IntegrityError` and `LocationResolutionError` unchanged.
+- **Why here:** the new P1 modules (`masking_preparation`, `directional_analysis`) need verified, root-resolved reads. Routing them through this boundary keeps the edges exact:
+  - no new `audio_io` client;
+  - this module's edges are unchanged;
+  - the new modules import only `wav_input`, never `audio_io`.
+- **Pinned by:** `tests/architecture/test_adapters.py` (`ANALYSIS_EDGES`) and new regressions in `tests/unit/test_dsp_wav_input.py`.
