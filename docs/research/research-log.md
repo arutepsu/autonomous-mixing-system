@@ -2390,3 +2390,45 @@ One fresh read-only final review found distinct current artifacts could alias un
 Checks: 43 experimental tests; full suite 6,964 passed, 4 skipped. Fixture verifier, repository lint, source/test/wrapper formatting, CLI help and dependency lock checks pass. These are implementation/numerical-contract results on disposable signals, not scientific calibration or musical quality evidence. Deterministic experimental diagnosis and existing-loop composition remain later increments.
 
 Final restored-source focused check: 511 passed with warnings treated as errors; git diff --check is clean.
+
+## 2026-11-23 — Experimental fixed-support diagnosis (Claude Code)
+- **Start:** HEAD `62133c3`. The tree was clean apart from the untracked handoff `2026-11-23-experimental-masking-diagnosis-handoff.md`, which is preserved.
+- **Scope:** extends the existing records (`masking_diagnosis`), pure rule (`core.diagnosis.masking`) and configured source (`drivers.diagnosis_runtime`). No new adapter, port or coordinator stage; no provider, FL Studio, CLI or dataset work.
+- **Thresholds:** unchanged owner-approved development values, read only from the plan's `ExperimentalMaskingPolicy`. Labelled boundary configurations are used only in tests.
+- **Rule:**
+  - exact source and selector binding;
+  - integral and consistent counts, with the run reconstructed exactly on the 576/44100 grid and bounded by the robust count and the frozen cells' longest same-band run;
+  - minimum frozen support, otherwise INCOMPLETE;
+  - one uncalibrated candidate iff robust/frozen >= 0.25 and run >= 4 calls, both inclusive.
+  - The ordinary positive fraction is never used.
+- **Method identity:** `p1.experimental.diagnosis@1+prepared.sha256.<manifest digest>`.
+- **Tests, written first:**
+  - The new rule and record tests and the runtime tests were red before implementation.
+  - The legacy readiness suites stayed green throughout.
+  - The engineering-integration test uses real preparation and the analyzer on disposable numerical WAVs with the current values. It finds a candidate, matching the independently recomputed predicate; a labelled small-support configuration gives INCOMPLETE. This is not validation data.
+  - The fixtures' run durations initially used `k * (576/44100)`, which is not bit-identical to the analyzer's `k * 576 / 44100`; the exact check correctly refused them. The fixtures now use the analyzer's expression.
+- **Checks:**
+  - **Full suite** (`uv run --locked --extra agent pytest -q`): 7,025 passed, 4 skipped.
+  - **Architecture:** 276 passed.
+  - **Remaining checks:** ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 11 of 11 caught. They cover positive count substituted for robust count, `>=` to `>` for fraction and persistence, minimum support removed, source identity skipped, specification/analyzer binding skipped, another support/policy accepted, method not bound, Unavailable treated as zero, a candidate leaked across directions, and support count not compared with the frozen cells. Every file was restored byte-identically.
+- **Limits:**
+  - Candidates are uncalibrated model-threshold exceedance hypotheses, not perceptual or mixing claims.
+  - No scientific calibration was performed.
+  - R5 composition, CLI enablement and live agent trials remain separate next work.
+- Uncommitted for Codex review.
+
+## 2026-11-23 — Experimental diagnosis review fixes (Claude Code)
+- **Findings (Codex, two P2) and fixes, with regressions written first:**
+  1. **Metric order changed the result:** values were read by definition position, although the records accept any order. Reversing valid definitions turned two candidates into zero, with incomplete coverage.
+     - **Fix:** observations are resolved by metric identity and returned in catalogue order.
+     - **Regression:** all six permutations give the same outcome.
+  2. **Large durations crashed:** a valid finite duration such as `1e308` overflowed when converted to calls.
+     - **Fix:** a duration beyond the frozen cells' longest same-band run is INCOMPLETE before that arithmetic, and the exact grid check still applies to every accepted value.
+     - **Regression:** `1e308`, the largest float, `1e20` and 11 calls are all INCOMPLETE with no candidate.
+- **Checks:**
+  - **Full suite** (`--extra agent`): 7,035 passed, 4 skipped.
+  - **Architecture:** 276 passed.
+  - **Remaining checks:** ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 13 of 13 caught, two of them new. Every file was restored byte-identically.
+- Uncommitted for re-review. No provider, FL Studio or coordinator changes.

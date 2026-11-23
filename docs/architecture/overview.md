@@ -658,4 +658,17 @@ The existing `dsp_analysis.wav_input` boundary accepts exactly duplicated stereo
 
 ### Experimental P1 measurement extension (2026-11-23)
 
-The existing `masking_measurement` records, `masking_preparation` and `directional_analysis` own the optional uncalibrated fixed-support path. No new adapter boundary or port is introduced. Preparation persists policy/source/noise-bound baseline cells; the analyzer measures the same cells on current artifacts under separate `p1.experimental.*@1` IDs. Legacy geometric/qualified meanings and no-policy behavior stay unchanged. The reviewed noise and quiet-floor helpers are shared from preparation, with the research script retaining compatible imports. This is measurement plumbing only: experimental positive diagnosis, composition and live agent validation remain later work.
+The existing `masking_measurement` records, `masking_preparation` and `directional_analysis` own the optional uncalibrated fixed-support path. No new adapter boundary or port is introduced. Preparation persists policy/source/noise-bound baseline cells; the analyzer measures the same cells on current artifacts under separate `p1.experimental.*@1` IDs. Legacy geometric/qualified meanings and no-policy behavior stay unchanged. The reviewed noise and quiet-floor helpers are shared from preparation, with the research script retaining compatible imports. This is measurement plumbing only: experimental positive diagnosis, composition and live agent validation remain later work. *(Superseded 2026-11-23 for experimental diagnosis only; see below. Composition and live validation remain later work.)*
+
+
+### Experimental P1 diagnosis (2026-11-23; implemented, review pending)
+
+`core.records.masking_diagnosis` adds `ExperimentalMaskingDiagnosisJob`/`Policy` beside the legacy readiness records. The method identity is bound to the complete prepared plan, and thresholds are read only from its experimental screening policy.
+
+`core.diagnosis.masking.diagnose_experimental_masking` is pure: no files, manifests, DSP or provider. It turns exactly bound `p1.experimental.*@1` scalars into one MASKING coverage row per configured job.
+- **INCOMPLETE:** missing, unavailable, ambiguous, wrongly bound or inconsistent evidence, or support below the minimum.
+- **ASSESSED:** the rule ran on usable evidence, with an uncalibrated candidate only when both inclusive predicates hold.
+
+P2/P3 stay UNAVAILABLE. `ConfiguredDiagnosisSource` dispatches by explicit policy type, keeps the legacy readiness route, and refuses reused or colliding coverage and candidate IDs.
+
+A candidate is an experimental dist10 exceedance hypothesis, not audible masking, a gain instruction or better mixing. Coordinator composition, CLI enablement and live agent runs are not implemented.

@@ -336,3 +336,33 @@ The completed [policy pilot](../../research/p1-current-policy-pilot-results.md) 
 3. **Existing coordinator composition:** wire the real configured analyzer/diagnosis and audited Claude adapter through the existing coordinator/driver. Enforce completed exact exchange correlation before admission; persist observation-to-evidence and policy/support identities through manual export suspension/restart. Retain all budgets, fader/audio distinction, explicit recovery and hidden-reference boundaries. Do not remove the unavailable CLI guard until the selected production components/configuration genuinely compose; deterministic baselines do not need fabricated provider audits. Test real components with labelled provider/FL doubles, then separately authorize a live/model development trial. Current thresholds are configuration, never a reason to bypass admission or fake an action.
 
 No automatic save/export/install/unattended FL operation. No live/model trial or requirement-status change is authorized by this engineering note. The initial development path can legitimately abstain; a complete safe trace is an engineering outcome, not completed musical correction or proof of iteration benefit. The accepted staged gates still govern the exact new contracts before code; this note records the owner's changed development priority, not a claim that R2B/R5 already exist.
+
+### Experimental fixed-support diagnosis (2026-11-23; implemented, uncommitted for Codex review)
+
+Implemented per `2026-11-23-experimental-masking-diagnosis-handoff.md`, extending the existing records, pure rule and configured source. No new adapter, port, protocol or coordinator stage.
+
+- **Records** (`core.records.masking_diagnosis`):
+  - `ExperimentalMaskingDiagnosisJob` holds the full frozen `ExperimentalSupport` and exactly `p1.experimental.support_cells`, `robust_exceedance_cells` and `longest_robust_run_seconds` (all `@1`).
+  - `ExperimentalMaskingDiagnosisPolicy` holds the method, measurement plan and jobs, and copies no thresholds: `screening` is the plan's `ExperimentalMaskingPolicy`.
+  - The method must equal `bound_specification("p1.experimental.diagnosis", "1", measurement_plan.prepared_digest)`, which covers the policy and frozen cells. The handoff wrote `prepared.digest`; the plan's manifest digest is the existing field for that identity.
+  - The legacy readiness job reuses the same shared binding check, with unchanged behaviour.
+- **Rule:** `core.diagnosis.masking.diagnose_experimental_masking(request, *, policy, identities)`.
+  - **Binding:** each ordered source must resolve exactly, with one observation per selector bound to analyzer, specification, scope, unit and ordered artifacts.
+  - **Consistency:** the support count must be integral and equal the frozen count. The robust count must be integral and in range. The run must equal `steps * 576 / 44100` exactly, with steps no more than the robust count and the longest same-band run the frozen cells allow.
+  - **Minimum support:** applied after these checks, using the plan's minimum.
+  - **Candidate:** reported iff `robust / frozen >= minimum_robust_fraction` and `run >= minimum_consecutive_calls * 576 / 44100`, both inclusive. The positive-margin fraction is never used.
+  - **Coverage:** one MASKING coverage row per job, ASSESSED or INCOMPLETE; P2/P3 stay UNAVAILABLE.
+  - **Candidates:** they cite exactly their job's three observations. Their evidence is `UNCALIBRATED`, and `insufficient_evidence=False` refers only to the declared engineering predicates. They state the identities, counts, thresholds and the limitations: no perceptual validation, declared alignment, theoretical noise reference, overlapping-window duration, and no correction implication.
+- **Source:** `drivers.diagnosis_runtime.ConfiguredDiagnosisSource` dispatches by explicit policy type. The legacy readiness route is unchanged. Coverage and candidate IDs are tracked together, so neither reuse nor collision is accepted across calls.
+- **Evidence:**
+  - Tests were written first: 54 rule and record tests, plus runtime tests including an engineering-integration test through real preparation and the analyzer on disposable numerical WAVs. That test uses the current values, recomputes the predicate independently and exercises small support. It is not validation data.
+  - Full suite (`--extra agent`): 7,025 passed, 4 skipped.
+  - Mutation probes: 11 of 11 caught.
+- **Not done:** no scientific calibration, perceptual validation, R5 composition, provider call or CLI enablement.
+
+- **Codex review fixes (2026-11-23), each with a regression written first:**
+  1. **Metric order:** values are now resolved by metric identity, never by definition position. All six definition orders give identical outcomes, and evidence is cited in catalogue order.
+  2. **Huge durations:** a run longer than the frozen cells' longest same-band run is INCOMPLETE before any conversion to calls, so a finite value such as `1e308` can no longer raise `OverflowError`.
+  - Full suite: 7,035 passed, 4 skipped. Mutation probes: 13 of 13 caught.
+
+**Status correction (2026-11-23):** the R2 statement that candidate generation is unimplemented is superseded for this experimental rule only. Qualified R2B (approved S0/qualified metrics) and R5 composition remain unimplemented.

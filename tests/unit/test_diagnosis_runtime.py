@@ -108,3 +108,136 @@ def test_real_preparer_analyzer_router_to_readiness_source(tmp_path, signal):
     p1 = next(r for r in result.value.coverage if r.family is ProblemFamily.MASKING)
     assert p1.status is DiagnosisCoverageStatus.INCOMPLETE and p1.explanation.count("unavailable") == 6
     assert "ta -> tb" in p1.explanation and "tb -> ta" in p1.explanation
+
+
+# --- experimental fixed-support diagnosis (handoff 2026-11-23, Task 3) --------------------------------------------
+
+
+def test_source_dispatches_an_explicit_experimental_policy_to_the_experimental_rule():
+    from masking_diagnosis_support import calls, experimental_policy, experimental_request
+
+    pol = experimental_policy()
+    result = source(pol).diagnose(experimental_request(pol, ((100, 25, calls(4)), (100, 0, 0.0))))
+    assert isinstance(result, Success) and len(result.value.candidates) == 1
+    masking = [r for r in result.value.coverage if r.family is ProblemFamily.MASKING]
+    assert [r.status for r in masking] == [DiagnosisCoverageStatus.ASSESSED] * 2
+
+
+def test_legacy_source_stays_readiness_only():
+    result = source(policy()).diagnose(request())
+    assert not result.value.candidates
+    assert [r.status for r in result.value.coverage if r.family is ProblemFamily.MASKING] == [
+        DiagnosisCoverageStatus.INCOMPLETE
+    ]
+
+
+def test_source_refuses_candidate_ids_reused_across_calls():
+    from masking_diagnosis_support import calls, experimental_policy, experimental_request
+
+    class CandidateRepeat:
+        def __init__(self):
+            self.i = 0
+
+        def next_token(self):
+            self.i += 1
+            # coverage tokens stay fresh; the candidate token (second in each report) repeats
+            return "cand" if self.i % 5 == 2 else f"cov-{self.i}"
+
+    pol = experimental_policy()
+    configured = source(pol, ids=CandidateRepeat())
+    req = experimental_request(pol, ((100, 25, calls(4)), (100, 0, 0.0)))
+    assert isinstance(configured.diagnose(req), Success)
+    with pytest.raises(ValueError, match="reused"):
+        configured.diagnose(req)
+
+
+def test_coverage_and_candidate_ids_may_not_collide_across_calls():
+    from masking_diagnosis_support import calls, experimental_policy, experimental_request
+
+    class Collide:
+        def __init__(self):
+            self.values = ["a", "b", "c", "d", "e", "b", "x", "y", "z", "w"]
+
+        def next_token(self):
+            return self.values.pop(0)
+
+    pol = experimental_policy()
+    configured = source(pol, ids=Collide())
+    req = experimental_request(pol, ((100, 25, calls(4)), (100, 0, 0.0)))
+    configured.diagnose(req)  # coverage a, candidate b, coverage c, d, e
+    with pytest.raises(ValueError, match="reused"):
+        configured.diagnose(req)  # next report reuses "b" (a candidate ID) as a coverage ID
+
+
+def test_source_rejects_a_policy_of_neither_kind():
+    with pytest.raises(ValueError):
+        runtime.ConfiguredDiagnosisSource(policy=object(), identities=Tokens())
+
+
+def _experimental_diagnosis_job_definitions(world, fixed):
+    from autonomous_mixing.core.records.masking_diagnosis import EXPERIMENTAL_DIAGNOSIS_METRICS
+
+    g = fixed.geometry
+    return tuple(world.job(metric, g.pair.masker, g.pair.target, time_range=g.time_range, unit=unit)
+                 for metric, unit in EXPERIMENTAL_DIAGNOSIS_METRICS)  # fmt: skip
+
+
+def _real_experimental_diagnosis(world):
+    from autonomous_mixing.core.records.analysis import AnalysisRequest
+    from autonomous_mixing.core.records.coordinator_runtime import DiagnosisRequest
+    from autonomous_mixing.core.records.masking_diagnosis import (
+        ExperimentalMaskingDiagnosisJob,
+        ExperimentalMaskingDiagnosisPolicy,
+        experimental_diagnosis_method,
+    )
+    from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec
+
+    prepared = world.plan.prepared
+    jobs = tuple(ExperimentalMaskingDiagnosisJob(fixed, _experimental_diagnosis_job_definitions(world, fixed))
+                 for fixed in prepared.experimental_supports)  # fmt: skip
+    pol = ExperimentalMaskingDiagnosisPolicy(experimental_diagnosis_method(world.plan), world.plan, jobs)
+    definitions = tuple(d for j in jobs for d in j.measurements)
+    interval = prepared.supports[0].time_range
+    analysis = AnalysisRequest(world.stems.state, AnalysisScope((TA, TB), interval),
+                               AnalysisSpec(world.spec, tuple(dict.fromkeys(d.selector.metric for d in definitions))),
+                               definitions, world.stems.bindings)  # fmt: skip
+    measured = world.analyzer.analyze(analysis)
+    assert isinstance(measured, Success), measured
+    req = DiagnosisRequest(world.stems.state, analysis.scope, measured.value.observations)
+    result = source(pol).diagnose(req)
+    assert isinstance(result, Success)
+    return pol, measured.value.observations, result.value
+
+
+def test_engineering_integration_real_preparation_analyzer_and_experimental_source(tmp_path):
+    """Engineering integration on disposable numerical WAVs (not validation data); the predicate is recomputed."""
+    from test_experimental_masking import experimental_world
+
+    from autonomous_mixing.core.records.observation import MeasuredScalar
+
+    world = experimental_world(tmp_path)  # the owner-approved current screening values
+    pol, observations, report = _real_experimental_diagnosis(world)
+    screen = pol.screening
+    rows = [r for r in report.coverage if r.family is ProblemFamily.MASKING]
+    assert len(rows) == 2 and all(r.method == pol.method for r in rows)
+    for job, row in zip(pol.jobs, rows, strict=True):
+        scope = job.measurements[0].selector.scope
+        values = {o.metric.name: o.result for o in observations if o.scope == scope}
+        n, r, run = (values[m.selector.metric.name] for m in job.measurements)
+        assert all(isinstance(v, MeasuredScalar) for v in (n, r, run)), values
+        assert row.status is DiagnosisCoverageStatus.ASSESSED and n.value == job.support.cell_count
+        expected = (r.value / n.value >= screen.minimum_robust_fraction
+                    and run.value >= screen.minimum_consecutive_calls * 576 / 44100)  # fmt: skip
+        found = [c for c in report.candidates if c.coverage_id == row.coverage_id]
+        assert len(found) == int(expected)
+    assert report.candidates, "the labelled numerical fixture is expected to exercise the positive path"
+
+
+def test_engineering_integration_small_support_is_incomplete(tmp_path):
+    from test_experimental_masking import experimental_world
+    from test_experimental_masking import policy as screen_policy
+
+    world = experimental_world(tmp_path, p=screen_policy(minimum_cells=10000))  # labelled test configuration
+    _, _, report = _real_experimental_diagnosis(world)
+    rows = [r for r in report.coverage if r.family is ProblemFamily.MASKING]
+    assert all(r.status is DiagnosisCoverageStatus.INCOMPLETE for r in rows) and not report.candidates

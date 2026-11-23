@@ -34,7 +34,7 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
-    "diagnosis.masking": ("diagnose_masking",),
+    "diagnosis.masking": ("diagnose_masking", "diagnose_experimental_masking"),  # experimental 2026-11-23
     "admission.daw": (
         "resolve_daw_gain",
         "daw_gain_bounds",

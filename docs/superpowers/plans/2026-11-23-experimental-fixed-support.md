@@ -20,3 +20,5 @@ Verification: 43 experimental tests; full suite 6,964 passed, 4 skipped. Twelve 
 Next separate increment: deterministic experimental diagnosis using this exact persisted support/policy and honest unavailable outcomes; then composition into the existing coordinator. Neither is implemented here. Scientific policy validation and held-out musical evaluation remain pending.
 
 Final restored-source focused check: 511 passed with warnings treated as errors; git diff --check is clean.
+
+**Follow-up (2026-11-23):** the next increment named above, deterministic experimental diagnosis, is implemented and uncommitted for review. See the diagnosis plan's "Experimental fixed-support diagnosis" note. Composition into the coordinator remains separate and is not implemented.

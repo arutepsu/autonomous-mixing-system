@@ -226,7 +226,18 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
-    "masking_diagnosis": ("READINESS_METRICS", "MaskingDiagnosisJob", "MaskingDiagnosisPolicy"),
+    "masking_diagnosis": (
+        "READINESS_METRICS",
+        "MaskingDiagnosisJob",
+        "MaskingDiagnosisPolicy",
+        # Experimental fixed-support diagnosis (handoff 2026-11-23).
+        "EXPERIMENTAL_DIAGNOSIS_METRICS",
+        "EXPERIMENTAL_DIAGNOSIS_METHOD_NAME",
+        "EXPERIMENTAL_DIAGNOSIS_METHOD_VERSION",
+        "experimental_diagnosis_method",
+        "ExperimentalMaskingDiagnosisJob",
+        "ExperimentalMaskingDiagnosisPolicy",
+    ),
     "daw_binding": ("DawFaderReading", "DawTrackBinding"),  # moved from daw (ADR-035)
     "daw": ("DawTrackState", "DawGainResolution"),
     "daw_control": (  # DAW control contract, 2026-11-18
