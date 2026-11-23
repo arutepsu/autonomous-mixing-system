@@ -45,6 +45,10 @@ autonomous_mixing/
   evaluation/       hidden reference, injected-defect ground truth, research metrics
 ```
 
+## Design restraint
+
+Owner clarification (2026-11-22): prefer extending an existing module when the responsibility is unchanged. Add an adapter, port, abstraction or intermediate artifact only when a distinct responsibility or concrete requirement justifies it. A small input-format extension should not create a parallel pipeline. Keep necessary validation, explicit provenance and compatibility versioning; avoid speculative infrastructure. Separate modules where responsibilities actually differ rather than growing a module without bounds.
+
 ## Import rules
 1. `core` imports nothing outside `core`: no NumPy, soundfile, provider SDK or filesystem access.
 2. Inside `core`, `core.records` imports nothing outside itself; `core.ports` imports only `core.records`; stage packages (`admission`, `verification`, `diagnosis`) import only `core.records` and `core.ports` (and the standard library). Only `core.loop` composes stages and ports.

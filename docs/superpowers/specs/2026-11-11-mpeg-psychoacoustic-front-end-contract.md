@@ -596,3 +596,9 @@ Task 3K (2026-11-16, §3.5): through the partition thresholds, the Python chain'
 6. **Deferred profile items**: float-WAV conversion, stereo, 48 kHz (needs a fixture), multi-masker sums (sum domain and clipping).
 7. **Time aggregation** of per-frame margins: the thesis states none; Eq. 7.13 is per band. Out of scope here.
 8. Retry the SoundSoftware author repository; if it is reachable, compare its threshold and band code with dist10.
+
+## Exact dual-mono ingress extension (2026-11-22)
+
+The legacy native-mono profile v1 and the numerical `dist10_clip_to_bands` contract are unchanged. The existing WAV boundary now has an explicit `allow_exact_dual_mono=False` keyword on `pcm16_counts`, `read_dist10_pcm16` and `read_dist10_member`. Opt-in admits 44,100 Hz PCM_16 mono or two channels whose original counts are exactly equal over the entire verified clip. Both channels must pass shape, finite/range and integral-count validation before channel 0 is selected. There is no tolerance, averaging, resampling or quantization; genuinely different stereo remains unsupported. The shared verifier still charges the actual two-channel decode and retains the original artifact/hash/metadata. No derived WAV is created.
+
+P1 persists this opt-in as `p1.dist10_mono_pcm16_44100@2` in its existing prepared-profile field. Canonical mono support geometry stays under profile v1; the full prepared-manifest digest and bound specification distinguish ingress policies. Legacy manifest and raw-evidence bytes are pinned by pre-change golden fixtures. V2 raw evidence uses schema 2 and records source channel count, analysis channel count 1, the fixed versioned channel mapping, ingress profile and canonical analysis profile. This representation extension establishes no qualified masking policy or perceptual claim.

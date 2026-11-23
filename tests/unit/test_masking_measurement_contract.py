@@ -114,8 +114,15 @@ def test_a_duplicate_direction_and_interval_is_refused():
 
 @pytest.mark.parametrize("overrides", [{"sample_rate_hz": 48000}, {"channel_count": 2}])
 def test_sources_outside_the_profile_are_refused_not_converted(overrides):
-    with pytest.raises(ValueError, match="native mono 44100"):
-        MaskingPreparationJob(MaskingPair(TA, TB), FULL, REGION, source_of(A, **overrides), source_of(B), ALIGNMENT)
+    if "channel_count" in overrides:
+        job = MaskingPreparationJob(
+            MaskingPair(TA, TB), FULL, REGION, source_of(A, **overrides), source_of(B), ALIGNMENT
+        )
+        with pytest.raises(ValueError, match="mono"):
+            prep_request(STATE, BINDINGS, (job,))  # v1 stays mono; candidate records support the opt-in v2 too.
+    else:
+        with pytest.raises(ValueError, match="44100"):
+            MaskingPreparationJob(MaskingPair(TA, TB), FULL, REGION, source_of(A, **overrides), source_of(B), ALIGNMENT)
 
 
 @pytest.mark.parametrize("overrides", [{"frame_count": N - 1}, {"timeline_start_seconds": 1.0}])

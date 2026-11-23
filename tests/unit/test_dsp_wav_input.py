@@ -336,3 +336,154 @@ def test_member_outside_its_root_is_refused(tmp_path):
 def test_member_read_validates_limits(tmp_path):
     with pytest.raises(ValueError):
         read_dist10_member(_member(tmp_path, counts(10)), root=str(tmp_path), max_file_bytes=0, max_decoded_bytes=1)
+
+
+# Exact dual-mono extension: input representation only, no audio conversion/output.
+@pytest.mark.parametrize("n", [5, 4000, 65536])
+def test_exact_dual_mono_opt_in_preserves_counts_and_original_artifact(tmp_path, n):
+    original = np.arange(-32768, 32768, dtype=np.int16) if n == 65536 else counts(n)
+    location = located(tmp_path, np.column_stack((original, original)))
+    before = (tmp_path / "clip.wav").read_bytes()
+    with pytest.raises(Dist10InputError) as refused:
+        read_dist10_pcm16(location, limits=LIMITS)
+    assert refused.value.code is Code.UNSUPPORTED_CHANNEL_COUNT
+    clip = read_dist10_pcm16(location, limits=LIMITS, allow_exact_dual_mono=True)
+    np.testing.assert_array_equal(clip.samples, original)
+    assert type(clip.samples) is np.ndarray and clip.samples.ndim == 1 and not clip.samples.flags.writeable
+    assert clip.artifact is location.artifact and clip.artifact.channel_count == 2
+    assert clip.verified_sha256 == location.artifact.content_hash
+    assert clip.analysis_channel_count == 1 and clip.channel_mapping == "exact_dual_mono_first_channel@1"
+    assert (tmp_path / "clip.wav").read_bytes() == before
+    assert len(list(tmp_path.iterdir())) == 1
+    band = dist10_clip_to_bands(clip.samples, sample_rate_hz=44100)
+    expected = dist10_clip_to_bands(original, sample_rate_hz=44100)
+    for name in ("en", "thm", "call", "eligible", "nonzero_samples"):
+        np.testing.assert_array_equal(getattr(band, name), getattr(expected, name))
+
+
+@pytest.mark.parametrize("index", [0, 3999])
+def test_a_single_lsb_difference_in_either_end_of_full_clip_is_refused(tmp_path, index):
+    samples = np.zeros((4000, 2), dtype=np.int16)
+    samples[index, 1] = 1
+    with pytest.raises(Dist10InputError) as raised:
+        read_dist10_pcm16(located(tmp_path, samples), limits=LIMITS, allow_exact_dual_mono=True)
+    assert raised.value.code is Code.NON_IDENTICAL_CHANNELS and f"frame {index}" in str(raised.value)
+
+
+def test_inverted_channels_are_not_dual_mono(tmp_path):
+    one = np.array([1, -1, 100, -100], dtype=np.int16)
+    with pytest.raises(Dist10InputError) as raised:
+        read_dist10_pcm16(located(tmp_path, np.column_stack((one, -one))), limits=LIMITS, allow_exact_dual_mono=True)
+    assert raised.value.code is Code.NON_IDENTICAL_CHANNELS
+
+
+@pytest.mark.parametrize(
+    "value,code",
+    [
+        (np.nan, "OUT_OF_RANGE_SAMPLES"),
+        (np.inf, "OUT_OF_RANGE_SAMPLES"),
+        (-np.inf, "OUT_OF_RANGE_SAMPLES"),
+        (1e308, "OUT_OF_RANGE_SAMPLES"),
+        (0.5 / 32768, "NON_INTEGRAL_SAMPLES"),
+    ],
+)
+@pytest.mark.parametrize("policy", ["raise", "warn", "ignore"])
+def test_right_channel_is_validated_before_selection(value, code, policy):
+    audio = checked([[0, 0], [0, value]], channels=2)
+    with np.errstate(all=policy), warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(Dist10InputError) as raised:
+            pcm16_counts(audio, allow_exact_dual_mono=True)
+    assert raised.value.code is getattr(Code, code)
+
+
+@pytest.mark.parametrize("shape", [(3, 2), (2, 1), (2, 3), (4,)])
+def test_decoded_frame_and_channel_shape_must_match_metadata(shape):
+    audio = checked(np.zeros((2, 2)), channels=2)
+    forged = dataclasses.replace(audio, samples=np.zeros(shape, dtype=np.float64))
+    with pytest.raises(Dist10InputError) as raised:
+        pcm16_counts(forged, allow_exact_dual_mono=True)
+    assert raised.value.code is Code.DECODED_SHAPE_MISMATCH
+
+
+@pytest.mark.parametrize("value", [1, 0, None, "yes"])
+def test_dual_mono_opt_in_is_a_strict_bool(tmp_path, value):
+    location = located(tmp_path, EXTREMES)
+    for call in (
+        lambda: pcm16_counts(checked([0]), allow_exact_dual_mono=value),
+        lambda: read_dist10_pcm16(location, limits=LIMITS, allow_exact_dual_mono=value),
+        lambda: read_dist10_member(
+            location.artifact,
+            root=str(tmp_path),
+            max_file_bytes=LIMITS.max_file_bytes,
+            max_decoded_bytes=LIMITS.max_decoded_bytes,
+            allow_exact_dual_mono=value,
+        ),
+    ):
+        with pytest.raises(ValueError, match="bool"):
+            call()
+
+
+def test_dual_mono_uses_one_shared_read_and_original_stereo_limits(tmp_path, monkeypatch):
+    real = wav_input.check_resolved_wav_integrity
+    seen = []
+
+    def spy(location, **limits):
+        seen.append((location.artifact.channel_count, limits))
+        return real(location, **limits)
+
+    monkeypatch.setattr(wav_input, "check_resolved_wav_integrity", spy)
+    location = located(tmp_path, np.column_stack((EXTREMES, EXTREMES)))
+    clip = read_dist10_pcm16(location, limits=LIMITS, allow_exact_dual_mono=True)
+    assert seen == [(2, dict(max_file_bytes=LIMITS.max_file_bytes, max_decoded_bytes=LIMITS.max_decoded_bytes))]
+    assert clip.artifact.channel_count == 2
+    with pytest.raises(IntegrityError) as raised:
+        read_dist10_pcm16(location, limits=AudioReadLimits(LIMITS.max_file_bytes, 5 * 8), allow_exact_dual_mono=True)
+    assert raised.value.code is IntegrityFailureCode.RESOURCE_LIMIT
+
+
+def test_opted_in_mono_keeps_identity_mapping(tmp_path):
+    clip = read_dist10_pcm16(located(tmp_path, EXTREMES), limits=LIMITS, allow_exact_dual_mono=True)
+    assert clip.channel_mapping == "mono_identity@1" and clip.analysis_channel_count == 1
+    np.testing.assert_array_equal(clip.samples, EXTREMES)
+
+
+def test_empty_dual_mono_counts_are_well_defined_but_empty_files_keep_shared_refusal(tmp_path):
+    result = pcm16_counts(checked([], channels=2), allow_exact_dual_mono=True)
+    assert result.shape == (0,) and result.dtype == np.int16 and not result.flags.writeable
+    with pytest.raises(IntegrityError):
+        read_dist10_pcm16(
+            located(tmp_path, np.empty((0, 2), dtype=np.int16)), limits=LIMITS, allow_exact_dual_mono=True
+        )
+
+
+@pytest.mark.parametrize("subtype", ["PCM_24", "PCM_32", "PCM_U8", "FLOAT", "DOUBLE"])
+def test_dual_mono_opt_in_does_not_relax_subtype(tmp_path, subtype):
+    with pytest.raises(Dist10InputError) as raised:
+        read_dist10_pcm16(
+            located(tmp_path, np.column_stack((EXTREMES, EXTREMES)), subtype=subtype),
+            limits=LIMITS,
+            allow_exact_dual_mono=True,
+        )
+    assert raised.value.code is Code.UNSUPPORTED_SUBTYPE
+
+
+def test_dual_mono_subclass_cannot_hide_right_channel_values_and_input_is_unchanged():
+    class HidingSlices(np.ndarray):
+        def __getitem__(self, key):
+            value = super().__getitem__(key)
+            return np.zeros_like(value) if isinstance(value, np.ndarray) else value
+
+    base = np.array([[0.0, 0.0], [0.0, np.nan]])
+    disguised = base.view(HidingSlices)
+    audio = dataclasses.replace(checked([[0, 0], [0, 0]], channels=2), samples=disguised)
+    with pytest.raises(Dist10InputError) as raised:
+        pcm16_counts(audio, allow_exact_dual_mono=True)
+    assert raised.value.code is Code.OUT_OF_RANGE_SAMPLES
+    np.testing.assert_array_equal(base, [[0, 0], [0, np.nan]])
+    valid = np.array([[0.0, 0.0], [1 / 32768, 1 / 32768]])
+    original = valid.copy()
+    result = pcm16_counts(dataclasses.replace(audio, samples=valid.view(HidingSlices)), allow_exact_dual_mono=True)
+    assert type(result) is np.ndarray and not np.shares_memory(result, valid)
+    np.testing.assert_array_equal(result, [0, 1])
+    np.testing.assert_array_equal(valid, original)

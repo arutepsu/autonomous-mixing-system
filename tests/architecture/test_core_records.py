@@ -28,6 +28,7 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
+    "masking_diagnosis": {"identifiers", "invariants", "masking_measurement", "verification_evidence"},
     "daw_binding": {"identifiers", "invariants"},  # coordinator-integration Increment 1 (ADR-035)
     "daw": {"identifiers", "invariants", "actions", "daw_binding"},
     "daw_control": {"identifiers", "invariants", "daw", "daw_binding", "admission"},  # DAW control contract, 2026-11-18
@@ -225,6 +226,7 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
+    "masking_diagnosis": ("READINESS_METRICS", "MaskingDiagnosisJob", "MaskingDiagnosisPolicy"),
     "daw_binding": ("DawFaderReading", "DawTrackBinding"),  # moved from daw (ADR-035)
     "daw": ("DawTrackState", "DawGainResolution"),
     "daw_control": (  # DAW control contract, 2026-11-18
@@ -505,6 +507,10 @@ INVENTORY = {
     ),
     "masking_measurement": (
         "P1_PROFILE",
+        "P1_EXACT_DUAL_MONO_PROFILE",
+        "P1_EXPERIMENTAL_METHOD",
+        "ExperimentalMaskingPolicy",
+        "ExperimentalSupport",
         "P1_SAMPLE_RATE_HZ",
         "P1_CHANNEL_COUNT",
         "P1_MODEL_BANDS",

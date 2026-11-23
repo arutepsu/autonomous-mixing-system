@@ -150,8 +150,11 @@ def test_files_outside_the_profile_never_reach_preparation_as_valid(tmp_path, st
     if "subtype" in change:
         result = preparer(stems, store).prepare(prep_request(stems.state, stems.bindings, (prep_job(a, b, FULL),)))
         assert isinstance(result, PortFailure) and result.code is PortFailureCode.UNAVAILABLE and code in result.message
-    else:  # the declared metadata is refused already by the request records
-        with pytest.raises(ValueError, match="native mono 44100"):
+    elif "channels" in change:
+        with pytest.raises(ValueError, match="mono"):
+            prep_request(stems.state, stems.bindings, (prep_job(a, b, FULL),))
+    else:  # unsupported rate is refused by the candidate job record
+        with pytest.raises(ValueError, match="44100"):
             prep_job(a, b, FULL)
 
 
@@ -275,7 +278,7 @@ def _rewrite(store: Path, document: dict) -> str:
 @pytest.mark.parametrize(
     ("mutate", "code"),
     [
-        (lambda d: d.update(schema_version=2), Code.UNSUPPORTED_SCHEMA),
+        (lambda d: d.update(schema_version=999), Code.UNSUPPORTED_SCHEMA),
         (lambda d: d.update(schema="other"), Code.UNSUPPORTED_SCHEMA),
         (lambda d: d.update(qualification="qualified"), Code.MALFORMED),
         (lambda d: d.update(kind="qualified"), Code.MALFORMED),

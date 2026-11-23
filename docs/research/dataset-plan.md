@@ -29,3 +29,8 @@ Injected faults are not automatically real-world mixing problems. Ask whether ea
 - Human listening or expert ratings as reference labels?
 - Which defect intensities can be reproducibly created without trivial solutions?
 - How to ensure clips are loudness-matched for perceptual comparisons?
+
+
+## Feasible pilot proposal (2026-11-23; not a new sample-size commitment)
+
+The numerical targets above remain provisional; the optional six-project/three-listener calibration study is not adopted. The owner prioritizes a feasible agent/tool/feedback thesis. The [experimental policy and evaluation proposal](p1-experimental-policy-pilot.md) recommends keeping inspected HT01/trap material in development and reserving one genuinely independent new project before algorithm/agent outcomes are examined. A second held-out project is optional if feasible. More variants/repeats of one project do not become new independent projects. No new split is assigned or evaluation authorized by this note; a small evaluation supports limited case-study claims, not statistical generalization.

@@ -29,6 +29,12 @@ direction and interval in the request) holds the full-clip call metadata, ``T_A`
 flags, source hashes, the prepared-plan and support digests and the observation IDs it backs. It is written before
 success; a write failure, or evidence beyond ``max_evidence_bytes``, returns ``UNAVAILABLE``. Evidence is model
 output, never a sufficiency or audibility claim.
+
+Explicit ``p1.experimental.*@1`` measurements use the policy-bound frozen subset, never a candidate-derived subset.
+The count remains factual; other values are unavailable below minimum support or outside current validity rules.
+Schema 3 evidence records masker energy, baseline identities, policy/noise digests, fixed cells and current flags.
+Actual masker/target artifact IDs distinguish every calculation/evidence group, even for the same track/time.
+All legacy raw/qualified IDs retain their meanings; no positive diagnosis is generated here.
 """
 
 import hashlib
@@ -40,12 +46,15 @@ from pathlib import Path
 
 import numpy as np
 
-from autonomous_mixing.adapters.dsp_analysis.bands import dist10_long_bands
 from autonomous_mixing.adapters.dsp_analysis.front_end import ClipBandAnalysis, dist10_clip_to_bands
 from autonomous_mixing.adapters.dsp_analysis.masking import MaskingMarginGrid, directional_masking_margin_db
 from autonomous_mixing.adapters.dsp_analysis.masking_preparation import (
     PreparationStoreError,
+    experimental_cell_flags,
     load_prepared_plan,
+    noise_reference_digest,
+    quiet_floor_bands,
+    rounding_noise_band_energy,
     single_member,
     write_content_addressed,
 )
@@ -59,6 +68,7 @@ from autonomous_mixing.core.records.coordinator_runtime import ClockReading
 from autonomous_mixing.core.records.identifiers import ArtifactId, ObservationId, VersionRef
 from autonomous_mixing.core.records.invariants import require_instance, require_text
 from autonomous_mixing.core.records.masking_measurement import (
+    P1_EXACT_DUAL_MONO_PROFILE,
     P1_MODEL_BANDS,
     P1_PROFILE,
     MaskingMeasurementPlan,
@@ -99,6 +109,23 @@ RAW_METRICS = {
     RAW_QUIET_FLOOR_THRESHOLD_CELLS: "cells",
     RAW_NONFINITE_MARGIN_CELLS: "cells",
 }
+# Explicit experimental measurements never reuse scientifically qualified metric identities.
+EXPERIMENTAL_SUPPORT_CELLS = _ref("p1.experimental.support_cells")
+EXPERIMENTAL_SIGNED_MARGIN_MEDIAN_DB = _ref("p1.experimental.signed_margin_median_db")
+EXPERIMENTAL_POSITIVE_MARGIN_CELLS = _ref("p1.experimental.positive_margin_cells")
+EXPERIMENTAL_POSITIVE_MARGIN_FRACTION = _ref("p1.experimental.positive_margin_fraction")
+EXPERIMENTAL_MEAN_POSITIVE_MARGIN_DB = _ref("p1.experimental.mean_positive_margin_db")
+EXPERIMENTAL_ROBUST_EXCEEDANCE_CELLS = _ref("p1.experimental.robust_exceedance_cells")
+EXPERIMENTAL_LONGEST_ROBUST_RUN_SECONDS = _ref("p1.experimental.longest_robust_run_seconds")
+EXPERIMENTAL_METRICS = {
+    EXPERIMENTAL_SUPPORT_CELLS: "cells",
+    EXPERIMENTAL_SIGNED_MARGIN_MEDIAN_DB: "dB",
+    EXPERIMENTAL_POSITIVE_MARGIN_CELLS: "cells",
+    EXPERIMENTAL_POSITIVE_MARGIN_FRACTION: "fraction",
+    EXPERIMENTAL_MEAN_POSITIVE_MARGIN_DB: "dB",
+    EXPERIMENTAL_ROBUST_EXCEEDANCE_CELLS: "cells",
+    EXPERIMENTAL_LONGEST_ROBUST_RUN_SECONDS: "s",
+}
 # Qualified catalogue (spec section 5): defined over S0, which needs an approved policy. Always Unavailable in R1.
 QUALIFIED_METRICS = {
     _ref("p1.support_cells"): "cells",
@@ -116,14 +143,6 @@ UNCALIBRATED_REASON = (
 _MARGIN_SUMMARIES = {RAW_SIGNED_MARGIN_MEDIAN_DB, RAW_POSITIVE_MARGIN_CELLS, RAW_POSITIVE_MARGIN_FRACTION,
                      RAW_MEAN_POSITIVE_MARGIN_DB}  # fmt: skip
 _QTHR_PROVENANCE = "dist10_long_bands applied to thresholds.DIST10_LONG_QTHR_44100 (63 partitions -> 21 bands)"
-
-
-def quiet_floor_bands() -> np.ndarray:
-    """``Q[b]``: the long-band mapping of the pinned partition threshold-in-quiet table (read-only, 21 values)."""
-    qthr = np.asarray(DIST10_LONG_QTHR_44100, dtype=np.float64)[None, :]
-    q = dist10_long_bands(qthr, qthr).thm[0].copy()
-    q.setflags(write=False)
-    return q
 
 
 def _qthr_sha256() -> str:
@@ -163,7 +182,7 @@ def _label(definition: MeasurementDefinition) -> str:
 
 
 def _unit(metric: VersionRef) -> str | None:
-    return RAW_METRICS.get(metric) or QUALIFIED_METRICS.get(metric)
+    return RAW_METRICS.get(metric) or QUALIFIED_METRICS.get(metric) or EXPERIMENTAL_METRICS.get(metric)
 
 
 def directional_cells(masker: ClipBandAnalysis, target: ClipBandAnalysis, support: PreparedSupport,
@@ -231,6 +250,83 @@ def _canonical(document: object) -> bytes:
     return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode()
 
 
+def _experimental_values(masker, target, fixed, policy, noise, quiet):
+    """Measure the exact frozen cells. Insufficient/unusable comparisons never become zero risk."""
+    cells = fixed.cells
+    flags = experimental_cell_flags(masker, target, cells, policy, noise, quiet)
+    n = len(cells)
+    rows = np.array([k for k, _ in cells], dtype=int)
+    bands = np.array([b for _, b in cells], dtype=int)
+    values = directional_masking_margin_db(masker.thm, target.en).margin_db[rows, bands]
+    exact_quiet_masker = flags["masker_silent"] & flags["quiet_floor"]
+    invalid_masker = (flags["masker_low_energy"] & ~exact_quiet_masker) | (
+        flags["masker_silent"] & ~flags["quiet_floor"]
+    )
+    reason = None
+    if n < policy.minimum_cells:
+        reason = f"experimental fixed support has {n} cells; minimum is {policy.minimum_cells}"
+    elif flags["target_silent"].any():
+        reason = "current target is exactly silent on experimental fixed support"
+    elif flags["target_low_energy"].any():
+        reason = "current target leaves the experimental band-energy screen"
+    elif invalid_masker.any():
+        reason = (
+            "current nonzero masker leaves the experimental band-energy screen, or silent masker is not at quiet floor"
+        )
+    elif flags["nonfinite"].any() or not np.isfinite(values).all():
+        reason = "current experimental evidence is nonfinite or undefined"
+    result = {EXPERIMENTAL_SUPPORT_CELLS: MeasuredScalar(float(n), "cells")}
+    if reason is not None:
+        result.update(
+            (metric, Unavailable(reason)) for metric in EXPERIMENTAL_METRICS if metric != EXPERIMENTAL_SUPPORT_CELLS
+        )
+    else:
+        robust = values > policy.margin_deadband_db
+        previous, lengths, longest = {}, {}, 0
+        for (k, b), yes in zip(cells, robust, strict=True):
+            if yes:
+                lengths[b] = lengths.get(b, 0) + 1 if previous.get(b) == k - 1 else 1
+                previous[b] = k
+                longest = max(longest, lengths[b])
+        positive = int(np.count_nonzero(values > 0))
+        result.update(
+            {
+                EXPERIMENTAL_SIGNED_MARGIN_MEDIAN_DB: MeasuredScalar(float(np.median(values)), "dB"),
+                EXPERIMENTAL_POSITIVE_MARGIN_CELLS: MeasuredScalar(float(positive), "cells"),
+                EXPERIMENTAL_POSITIVE_MARGIN_FRACTION: MeasuredScalar(positive / n, "fraction"),
+                EXPERIMENTAL_MEAN_POSITIVE_MARGIN_DB: MeasuredScalar(float(np.sum(np.maximum(values, 0))) / n, "dB"),
+                EXPERIMENTAL_ROBUST_EXCEEDANCE_CELLS: MeasuredScalar(float(np.count_nonzero(robust)), "cells"),
+                EXPERIMENTAL_LONGEST_ROBUST_RUN_SECONDS: MeasuredScalar(longest * 576 / 44100, "s"),
+            }
+        )
+    g = fixed.geometry
+    audit = {
+        "status": "experimental_unvalidated",
+        "policy": json.loads(policy.canonical_payload),
+        "policy_digest": policy.digest,
+        "support_digest": fixed.digest,
+        "geometry_digest": g.digest,
+        "cells": [list(c) for c in cells],
+        "cell_count": n,
+        "noise_reference_sha256": fixed.noise_reference_sha256,
+        "band_noise_reference": noise.tolist(),
+        "baseline_sources": {
+            "masker_artifact_id": str(g.masker_artifact_id),
+            "masker_sha256": g.masker_sha256,
+            "target_artifact_id": str(g.target_artifact_id),
+            "target_sha256": g.target_sha256,
+        },
+        "current_flags": {k: v.tolist() for k, v in flags.items()},
+        "comparison_available": reason is None,
+        "unavailable_reason": reason,
+    }
+    return result, audit
+
+
+def _job_key(job: _Job) -> tuple[MaskingPair, TimeRange, ArtifactId, ArtifactId]:
+    return (job.support.pair, job.support.time_range, job.masker.artifact_id, job.target.artifact_id)
+
+
 class DirectionalMaskingAnalyzer:
     """Implements ``AudioAnalyzer`` for P1 directional jobs over configured roots and registered prepared plans.
 
@@ -274,6 +370,9 @@ class DirectionalMaskingAnalyzer:
         self._issued: set[ObservationId] = set()
         self._evidence: dict[ObservationId, str] = {}
         self._q = quiet_floor_bands()
+        self._noise = (
+            rounding_noise_band_energy() if any(p.prepared.experimental_policy is not None for p in plans) else None
+        )
 
     def evidence_digest(self, observation_id: ObservationId) -> str | None:
         """The evidence file digest (in ``evidence_store``) backing an observation this instance returned."""
@@ -298,32 +397,53 @@ class DirectionalMaskingAnalyzer:
                 root_key = root_keys[artifact.artifact_id]
                 try:
                     clip = read_dist10_member(artifact, root=self._roots[root_key], max_file_bytes=self._max_file,
-                                              max_decoded_bytes=self._max_decoded)  # fmt: skip
+                                              max_decoded_bytes=self._max_decoded,
+                                              allow_exact_dual_mono=plan.prepared.profile == P1_EXACT_DUAL_MONO_PROFILE)  # fmt: skip
                 except Dist10ReadError as error:
                     return PortFailure(PortFailureCode.UNAVAILABLE,
                                        f"artifact {artifact.artifact_id} under root {root_key!r} could not be read "
                                        f"and verified: {error}", retryable=False)  # fmt: skip
                 clips[artifact.artifact_id] = (clip, dist10_clip_to_bands(clip.samples, sample_rate_hz=44100))
-        directions: dict[tuple[MaskingPair, TimeRange], DirectionalCells] = {}
+        directions: dict[tuple[MaskingPair, TimeRange, ArtifactId, ArtifactId], DirectionalCells] = {}
         for job in jobs:
-            key = (job.support.pair, job.support.time_range)
+            key = _job_key(job)
             if key not in directions:
                 directions[key] = directional_cells(clips[job.masker.artifact_id][1], clips[job.target.artifact_id][1],
                                                     job.support, self._q)  # fmt: skip
+        experiments = {}
+        if plan.prepared.experimental_policy is not None:
+            for job in jobs:
+                key = _job_key(job)
+                if key not in experiments:
+                    fixed = plan.prepared.experimental_support(job.support.pair, job.support.time_range)
+                    experiments[key] = _experimental_values(
+                        clips[job.masker.artifact_id][1],
+                        clips[job.target.artifact_id][1],
+                        fixed,
+                        plan.prepared.experimental_policy,
+                        self._noise,
+                        self._q,
+                    )
         observations = []
         for job in jobs:
-            cells = directions[(job.support.pair, job.support.time_range)]
+            cells = directions[_job_key(job)]
+            metric = job.definition.selector.metric
+            result = (
+                experiments[_job_key(job)][0][metric] if metric in EXPERIMENTAL_METRICS else summarize(metric, cells)
+            )
             observations.append(Observation(
                 self._fresh_id(), job.definition.selector.metric, (job.masker.artifact_id, job.target.artifact_id),
-                job.definition.selector.scope, summarize(job.definition.selector.metric, cells),
+                job.definition.selector.scope, result,
                 request.specification.ref, ANALYZER, reading.utc))  # fmt: skip
         response = AnalysisResponse(tuple(observations))
         validate_analysis_response(request, response)
         written: dict[ObservationId, str] = {}
         for key, cells in directions.items():
             members = [(job, obs) for job, obs in zip(jobs, observations, strict=True)
-                       if (job.support.pair, job.support.time_range) == key]  # fmt: skip
-            payload = self._evidence_payload(plan, members, cells, clips, reading)
+                       if _job_key(job) == key]  # fmt: skip
+            payload = self._evidence_payload(
+                plan, members, cells, clips, reading, experiments[key][1] if key in experiments else None
+            )
             if len(payload) > self._max_evidence:
                 return PortFailure(PortFailureCode.UNAVAILABLE,
                                    f"raw evidence of {len(payload)} bytes exceeds max_evidence_bytes", False)  # fmt: skip
@@ -349,6 +469,10 @@ class DirectionalMaskingAnalyzer:
         if stored != plan.prepared:
             raise _Rejected(PortFailureCode.UNAVAILABLE,
                             f"prepared plan {plan.prepared_digest} differs from the registered plan")  # fmt: skip
+        if plan.prepared.experimental_policy is not None:
+            expected = noise_reference_digest(self._noise)
+            if any(s.noise_reference_sha256 != expected for s in plan.prepared.experimental_supports):
+                raise _Rejected(PortFailureCode.UNAVAILABLE, "prepared experimental noise-reference identity differs")
         return plan
 
     def _plan(self, request: AnalysisRequest, plan: MaskingMeasurementPlan) -> tuple[_Job, ...]:
@@ -361,6 +485,10 @@ class DirectionalMaskingAnalyzer:
                 reason = "metric is not in the P1 catalogue"
             elif definition.unit != _unit(definition.selector.metric):
                 reason = f"unit {definition.unit!r} is not {_unit(definition.selector.metric)!r}"
+            elif definition.selector.metric in EXPERIMENTAL_METRICS and plan.prepared.experimental_policy is None:
+                reason = "experimental metric requires an explicit experimental policy"
+            elif plan.prepared.profile == P1_PROFILE and any(s.channel_count != 1 for s in definition.sources):
+                reason = "unsupported_channel_count: legacy profile requires mono source metadata"
             elif scope.frequency_range is not None:
                 reason = "P1 regions are whole model bands of the prepared support, not frequency ranges"
             elif len(scope.track_ids) != 2 or len(definition.sources) != 2:
@@ -412,24 +540,33 @@ class DirectionalMaskingAnalyzer:
         return observation_id
 
     def _evidence_payload(self, plan: MaskingMeasurementPlan, members, cells: DirectionalCells, clips,
-                          reading: ClockReading) -> bytes:  # fmt: skip
+                          reading: ClockReading, experimental=None) -> bytes:  # fmt: skip
         job = members[0][0]
         support = job.support
         masker_clip, masker = clips[job.masker.artifact_id]
         target_clip, target = clips[job.target.artifact_id]
 
+        extended = plan.prepared.profile == P1_EXACT_DUAL_MONO_PROFILE
+
         def source(clip: Dist10Pcm16Clip) -> dict:
             artifact = clip.artifact
-            return {"artifact_id": str(artifact.artifact_id), "sha256": clip.verified_sha256,
+            data = {"artifact_id": str(artifact.artifact_id), "sha256": clip.verified_sha256,
                     "container": clip.container, "subtype": clip.subtype, "frame_count": artifact.frame_count,
                     "sample_rate_hz": artifact.sample_rate_hz,
                     "timeline_start_seconds": artifact.timeline_start_seconds}  # fmt: skip
+            if extended or experimental is not None:
+                data.update(
+                    source_channel_count=artifact.channel_count,
+                    analysis_channel_count=clip.analysis_channel_count,
+                    channel_mapping=clip.channel_mapping,
+                )
+            return data
 
-        return _canonical({
+        payload = {
             "schema": EVIDENCE_SCHEMA,
-            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "schema_version": 2 if extended else EVIDENCE_SCHEMA_VERSION,
             "analyzer": [ANALYZER.name, ANALYZER.version],
-            "profile": [P1_PROFILE.name, P1_PROFILE.version],
+            "profile": [plan.prepared.profile.name, plan.prepared.profile.version],
             "specification": [plan.specification.name, plan.specification.version],
             "prepared_digest": plan.prepared_digest,
             "support": {"digest": support.digest, "pair": [str(support.pair.masker), str(support.pair.target)],
@@ -460,4 +597,11 @@ class DirectionalMaskingAnalyzer:
             "observations": [{"id": str(obs.observation_id), "metric": [obs.metric.name, obs.metric.version]}
                              for _, obs in members],
             "created_at": reading.utc.isoformat(),
-        })  # fmt: skip
+        }  # fmt: skip
+        if experimental is not None:
+            payload["schema_version"] = 3
+            payload["experimental"] = experimental
+            payload["masker_energy"] = masker.en.tolist()
+        if extended or experimental is not None:
+            payload["analysis_profile"] = [P1_PROFILE.name, P1_PROFILE.version]
+        return _canonical(payload)

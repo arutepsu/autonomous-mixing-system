@@ -1,6 +1,6 @@
 # P1 directional masking: measurement and diagnosis method
 
-**Status:** Method specification accepted by the owner, 2026-11-20. Updated 2026-11-22: R1 descriptive measurement/support implementation is reviewed and committed at `0242c99`; calibration has not run, qualified support S0 is unavailable and production diagnosis is missing. Design acceptance does not establish numerical policy values or perceptual validity.
+**Status:** Method specification accepted by the owner, 2026-11-20. Updated 2026-11-22: R1 descriptive measurement/support implementation is reviewed and committed at `0242c99`; calibration has not run and qualified support S0 is unavailable. R2A readiness diagnosis is implemented (review pending), while positive qualified candidate generation remains missing. Design acceptance does not establish numerical policy values or perceptual validity.
 
 **Parent:** [Diagnosis and AI decision adapter plan](../plans/2026-11-20-diagnosis-and-decision-adapter.md).
 
@@ -9,6 +9,8 @@
 ## 1. Scope and source ownership
 
 The first profile is two aligned, native mono 44,100 Hz PCM_16 clips of equal length, analyzed at their actual exported levels. Read counts exactly through the existing verified WAV boundary. No resampling, normalization, stereo fold-down, bit-depth conversion or summation of several maskers is part of this profile. Stereo masters may still be measured by the separate native-channel level analyzer, but are not P1 inputs.
+
+**Explicit ingress extension (2026-11-22):** the existing prepared-profile field additionally supports `p1.dist10_mono_pcm16_44100@2`. It accepts native mono or verified exact dual mono at the same rate/subtype; each current two-channel source must match over the entire clip before one unchanged count sequence reaches DSP. Original stereo metadata/hash is retained. This is not general stereo analysis or fold-down. The geometric cell identity remains canonical mono; the full prepared manifest and bound specification identify the chosen ingress. V1 remains strict, and all other scope limits above remain. V2 raw evidence explicitly identifies source versus analysis channels and the versioned mapping. R2A remains INCOMPLETE with no positive candidates until qualification exists.
 
 The [front-end numerical contract](2026-11-11-mpeg-psychoacoustic-front-end-contract.md) owns DSP equations, tables, precision, captures and discrepancies. This document owns selection, aggregation, evidence sufficiency and calibration. Reviewed numerical kernels are reused unchanged. P2 buildup and P3 phase interaction remain unavailable.
 
@@ -252,3 +254,19 @@ This section records what R1 implemented and where it differs from or makes prec
 **Open questions.**
 - Manifest and evidence size grow with clip length: about 63 numbers per call, plus 20 cells per call in the manifest. They are bounded by explicit byte limits, but no limit has been sized for full songs.
 - Whether evidence should also store the masker's `en` and the target's `thm` for later qualification predicates is open.
+
+
+## R2A readiness implementation note (2026-11-22; review pending)
+
+The standalone readiness source validates exact configured measurement/support bindings and reports INCOMPLETE P1 with no candidates, including when qualified-named scalar fixtures are finite. P2/P3 remain UNAVAILABLE. This implements the pre-calibration outcome in section 6, not its positive candidate rule. Source matching is unique over all SourceRequirement fields, with no first/latest-revision inference; alignment remains declared and unavailable observations have no scalar unit. The pure rule authenticates neither files nor a manifest. Real R1 integration is tested on temporary unit-test WAVs only. Numerical policy, qualified S0/metrics, positive diagnosis and R5 composition remain pending; the scientific rule and calibration protocol above are unchanged.
+
+
+## Experimental fixed-support measurement implementation (2026-11-23)
+
+The existing preparer and directional analyzer now accept an explicit versioned experimental policy. Preparation computes geometric U as before, screens the verified full baseline clips once and persists the selected cells with the policy, complete baseline identity and noise-reference digest. The optional extension remains uncalibrated; it is not qualified S0. No-policy manifests and native-mono evidence retain their previous bytes.
+
+Current-state `p1.experimental.*@1` measurements use precisely those frozen cells. The frozen cell count remains factual even when below the configured minimum; other values are unavailable for insufficient support, unusable current target energy or nonzero masker energy. An exactly silent masker at exact threshold in quiet has the explicit assessable exception. Equality passes the energy/quiet elevation screens, exact Q is excluded during initial selection, and robust exceedance uses strict M > the configured deadband. Missing calls break consecutive runs. Current quiet-elevation changes are diagnostic and never reselect the denominator.
+
+Experimental schema3 evidence includes masker energy, the frozen baseline source identities, current input identities/channel mapping, policy and noise identities, current flags and availability. Distinct current artifacts for the same track/time receive distinct calculations and evidence. Existing qualified metric names still return unavailable. This increment implements no positive diagnosis, provider call or coordinator wiring. Scientific qualification and musical assessment remain pending.
+
+The reviewed rounding-noise implementation now belongs to the existing preparation module; the research script imports it compatibly. A pre-change golden pins all per-bin, partition and band values including Nyquist. The older open question about retaining masker energy is answered for experimental schema3 only; legacy schemas are unchanged.

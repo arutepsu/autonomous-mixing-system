@@ -19,3 +19,7 @@
   - this module's edges are unchanged;
   - the new modules import only `wav_input`, never `audio_io`.
 - **Pinned by:** `tests/architecture/test_adapters.py` (`ANALYSIS_EDGES`) and new regressions in `tests/unit/test_dsp_wav_input.py`.
+
+## Implementation note (2026-11-22, exact dual mono; still Proposed)
+
+The existing three reader/conversion functions gain keyword-only `allow_exact_dual_mono: bool = False`. The default retains native-mono v1. Explicit opt-in permits mono or exactly equal stereo PCM_16 at 44,100 Hz, after shared verification and full decoded shape/range/integrality checks of both channels. It selects channel 0 unchanged, retains the original verified stereo artifact/hash, and charges actual source channels. Unequal stereo is rejected. No new adapter, shared-reader client, conversion subsystem or copied WAV is introduced. Preparation and analysis derive opt-in only from the persisted v2 profile, with legacy pre-read admission preserved. Numerical kernels remain file-free and unchanged.

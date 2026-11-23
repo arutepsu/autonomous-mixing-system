@@ -7,10 +7,16 @@ profile fixes geometry: call ``k`` is eligible when ``k >= 2`` and ``576k + 256 
 ``[576k - 768, 576k + 256)``. A requested interval keeps only eligible calls whose complete window lies inside it,
 and interval boundaries must be integral sample positions (never rounded).
 
+The explicit v2 ingress profile also permits exactly duplicated stereo source counts, verified by the reader.
+Source metadata remains truthful (one or two channels); v1 request and diagnosis gates still require one. Both
+profiles use the same canonical mono DSP support identity; the full prepared manifest/profile identifies ingress.
+
 R1 provides **geometric support U** only: declared region bands crossed with those calls. The qualified initial
 support S0 needs an approved qualification policy and numerical deadband (section 8), and none exists, so no record
 here can describe a qualified plan: qualification is ``UNCALIBRATED`` and the support kind is ``GEOMETRIC``. A
 prepared plan is a descriptive record of U and of the baseline it was prepared from; it is never qualified evidence.
+An explicit optional experimental policy adds frozen screened cells with separate identities. It leaves scientific
+qualification UNCALIBRATED and never turns geometric U into validated S0.
 """
 
 import bisect
@@ -35,6 +41,8 @@ from autonomous_mixing.core.records.project import ProjectState
 from autonomous_mixing.core.records.verification_evidence import SourceRequirement
 
 P1_PROFILE = VersionRef("p1.dist10_mono_pcm16_44100", "1")
+P1_EXACT_DUAL_MONO_PROFILE = VersionRef("p1.dist10_mono_pcm16_44100", "2")
+P1_EXPERIMENTAL_METHOD = VersionRef("p1.experimental_screen", "1")
 P1_SAMPLE_RATE_HZ = 44100
 P1_CHANNEL_COUNT = 1
 P1_MODEL_BANDS = 21  # every band is kept descriptively in raw evidence
@@ -168,8 +176,10 @@ def _require_profile_source(source: SourceRequirement, track: TrackId, field: st
     require_instance(source, SourceRequirement, field)
     if source.source_track_ids != (track,):
         raise ValueError(f"{field} must be the single-track source of {track}")
-    if source.sample_rate_hz != P1_SAMPLE_RATE_HZ or source.channel_count != P1_CHANNEL_COUNT:
-        raise ValueError(f"{field} must be native mono {P1_SAMPLE_RATE_HZ} Hz (no resampling or fold-down)")
+    if source.sample_rate_hz != P1_SAMPLE_RATE_HZ or source.channel_count not in (1, 2):
+        raise ValueError(
+            f"{field} must be {P1_SAMPLE_RATE_HZ} Hz with 1 or 2 candidate channels (no resampling/fold-down)"
+        )
 
 
 @dataclass(frozen=True)
@@ -200,12 +210,59 @@ class MaskingPreparationJob:
 
 
 @dataclass(frozen=True)
+class ExperimentalMaskingPolicy:
+    """Explicit operational screening values; approval for engineering is not scientific calibration."""
+
+    method: VersionRef
+    energy_above_noise_db: float
+    quiet_elevation_db: float
+    margin_deadband_db: float
+    minimum_cells: int
+    minimum_robust_fraction: float
+    minimum_consecutive_calls: int
+
+    def __post_init__(self) -> None:
+        require_instance(self.method, VersionRef, "method")
+        if self.method != P1_EXPERIMENTAL_METHOD:
+            raise ValueError("unsupported experimental screening method")
+        for name in ("energy_above_noise_db", "quiet_elevation_db", "margin_deadband_db"):
+            if require_finite(getattr(self, name), name) < 0:
+                raise ValueError(f"{name} must be nonnegative")
+        require_count(self.minimum_cells, "minimum_cells", minimum=1)
+        require_count(self.minimum_consecutive_calls, "minimum_consecutive_calls", minimum=1)
+        if not 0 <= require_finite(self.minimum_robust_fraction, "minimum_robust_fraction") <= 1:
+            raise ValueError("minimum_robust_fraction must lie in [0, 1]")
+
+    @property
+    def canonical_payload(self) -> bytes:
+        return json.dumps(
+            {
+                "method": [self.method.name, self.method.version],
+                "energy_above_noise_db": float(self.energy_above_noise_db),
+                "quiet_elevation_db": float(self.quiet_elevation_db),
+                "margin_deadband_db": float(self.margin_deadband_db),
+                "minimum_cells": self.minimum_cells,
+                "minimum_robust_fraction": float(self.minimum_robust_fraction),
+                "minimum_consecutive_calls": self.minimum_consecutive_calls,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(self.canonical_payload).hexdigest()
+
+
+@dataclass(frozen=True)
 class MaskingPreparationRequest:
     """Prepare support for one initial runtime state before any run is constructed (spec section 4).
 
     Names the producer-supplied initial state and its current-member roots, the profile, the ordered jobs and the
     resource bounds. It holds no reference target and no AI proposal. ``qualification`` is ``UNCALIBRATED``: only
-    geometric support U can be prepared. The bounds are resource limits, not scientific thresholds.
+    geometric support U can be prepared, optionally extended with explicitly experimental screened cells. The bounds
+    are resource limits, not scientific thresholds.
     """
 
     state: ProjectState
@@ -216,19 +273,26 @@ class MaskingPreparationRequest:
     max_file_bytes: int
     max_decoded_bytes: int
     max_elapsed_seconds: float
+    experimental_policy: ExperimentalMaskingPolicy | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.state, ProjectState, "MaskingPreparationRequest.state")
         require_tuple_of(self.root_bindings, ArtifactRootBinding, "MaskingPreparationRequest.root_bindings",
                          nonempty=True, distinct=True)  # fmt: skip
-        if self.profile != P1_PROFILE:
+        if self.profile not in (P1_PROFILE, P1_EXACT_DUAL_MONO_PROFILE):
             raise ValueError(f"MaskingPreparationRequest.profile must be {P1_PROFILE.name}@{P1_PROFILE.version}")
         require_tuple_of(self.jobs, MaskingPreparationJob, "MaskingPreparationRequest.jobs", nonempty=True,
                          distinct=True)  # fmt: skip
+        if self.profile == P1_PROFILE and any(
+            source.channel_count != 1 for job in self.jobs for source in (job.masker_source, job.target_source)
+        ):
+            raise ValueError("legacy profile requires mono source metadata")
         keys = [job.key for job in self.jobs]
         if len(set(keys)) != len(keys):
             raise ValueError("each direction and interval is prepared once")
         require_instance(self.qualification, QualificationStatus, "MaskingPreparationRequest.qualification")
+        if self.experimental_policy is not None:
+            require_instance(self.experimental_policy, ExperimentalMaskingPolicy, "experimental_policy")
         require_count(self.max_file_bytes, "MaskingPreparationRequest.max_file_bytes", minimum=1)
         require_count(self.max_decoded_bytes, "MaskingPreparationRequest.max_decoded_bytes", minimum=1)
         if require_finite(self.max_elapsed_seconds, "MaskingPreparationRequest.max_elapsed_seconds") <= 0:
@@ -318,6 +382,58 @@ class PreparedSupport:
 
 
 @dataclass(frozen=True)
+class ExperimentalSupport:
+    """Frozen experimental cells within U, bound to baseline sources and explicit policy/noise identities.
+
+    This is never scientifically qualified support; the plan retains UNCALIBRATED status.
+    """
+
+    geometry: PreparedSupport
+    policy_digest: str
+    noise_reference_sha256: str
+    cells: tuple[tuple[int, int], ...]
+
+    def __post_init__(self) -> None:
+        require_instance(self.geometry, PreparedSupport, "geometry")
+        _require_sha256(self.policy_digest, "policy_digest")
+        _require_sha256(self.noise_reference_sha256, "noise_reference_sha256")
+        if not isinstance(self.cells, tuple):
+            raise ValueError("experimental cells must be an immutable tuple")
+        previous = None
+        g = self.geometry
+        for cell in self.cells:
+            if (
+                not isinstance(cell, tuple)
+                or len(cell) != 2
+                or any(type(i) is not int for i in cell)
+                or not g.first_call <= cell[0] < g.first_call + g.call_count
+                or cell[1] not in g.region.bands
+            ):
+                raise ValueError("experimental cell must be an integer call/band inside its geometry")
+            if previous is not None and cell <= previous:
+                raise ValueError("experimental cells must be sorted and unique")
+            previous = cell
+
+    @property
+    def cell_count(self) -> int:
+        return len(self.cells)
+
+    @property
+    def digest(self) -> str:
+        g = self.geometry
+        payload = {
+            "kind": "experimental_fixed",
+            "geometry_digest": g.digest,
+            "masker": [str(g.masker_artifact_id), g.masker_sha256],
+            "target": [str(g.target_artifact_id), g.target_sha256],
+            "policy_digest": self.policy_digest,
+            "noise_reference_sha256": self.noise_reference_sha256,
+            "cells": self.cells,
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
+
+
+@dataclass(frozen=True)
 class PreparationTiming:
     """When preparation ran and how long it took; reported separately from any run budget (spec section 4)."""
 
@@ -349,9 +465,11 @@ class MaskingPreparedPlan:
     max_file_bytes: int
     max_decoded_bytes: int
     timing: PreparationTiming
+    experimental_policy: ExperimentalMaskingPolicy | None = None
+    experimental_supports: tuple[ExperimentalSupport, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.profile != P1_PROFILE:
+        if self.profile not in (P1_PROFILE, P1_EXACT_DUAL_MONO_PROFILE):
             raise ValueError("MaskingPreparedPlan.profile must be the P1 profile")
         require_tuple_of(self.supports, PreparedSupport, "MaskingPreparedPlan.supports", nonempty=True,
                          distinct=True)  # fmt: skip
@@ -363,6 +481,26 @@ class MaskingPreparedPlan:
         require_count(self.max_file_bytes, "MaskingPreparedPlan.max_file_bytes", minimum=1)
         require_count(self.max_decoded_bytes, "MaskingPreparedPlan.max_decoded_bytes", minimum=1)
         require_instance(self.timing, PreparationTiming, "MaskingPreparedPlan.timing")
+        require_tuple_of(
+            self.experimental_supports, ExperimentalSupport, "experimental_supports", nonempty=False, distinct=True
+        )
+        if self.experimental_policy is None:
+            if self.experimental_supports:
+                raise ValueError("experimental support requires an explicit policy")
+        else:
+            require_instance(self.experimental_policy, ExperimentalMaskingPolicy, "experimental_policy")
+            if tuple(s.geometry for s in self.experimental_supports) != self.supports:
+                raise ValueError("experimental support must cover every exact baseline geometry in order")
+            if any(s.policy_digest != self.experimental_policy.digest for s in self.experimental_supports):
+                raise ValueError("experimental support policy differs")
+            if len({s.noise_reference_sha256 for s in self.experimental_supports}) != 1:
+                raise ValueError("experimental supports must use one noise reference")
+
+    def experimental_support(self, pair: MaskingPair, time_range: TimeRange) -> ExperimentalSupport | None:
+        return next(
+            (s for s in self.experimental_supports if s.geometry.pair == pair and s.geometry.time_range == time_range),
+            None,
+        )
 
     def support(self, pair: MaskingPair, time_range: TimeRange) -> PreparedSupport | None:
         return next((s for s in self.supports if s.pair == pair and s.time_range == time_range), None)

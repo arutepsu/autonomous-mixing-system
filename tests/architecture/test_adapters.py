@@ -258,7 +258,8 @@ ANALYSIS_EDGES = {
     # P1 R1 handoff, 2026-11-20: support preparation and its manifest. Reads only through the dist10 input boundary
     # (wav_input.read_dist10_member); no audio_io edge and no NumPy.
     "masking_preparation": (
-        {f"{ANALYSIS}.wav_input", f"{PORTS}.coordinator_runtime"}
+        {f"{ANALYSIS}.{m}" for m in ("bands", "front_end", "partitions", "thresholds", "wav_input")}
+        | {f"{PORTS}.coordinator_runtime"}
         | _r(
             "artifacts",
             "coordinator_runtime",
@@ -269,12 +270,12 @@ ANALYSIS_EDGES = {
             "results",
             "verification_evidence",
         ),
-        set(),
+        {"numpy"},
     ),  # fmt: skip
     # P1 R1 handoff, 2026-11-20: the directional AudioAnalyzer composes the reviewed kernels (front_end, masking,
     # bands, the qthr table), reads only through wav_input and verifies plans through masking_preparation.
     "directional_analysis": (
-        {f"{ANALYSIS}.{m}" for m in ("bands", "front_end", "masking", "masking_preparation", "thresholds", "wav_input")}
+        {f"{ANALYSIS}.{m}" for m in ("front_end", "masking", "masking_preparation", "thresholds", "wav_input")}
         | {f"{PORTS}.analysis", f"{PORTS}.coordinator_runtime"}
         | _r(
             "analysis",

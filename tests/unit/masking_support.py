@@ -102,11 +102,11 @@ class Stems:
     """Mono PCM_16 stems in one input root, one per track, as current members of one project state."""
 
     def __init__(self, tmp: Path, counts: dict[TrackId, np.ndarray], *, rate: int = RATE, subtype="PCM_16",
-                 channels: int = 1, start: float = 0.0):  # fmt: skip
+                 channels: int | dict[TrackId, int] = 1, start: float = 0.0):  # fmt: skip
         self.root = tmp / "inputs"
         self.root.mkdir(exist_ok=True)
         self.roots = {"inputs": str(self.root)}
-        self.artifacts = {track: self.write(track, values, rate=rate, subtype=subtype, channels=channels, start=start)
+        self.artifacts = {track: self.write(track, values, rate=rate, subtype=subtype, channels=channels.get(track, 1) if isinstance(channels, dict) else channels, start=start)
                           for track, values in counts.items()}  # fmt: skip
         self.state = state_of(tuple(self.artifacts.values()))
         self.bindings = tuple(ArtifactRootBinding(a.artifact_id, "inputs") for a in self.artifacts.values())
@@ -170,9 +170,20 @@ def prep_request(state: ProjectState, bindings, jobs, **overrides) -> MaskingPre
 class World:
     """Stems, a persisted prepared plan for the given directions and an analyzer registered for its bound specification."""
 
-    def __init__(self, tmp: Path, counts: dict, directions=((TA, TB), (TB, TA)), time_range=FULL, region=None):
+    def __init__(
+        self,
+        tmp: Path,
+        counts: dict,
+        directions=((TA, TB), (TB, TA)),
+        time_range=FULL,
+        region=None,
+        *,
+        channels=1,
+        profile=P1_PROFILE,
+        experimental_policy=None,
+    ):
         self.tmp = tmp
-        self.stems = Stems(tmp, counts)
+        self.stems = Stems(tmp, counts, channels=channels)
         self.plans_dir, self.evidence_dir = tmp / "plans", tmp / "evidence"
         self.plans_dir.mkdir()
         self.evidence_dir.mkdir()
@@ -181,7 +192,7 @@ class World:
                      for a, b in directions)  # fmt: skip
         result = MaskingPreparer(self.stems.roots, store=self.plans_dir, clock=Clock(),
                                  known_alignments=frozenset({ALIGNMENT.method})).prepare(
-            prep_request(self.stems.state, self.stems.bindings, jobs))  # fmt: skip
+            prep_request(self.stems.state, self.stems.bindings, jobs, profile=profile, experimental_policy=experimental_policy))  # fmt: skip
         assert isinstance(result, Success), result
         self.persisted = result.value
         self.spec = bound_specification(SPEC_NAME, SPEC_VERSION, result.value.digest)

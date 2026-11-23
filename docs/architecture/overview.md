@@ -643,3 +643,19 @@ Limits:
 `adapters.decision_agent` now contains explicit configuration, a versioned public request, bounded synchronous SDK transport and `ClaudeDecisionMaker`. It implements the existing decision port through the R3 audit collaborator, without importing a concrete journal or coordinator. Requests are recorded before one possible dispatch; response evidence precedes decision interpretation; a usable decision requires an exact completion acknowledgement. Completed replay sends nothing, and incomplete exchanges never automatically resend.
 
 Locked-SDK mock HTTP tests and real temporary exchange-store tests establish implementation behavior only. Structural envelope extraction happens before response persistence; both selected decision-text bytes and the bounded raw provider body/hash are retained. No live model/API capability, musical quality or perceptual-masking result is established. SDK optionality is tested with imports blocked. Native coordinators/CLI are not rewired in R4, and production diagnosis remains missing. See the R4 handoff and implementation note in the diagnosis-and-decision plan for the audit, timeout and byte-bound limitations.
+
+
+### R2A configured diagnosis readiness (2026-11-22; implemented, review pending)
+
+`core.records.masking_diagnosis` binds the exact prepared support and required metric definitions; `core.diagnosis.masking.diagnose_masking` classifies evidence readiness; `drivers.diagnosis_runtime.ConfiguredDiagnosisSource` implements the existing port without changing CLI or coordinator composition. It validates each report and refuses reused coverage IDs. Source resolution is unique over all declared fields and ordered observation IDs, not first/latest revision. P1 remains INCOMPLETE, P2/P3 UNAVAILABLE, and candidates empty. Finite scalar presence is not qualification.
+
+The pure source has no I/O, arrays, hidden evaluation input or provider dependency. Its small SourceRequirement matcher is parity-tested against R1 because importing the verification stage or an adapter would violate the boundary. Preparation/authenticated input still comes from R1; core cannot independently verify physical alignment, PCM subtype or manifest bytes. Real-analyzer/router integration tests exercise silence and nonzero unit-test WAVs without establishing calibration or model performance. The R2B positive rule and R5 integration remain pending. The earlier statement that no diagnosis source exists is superseded for readiness only.
+
+### Exact dual-mono ingress (2026-11-22; implemented, review pending)
+
+The existing `dsp_analysis.wav_input` boundary accepts exactly duplicated stereo PCM_16 only with explicit opt-in, derived in P1 from prepared profile v2. Both full decoded channels are verified before channel 0 is selected; original artifact/hash/channel metadata remain unchanged. Native-mono v1 admission and persisted evidence bytes stay unchanged. DSP, geometric cell identity and qualified-metric availability are unchanged. Extended evidence distinguishes source channels from mono analysis. No new adapter, I/O client, port or copied audio; genuinely different stereo remains unsupported. HT01 has not been analyzed by this implementation.
+
+
+### Experimental P1 measurement extension (2026-11-23)
+
+The existing `masking_measurement` records, `masking_preparation` and `directional_analysis` own the optional uncalibrated fixed-support path. No new adapter boundary or port is introduced. Preparation persists policy/source/noise-bound baseline cells; the analyzer measures the same cells on current artifacts under separate `p1.experimental.*@1` IDs. Legacy geometric/qualified meanings and no-policy behavior stay unchanged. The reviewed noise and quiet-floor helpers are shared from preparation, with the research script retaining compatible imports. This is measurement plumbing only: experimental positive diagnosis, composition and live agent validation remain later work.

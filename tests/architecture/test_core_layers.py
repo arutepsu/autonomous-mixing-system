@@ -34,6 +34,7 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
+    "diagnosis.masking": ("diagnose_masking",),
     "admission.daw": (
         "resolve_daw_gain",
         "daw_gain_bounds",
@@ -184,7 +185,7 @@ def test_the_core_packages_are_the_planned_ones():
     present = {_package(name) for name in MODULES if _package(name)}
     assert present <= set(ALLOWED_PACKAGES), present
     behavior = {name.split(".", 2)[2] for name in MODULES if _package(name) not in (None, "records")}
-    behavior -= {"ports", "admission", "verification", "loop"}
+    behavior -= {"ports", "admission", "verification", "diagnosis", "loop"}
     assert behavior == set(BEHAVIOR_INVENTORY)
 
 

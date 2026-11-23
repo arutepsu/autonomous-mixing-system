@@ -28,10 +28,17 @@ Call sequence (no partial success; any failure returns a ``PortFailure`` and wri
 ``load_prepared_plan`` reads a manifest back by digest and refuses a missing, altered, non-canonical, unsupported
 or invalid one with ``PreparationStoreError``; it never recreates support. The manifest is evidence of the prepared
 geometry and its baseline provenance (verified hashes), not of masking.
+
+Opt-in experimental extension: a supplied ExperimentalMaskingPolicy runs the same full-clip front end once per
+verified member and freezes actual screened cells within U. Manifest schema 2 binds policy/source/noise identities;
+legacy schema 1 bytes stay unchanged. Inclusive energy/quiet thresholds compare powers directly. Existing reviewed
+rounding-noise functions live here and the research script re-exports them. Experimental support is unvalidated,
+not scientific qualification; preparation still emits no diagnosis.
 """
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from collections.abc import Mapping
@@ -40,16 +47,25 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from autonomous_mixing.adapters.dsp_analysis.wav_input import Dist10ReadError, read_dist10_member
+import numpy as np
+
+from autonomous_mixing.adapters.dsp_analysis.bands import dist10_long_bands
+from autonomous_mixing.adapters.dsp_analysis.front_end import dist10_clip_to_bands
+from autonomous_mixing.adapters.dsp_analysis.partitions import dist10_long_partition_map
+from autonomous_mixing.adapters.dsp_analysis.thresholds import DIST10_LONG_QTHR_44100
+from autonomous_mixing.adapters.dsp_analysis.wav_input import Dist10Pcm16Clip, Dist10ReadError, read_dist10_member
 from autonomous_mixing.core.ports.coordinator_runtime import RunClock
 from autonomous_mixing.core.records.artifacts import AudioArtifact
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading
 from autonomous_mixing.core.records.identifiers import ArtifactId, TrackId, VersionRef
 from autonomous_mixing.core.records.invariants import require_instance, require_text
 from autonomous_mixing.core.records.masking_measurement import (
+    P1_EXACT_DUAL_MONO_PROFILE,
     P1_PROFILE,
     AlignmentProvenance,
     BandRegion,
+    ExperimentalMaskingPolicy,
+    ExperimentalSupport,
     MaskingPair,
     MaskingPreparationRequest,
     MaskingPreparedPlan,
@@ -158,25 +174,65 @@ def _support_document(support: PreparedSupport) -> dict:
     }
 
 
+def _experimental_document(support: ExperimentalSupport) -> dict:
+    g = support.geometry
+    return {
+        "geometry_digest": g.digest,
+        "policy_digest": support.policy_digest,
+        "masker": [str(g.masker_artifact_id), g.masker_sha256],
+        "target": [str(g.target_artifact_id), g.target_sha256],
+        "noise_reference_sha256": support.noise_reference_sha256,
+        "cells": [list(cell) for cell in support.cells],
+        "digest": support.digest,
+    }
+
+
+def _decode_policy(item: dict) -> ExperimentalMaskingPolicy:
+    return ExperimentalMaskingPolicy(
+        method=VersionRef(*item["method"]),
+        energy_above_noise_db=item["energy_above_noise_db"],
+        quiet_elevation_db=item["quiet_elevation_db"],
+        margin_deadband_db=item["margin_deadband_db"],
+        minimum_cells=item["minimum_cells"],
+        minimum_robust_fraction=item["minimum_robust_fraction"],
+        minimum_consecutive_calls=item["minimum_consecutive_calls"],
+    )
+
+
+def _decode_experimental(item: dict, supports: tuple[PreparedSupport, ...]) -> ExperimentalSupport:
+    found = [s for s in supports if s.digest == item["geometry_digest"]]
+    if len(found) != 1:
+        raise ValueError("experimental support geometry is missing or ambiguous")
+    support = ExperimentalSupport(
+        found[0], item["policy_digest"], item["noise_reference_sha256"], tuple(tuple(cell) for cell in item["cells"])
+    )
+    if _experimental_document(support) != item:
+        raise ValueError("experimental support differs from its exact encoding")
+    return support
+
+
 def encode_prepared_plan(plan: MaskingPreparedPlan) -> bytes:
     """The canonical manifest bytes of ``plan``; its SHA-256 is the manifest digest."""
     require_instance(plan, MaskingPreparedPlan, "plan")
-    return _canonical(
-        {
-            "schema": MANIFEST_SCHEMA,
-            "schema_version": MANIFEST_SCHEMA_VERSION,
-            "profile": _version(plan.profile),
-            "kind": plan.kind.value,
-            "qualification": plan.qualification.value,
-            "limits": {"max_file_bytes": plan.max_file_bytes, "max_decoded_bytes": plan.max_decoded_bytes},
-            "timing": {
-                "started_at": plan.timing.started_at.isoformat(),
-                "finished_at": plan.timing.finished_at.isoformat(),
-                "elapsed_seconds": plan.timing.elapsed_seconds,
-            },
-            "supports": [_support_document(s) for s in plan.supports],
-        }
-    )
+    document = {
+        "schema": MANIFEST_SCHEMA,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "profile": _version(plan.profile),
+        "kind": plan.kind.value,
+        "qualification": plan.qualification.value,
+        "limits": {"max_file_bytes": plan.max_file_bytes, "max_decoded_bytes": plan.max_decoded_bytes},
+        "timing": {
+            "started_at": plan.timing.started_at.isoformat(),
+            "finished_at": plan.timing.finished_at.isoformat(),
+            "elapsed_seconds": plan.timing.elapsed_seconds,
+        },
+        "supports": [_support_document(s) for s in plan.supports],
+    }
+    if plan.experimental_policy is not None:
+        document["schema_version"] = 2
+        document["experimental_policy"] = json.loads(plan.experimental_policy.canonical_payload)
+        document["experimental_supports"] = [_experimental_document(s) for s in plan.experimental_supports]
+    return _canonical(document)
 
 
 def _refuse_constant(name: str) -> object:
@@ -215,7 +271,7 @@ def decode_prepared_plan(payload: bytes) -> MaskingPreparedPlan:
         raise PreparationStoreError(PreparationStoreFailureCode.MALFORMED, f"not strict JSON: {error}") from error
     if not isinstance(document, dict):
         raise PreparationStoreError(PreparationStoreFailureCode.MALFORMED, "manifest is not a JSON object")
-    if document.get("schema") != MANIFEST_SCHEMA or document.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+    if document.get("schema") != MANIFEST_SCHEMA or document.get("schema_version") not in (MANIFEST_SCHEMA_VERSION, 2):
         raise PreparationStoreError(
             PreparationStoreFailureCode.UNSUPPORTED_SCHEMA,
             f"schema {document.get('schema')!r} version {document.get('schema_version')!r} is not "
@@ -223,9 +279,17 @@ def decode_prepared_plan(payload: bytes) -> MaskingPreparedPlan:
         )
     try:
         timing = document["timing"]
+        supports = tuple(_decode_support(item) for item in document["supports"])
+        extended = document["schema_version"] == 2
         plan = MaskingPreparedPlan(
             profile=VersionRef(*document["profile"]),
-            supports=tuple(_decode_support(item) for item in document["supports"]),
+            supports=supports,
+            experimental_policy=_decode_policy(document["experimental_policy"]) if extended else None,
+            experimental_supports=tuple(
+                _decode_experimental(item, supports) for item in document["experimental_supports"]
+            )
+            if extended
+            else (),
             kind=SupportKind(document["kind"]),
             qualification=QualificationStatus(document["qualification"]),
             max_file_bytes=document["limits"]["max_file_bytes"],
@@ -292,6 +356,97 @@ def write_content_addressed(store: Path, payload: bytes) -> str:
     return digest
 
 
+def rounding_noise_per_bin() -> float:
+    """Expected unnormalised FFT energy per bin of int16 rounding noise: (1/12) x sum(w^2), dist10's long window."""
+    i = np.arange(1024)
+    window = 0.5 * (1.0 - np.cos(2.0 * 3.14159265358979 * (i - 0.5) / 1024))
+    return float(np.sum(window * window)) / 12.0
+
+
+def rounding_noise_partition_energy() -> np.ndarray:
+    """Partition energy (63,) of rounding noise over every bin 0..512 the partition mapping consumes.
+
+    Nyquist (bin 512) is included: the FFT energy floor excludes it, but the reproduced dist10 mapping accumulates it,
+    with bins 465..511, into partition 0.
+    """
+    partition = dist10_long_partition_map()
+    eb = np.zeros(63)
+    for k in range(partition.size):  # 513 bins, Nyquist included
+        eb[partition[k]] += rounding_noise_per_bin()
+    return eb
+
+
+def rounding_noise_band_energy() -> np.ndarray:
+    """Band energy (21,) of int16 rounding noise, through the partitions and the long-band mapping."""
+    eb = rounding_noise_partition_energy()[None, :]
+    return dist10_long_bands(eb, eb.copy()).en[0]
+
+
+def quiet_floor_bands() -> np.ndarray:
+    """``Q[b]``: the long-band mapping of the pinned partition threshold-in-quiet table (read-only, 21 values)."""
+    qthr = np.asarray(DIST10_LONG_QTHR_44100, dtype=np.float64)[None, :]
+    q = dist10_long_bands(qthr, qthr).thm[0].copy()
+    q.setflags(write=False)
+    return q
+
+
+def noise_reference_digest(noise: np.ndarray) -> str:
+    return hashlib.sha256(
+        _canonical({"method": "p1.pcm16_uniform_rounding_noise@1", "band_energy": noise.tolist()})
+    ).hexdigest()
+
+
+def _at_least_db_above(values: np.ndarray, reference: np.ndarray, db: float) -> np.ndarray:
+    """Inclusive power-domain comparison, without cancellation or intermediate power overflow.
+
+    Split the nonnegative base-10 exponent into at most three representable factors. Any positive finite binary64
+    reference spans less than 633 decimal exponents to binary64 max, so larger reserves cannot admit finite values.
+    The extra decade in the early guard makes it insensitive to logarithmic rounding at that unreachable boundary.
+    """
+    if not np.isfinite(reference).all() or np.any(reference <= 0):
+        raise ValueError("screen reference must be finite and positive")
+    exponent = float(db) / 10.0
+    limit = math.log10(np.finfo(float).max) - math.log10(float(np.min(reference))) + 1.0 if reference.size else 0.0
+    if exponent > limit:
+        return np.zeros(values.shape, dtype=bool)
+    floor = reference.copy()
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        for _ in range(3):
+            part = min(exponent, 300.0)
+            floor *= 10.0**part
+            exponent -= part
+    return values >= floor
+
+
+def experimental_cell_flags(masker, target, cells, policy, noise, quiet) -> dict[str, np.ndarray]:
+    """Predicates on the specified cells only; never chooses a candidate's replacement denominator."""
+    rows = np.array([cell[0] for cell in cells], dtype=int)
+    bands = np.array([cell[1] for cell in cells], dtype=int)
+    ea, eb, t = masker.en[rows, bands], target.en[rows, bands], masker.thm[rows, bands]
+    return {
+        "masker_silent": masker.nonzero_samples[rows] == 0,
+        "target_silent": target.nonzero_samples[rows] == 0,
+        "masker_low_energy": ~_at_least_db_above(ea, noise[bands], policy.energy_above_noise_db),
+        "target_low_energy": ~_at_least_db_above(eb, noise[bands], policy.energy_above_noise_db),
+        "quiet_elevation_insufficient": ~_at_least_db_above(t, quiet[bands], policy.quiet_elevation_db),
+        "quiet_floor": t == quiet[bands],
+        "nonfinite": ~(np.isfinite(ea) & np.isfinite(eb) & np.isfinite(t)),
+    }
+
+
+def _screen_cells(masker, target, geometry, policy, noise, quiet) -> tuple[tuple[int, int], ...]:
+    cells = tuple(
+        (k, b)
+        for k in range(geometry.first_call, geometry.first_call + geometry.call_count)
+        for b in geometry.region.bands
+    )
+    flags = experimental_cell_flags(masker, target, cells, policy, noise, quiet)
+    keep = np.ones(len(cells), dtype=bool)
+    for values in flags.values():
+        keep &= ~values
+    return tuple(cell for cell, selected in zip(cells, keep, strict=True) if selected)
+
+
 # --- preparation --------------------------------------------------------------------------------------------------
 
 
@@ -329,7 +484,7 @@ class MaskingPreparer:
         require_instance(request, MaskingPreparationRequest, "request")
         started = self._read_clock()
         try:
-            supports = self._prepare(request, started)
+            supports, experimental = self._prepare(request, started)
         except _Rejected as rejected:
             return rejected.failure
         try:
@@ -337,8 +492,10 @@ class MaskingPreparer:
         except _Rejected as rejected:
             return rejected.failure
         plan = MaskingPreparedPlan(
-            profile=P1_PROFILE,
+            profile=request.profile,
             supports=supports,
+            experimental_policy=request.experimental_policy,
+            experimental_supports=experimental,
             kind=SupportKind.GEOMETRIC,
             qualification=request.qualification,
             max_file_bytes=request.max_file_bytes,
@@ -363,7 +520,9 @@ class MaskingPreparer:
             return PortFailure(PortFailureCode.UNAVAILABLE, f"prepared plan could not be persisted: {error}", False)
         return Success(PersistedPreparation(digest, plan))
 
-    def _prepare(self, request: MaskingPreparationRequest, started: ClockReading) -> tuple[PreparedSupport, ...]:
+    def _prepare(
+        self, request: MaskingPreparationRequest, started: ClockReading
+    ) -> tuple[tuple[PreparedSupport, ...], tuple[ExperimentalSupport, ...]]:
         members = request.state.audio.artifacts
         root_keys = {b.artifact_id: b.root_key for b in request.root_bindings}
         planned = []
@@ -391,11 +550,19 @@ class MaskingPreparer:
                 raise _Rejected(PortFailureCode.INVALID_INPUT, f"{label}: {error}") from error
             planned.append((job, masker, target, first, stop))
         verified: dict[ArtifactId, str] = {}
+        analyses = {}
         for _, masker, target, _, _ in planned:
             for artifact in (masker, target):
                 if artifact.artifact_id not in verified:
                     self._check_time(request, started)
-                    verified[artifact.artifact_id] = self._verify(artifact, root_keys[artifact.artifact_id], request)
+                    clip = self._verify(artifact, root_keys[artifact.artifact_id], request)
+                    verified[artifact.artifact_id] = clip.verified_sha256
+                    if request.experimental_policy is not None:
+                        self._check_time(request, started)
+                        analyses[artifact.artifact_id] = dist10_clip_to_bands(
+                            clip.samples, sample_rate_hz=clip.artifact.sample_rate_hz
+                        )
+                        self._check_time(request, started)
         supports = []
         for job, masker, target, first, stop in planned:
             call0, calls = complete_window_calls(frame_count=masker.frame_count, start_sample=first, stop_sample=stop)
@@ -411,7 +578,23 @@ class MaskingPreparer:
                                       timeline_start_seconds=masker.timeline_start_seconds, start_sample=first,
                                       stop_sample=stop, first_call=call0, call_count=calls),
             ))  # fmt: skip
-        return tuple(supports)
+        experimental = ()
+        if request.experimental_policy is not None:
+            noise, quiet = rounding_noise_band_energy(), quiet_floor_bands()
+            reference = noise_reference_digest(noise)
+            policy = request.experimental_policy
+            experimental = tuple(
+                ExperimentalSupport(
+                    g,
+                    policy.digest,
+                    reference,
+                    _screen_cells(
+                        analyses[g.masker_artifact_id], analyses[g.target_artifact_id], g, policy, noise, quiet
+                    ),
+                )
+                for g in supports
+            )
+        return tuple(supports), experimental
 
     def _check_time(self, request: MaskingPreparationRequest, started: ClockReading) -> ClockReading:
         reading = self._read_clock()
@@ -422,12 +605,13 @@ class MaskingPreparer:
                             f"preparation exceeded its time limit of {request.max_elapsed_seconds} s")  # fmt: skip
         return reading
 
-    def _verify(self, artifact: AudioArtifact, root_key: str, request: MaskingPreparationRequest) -> str:
+    def _verify(self, artifact: AudioArtifact, root_key: str, request: MaskingPreparationRequest) -> Dist10Pcm16Clip:
         try:
             clip = read_dist10_member(artifact, root=self._roots[root_key], max_file_bytes=request.max_file_bytes,
-                                      max_decoded_bytes=request.max_decoded_bytes)  # fmt: skip
+                                      max_decoded_bytes=request.max_decoded_bytes,
+                                      allow_exact_dual_mono=request.profile == P1_EXACT_DUAL_MONO_PROFILE)  # fmt: skip
         except Dist10ReadError as error:
             raise _Rejected(PortFailureCode.UNAVAILABLE,
                             f"artifact {artifact.artifact_id} under root {root_key!r} could not be read and "
                             f"verified: {error}") from error  # fmt: skip
-        return clip.verified_sha256
+        return clip

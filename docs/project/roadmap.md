@@ -30,9 +30,9 @@ This dated checkpoint supersedes the M0-only current-status text. The calendar a
 | --- | --- |
 | Descriptive measurements | Partial: native-channel level analyzer and mono 44.1 kHz PCM_16 P1 directional measurement/support adapters implemented; R1 reviewed and committed at `0242c99`. No qualified P1 diagnosis. |
 | DAW/coordinator reliability | Partial: bounded control, recovery, export continuation and durable restart implemented/tested against a simulated FL host. Live research bridge/dB trials exist separately; no live integrated agent trial. |
-| Production AI/diagnosis | Partial: R3 packet/parser/audit is committed; R4 Claude adapter is implemented with simulated responses, review pending. Production diagnosis and R5 composition are missing. CLI start/continue still refuse. |
+| Production AI/diagnosis | Partial: R3 packet/parser/audit is committed; R4 Claude adapter is committed at `bb3e0a5` with simulated-response tests. R2A readiness diagnosis is implemented, review pending; qualified candidate generation and R5 composition remain missing. CLI start/continue still refuse. |
 | Dataset and scientific evaluation | In development by the owner in FL Studio. Calibration has not run; no held-out results. The six-project/three-listener/grid-search study remains optional and unapproved. |
-| Next engineering | Review R4 provider adapter, then diagnosis mechanics with unavailable calibration and R5 composition when genuine dependencies exist. Work can progress alongside dataset creation. |
+| Next engineering | Review R2A readiness diagnosis; obtain approved qualification/numerical policy and genuine qualified measurements for R2B, then R5 composition when genuine dependencies exist. Work can progress alongside dataset creation. |
 
 See the [accepted staged plan and owner clarifications](../superpowers/plans/2026-11-20-diagnosis-and-decision-adapter.md). The thesis focuses on agent/tool/loop/verification behavior with trustworthy measurements and defensible mixing claims; no paid listener panel is assumed. P2/P3 remain research targets under the existing scope, not completed capabilities.
 

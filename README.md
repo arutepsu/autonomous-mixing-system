@@ -2,9 +2,9 @@
 
 Bachelor thesis research prototype: **Autonomous Detection and Correction of Mixing Problems Using an AI Agent**.
 
-The system detects, corrects and verifies selected technical mixing problems; the AI agent (`decision_agent`, planned) is one decision-making component within it. Naming conventions: [ADR-005](docs/decisions/0005-system-oriented-naming.md).
+The system detects, corrects and verifies selected technical mixing problems; the AI decision component (`decision_agent`; adapter implemented, composition pending) is one decision-making component within it. Naming conventions: [ADR-005](docs/decisions/0005-system-oriented-naming.md).
 
-**Status (2026-11-22):** Partial research prototype. Versioned level/P1 descriptive measurements, bounded gain correction, controlled offline/DAW coordinators, verification/recovery and durable run records are implemented. R3 exchange auditing is committed and the R4 Claude adapter is implemented with simulated transport evidence (review pending). Production diagnosis and R5 composition are missing; autonomous CLI start/continue remain unavailable and no live integrated agent trial has run. The legacy `analyze` command still uses kick/bass labels. See [`docs/project/roadmap.md`](docs/project/roadmap.md) for current evidence/limits. Official project period: 2026-10-19 to 2027-01-18.
+**Status (2026-11-22):** Partial research prototype. Versioned level/P1 descriptive measurements, bounded gain correction, controlled offline/DAW coordinators, verification/recovery and durable run records are implemented. R3 exchange auditing and the R4 Claude adapter are committed with simulated transport evidence. R2A diagnosis readiness is implemented (review pending); qualified candidate generation and R5 composition are missing; autonomous CLI start/continue remain unavailable and no live integrated agent trial has run. The legacy `analyze` command still uses kick/bass labels. See [`docs/project/roadmap.md`](docs/project/roadmap.md) for current evidence/limits. Official project period: 2026-10-19 to 2027-01-18.
 
 ## Setup (Windows PowerShell)
 
@@ -62,9 +62,9 @@ This table is the canonical topic-ownership list; change rules are in [`docs/pro
 
 ## Current development order
 
-1. Review R4's Claude adapter over the committed R3 projection/parser/audit.
-2. Keep live provider calls separately authorized; simulated transport tests establish implementation behavior only.
-3. Develop diagnosis mechanics with explicit incomplete/unavailable policy outcomes; do not invent qualification thresholds.
+1. Review R2A readiness diagnosis over the existing R1 measurements.
+2. Keep live provider calls separately authorized; R4 simulated transport tests establish implementation behavior only.
+3. Establish approved qualification/numerical policy and genuine qualified measurements before R2B candidate generation; do not invent thresholds.
 4. Continue owner-created FL Studio data and feasible calibration/evaluation planning in parallel.
 5. Compose and evaluate the bounded agent/tool/verification loop once genuine compatible components and evidence exist.
 
