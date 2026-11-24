@@ -45,6 +45,8 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [039](0039-durable-run-journal-and-restart.md) | Durable run and acceptance journals, restart and orphan detection (Increment 5) | 2026-11-20 | Proposed |
 | [040](0040-operator-cli-for-the-daw-path.md) | Operator CLI for the DAW path: start, continue, status and authorized recovery (Increment 6) | 2026-11-20 | Proposed |
 
+| [041](0041-provider-run-evidence-gate.md) | Provider-run evidence gate and durable P1 associations (R5A) | 2026-11-23 | Proposed |
+
 ## Template
 
 ```markdown

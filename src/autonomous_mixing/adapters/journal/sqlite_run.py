@@ -48,7 +48,8 @@ from autonomous_mixing.core.records.run_trace import (
     TraceNotAppended,
 )
 
-SCHEMA_VERSION = 1
+# ADR-041 (R5A): AnalysisResponse/RunRequest fields changed. v1 is refused, never silently decoded/migrated.
+SCHEMA_VERSION = 2
 LOCAL_SQLITE_PROCESS_CRASH = StoreDurability.LOCAL_SQLITE_PROCESS_CRASH.value
 _SETTINGS = {"journal_mode": "delete", "synchronous": 3, "locking_mode": "exclusive"}
 
@@ -210,7 +211,7 @@ class SqliteRunJournal:
         rows = self._connection.execute("SELECT schema_version, run_json, initial_json, fingerprint FROM metadata")
         rows = rows.fetchall()
         if len(rows) != 1 or rows[0][0] != SCHEMA_VERSION:
-            raise _Unverified("unknown schema version or metadata")
+            raise _Unverified("legacy/unsupported run-store schema or metadata; no automatic migration")
         _, run_json, initial_json, digest = rows[0]
         if _fingerprint(run_json + initial_json) != digest:
             raise _Unverified("metadata fingerprint mismatch")

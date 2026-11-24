@@ -58,6 +58,7 @@ class AnalysisRouter:
             return PortFailure(PortFailureCode.UNSUPPORTED, f"no analyzer is routed for {', '.join(unrouted)}", False)
         order = list(dict.fromkeys(d.analyzer for d in request.definitions))
         produced: dict[tuple[VersionRef, AnalysisScope], Observation] = {}
+        evidence = []
         for ref in order:
             definitions = tuple(d for d in request.definitions if d.analyzer == ref)
             used = {d.selector.metric for d in definitions}
@@ -82,6 +83,7 @@ class AnalysisRouter:
             except ValueError as error:
                 return PortFailure(PortFailureCode.INVALID_RESPONSE, f"{_name(ref)}: invalid subresponse: {error}",
                                    False)  # fmt: skip
+            evidence.extend(result.value.evidence)
             for observation in result.value.observations:
                 if observation.analyzer != ref:
                     return PortFailure(PortFailureCode.INVALID_RESPONSE,
@@ -97,7 +99,7 @@ class AnalysisRouter:
         # Unrequested observations are kept (after the requested ones) so that validation rejects them.
         ordered = sorted(produced.items(), key=lambda item: rank.get(item[0], len(jobs)))
         try:
-            merged = AnalysisResponse(tuple(observation for _, observation in ordered))
+            merged = AnalysisResponse(tuple(observation for _, observation in ordered), tuple(evidence))
             validate_analysis_response(request, merged)
         except ValueError as error:
             return PortFailure(PortFailureCode.INVALID_RESPONSE, f"merged response is invalid: {error}", False)

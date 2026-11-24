@@ -34,6 +34,7 @@ ALLOWED_PACKAGES = {
 
 # Behavior modules and their public names (G9 for behavior); private helpers are not listed.
 BEHAVIOR_INVENTORY = {
+    "ports.decision_evidence": ("DecisionEvidenceSource",),
     "diagnosis.masking": ("diagnose_masking", "diagnose_experimental_masking"),  # experimental 2026-11-23
     "admission.daw": (
         "resolve_daw_gain",

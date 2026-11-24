@@ -28,6 +28,8 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
+    "provider_run": {"decision_exchange", "identifiers", "invariants", "masking_diagnosis"},
+    "decision_evidence": {"decision", "decision_exchange", "invariants", "results"},
     "masking_diagnosis": {"identifiers", "invariants", "masking_measurement", "verification_evidence"},
     "daw_binding": {"identifiers", "invariants"},  # coordinator-integration Increment 1 (ADR-035)
     "daw": {"identifiers", "invariants", "actions", "daw_binding"},
@@ -151,6 +153,7 @@ ALLOWED_RECORD_IMPORTS = {
     "reconciliation": {"acceptance", "invariants"},  # acceptance-reconciliation plan, 2026-11-09
     # Coordinator-runtime-contracts plan, 2026-11-09 (no reverse edges into this module).
     "coordinator_runtime": {
+        "provider_run",
         "daw_correction",  # ADR-035: the optional DAW session
         "actions",
         "admission",
@@ -186,6 +189,7 @@ ALLOWED_RECORD_IMPORTS = {
     },
     "termination": set(),
     "run_trace": {
+        "decision_evidence",
         "daw_control",  # ADR-035: DAW-path operation records
         "daw_correction",
         "daw_export",
@@ -226,6 +230,8 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
+    "provider_run": ("ProviderRunBinding",),
+    "decision_evidence": ("DecisionEvidenceVerified", "DecisionEvidenceRejected"),
     "masking_diagnosis": (
         "READINESS_METRICS",
         "MaskingDiagnosisJob",
@@ -494,6 +500,7 @@ INVENTORY = {
         "DecisionGateResult",
     ),
     "analysis": (
+        "AnalysisEvidenceReference",
         "AnalysisRequest",
         "AnalysisResponse",
         "deduplicate_analysis_definitions",  # analysis-jobs plan
@@ -519,6 +526,7 @@ INVENTORY = {
     "masking_measurement": (
         "P1_PROFILE",
         "P1_EXACT_DUAL_MONO_PROFILE",
+        "P1_FLOAT64_PROFILE",
         "P1_EXPERIMENTAL_METHOD",
         "ExperimentalMaskingPolicy",
         "ExperimentalSupport",

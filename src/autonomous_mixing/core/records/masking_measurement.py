@@ -41,6 +41,7 @@ from autonomous_mixing.core.records.project import ProjectState
 from autonomous_mixing.core.records.verification_evidence import SourceRequirement
 
 P1_PROFILE = VersionRef("p1.dist10_mono_pcm16_44100", "1")
+P1_FLOAT64_PROFILE = VersionRef("p1.dist10_pcm16_or_float64_rint_even_44100", "3")
 P1_EXACT_DUAL_MONO_PROFILE = VersionRef("p1.dist10_mono_pcm16_44100", "2")
 P1_EXPERIMENTAL_METHOD = VersionRef("p1.experimental_screen", "1")
 P1_SAMPLE_RATE_HZ = 44100
@@ -279,8 +280,8 @@ class MaskingPreparationRequest:
         require_instance(self.state, ProjectState, "MaskingPreparationRequest.state")
         require_tuple_of(self.root_bindings, ArtifactRootBinding, "MaskingPreparationRequest.root_bindings",
                          nonempty=True, distinct=True)  # fmt: skip
-        if self.profile not in (P1_PROFILE, P1_EXACT_DUAL_MONO_PROFILE):
-            raise ValueError(f"MaskingPreparationRequest.profile must be {P1_PROFILE.name}@{P1_PROFILE.version}")
+        if self.profile not in (P1_PROFILE, P1_EXACT_DUAL_MONO_PROFILE, P1_FLOAT64_PROFILE):
+            raise ValueError("MaskingPreparationRequest.profile must be a supported P1 ingress profile")
         require_tuple_of(self.jobs, MaskingPreparationJob, "MaskingPreparationRequest.jobs", nonempty=True,
                          distinct=True)  # fmt: skip
         if self.profile == P1_PROFILE and any(
@@ -469,7 +470,7 @@ class MaskingPreparedPlan:
     experimental_supports: tuple[ExperimentalSupport, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.profile not in (P1_PROFILE, P1_EXACT_DUAL_MONO_PROFILE):
+        if self.profile not in (P1_PROFILE, P1_EXACT_DUAL_MONO_PROFILE, P1_FLOAT64_PROFILE):
             raise ValueError("MaskingPreparedPlan.profile must be the P1 profile")
         require_tuple_of(self.supports, PreparedSupport, "MaskingPreparedPlan.supports", nonempty=True,
                          distinct=True)  # fmt: skip

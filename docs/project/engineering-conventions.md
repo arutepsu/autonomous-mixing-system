@@ -95,3 +95,7 @@ Do not name anything "model" (ambiguous with the LLM), and do not use "analysis"
 
 ## Working with two assistants
 Claude Code and Codex share files, not live state. They do not edit the same files at the same time ([agent-team README](../../agent-team/README.md)). Decisions are recorded in ADRs and the research log, never only in a chat session.
+
+## R5A provenance extension (2026-11-23; ADR-041 Proposed)
+
+An explicitly provider-bound RunRequest requires the decision evidence port; its driver implementation verifies existing provider/audit records and local P1 evidence without dispatch or DSP. AnalysisResponse stores content-addressed references. Optional trailing fields preserve in-memory callers; run-store schema2 deliberately refuses old serialized schema1 without migration. CLI run activation/composition remain separate.

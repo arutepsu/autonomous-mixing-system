@@ -67,6 +67,7 @@ def test_public_entry_point_keeps_explicit_collaborators():
         "analyzer",
         "diagnosis_source",
         "decision_maker",
+        "decision_evidence",
         "renderer",
         "integrity_inspector",
         "journal",

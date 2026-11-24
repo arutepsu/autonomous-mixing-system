@@ -661,7 +661,7 @@ The existing `dsp_analysis.wav_input` boundary accepts exactly duplicated stereo
 The existing `masking_measurement` records, `masking_preparation` and `directional_analysis` own the optional uncalibrated fixed-support path. No new adapter boundary or port is introduced. Preparation persists policy/source/noise-bound baseline cells; the analyzer measures the same cells on current artifacts under separate `p1.experimental.*@1` IDs. Legacy geometric/qualified meanings and no-policy behavior stay unchanged. The reviewed noise and quiet-floor helpers are shared from preparation, with the research script retaining compatible imports. This is measurement plumbing only: experimental positive diagnosis, composition and live agent validation remain later work. *(Superseded 2026-11-23 for experimental diagnosis only; see below. Composition and live validation remain later work.)*
 
 
-### Experimental P1 diagnosis (2026-11-23; implemented, review pending)
+### Experimental P1 diagnosis (2026-11-23; implemented)
 
 `core.records.masking_diagnosis` adds `ExperimentalMaskingDiagnosisJob`/`Policy` beside the legacy readiness records. The method identity is bound to the complete prepared plan, and thresholds are read only from its experimental screening policy.
 
@@ -672,3 +672,96 @@ The existing `masking_measurement` records, `masking_preparation` and `direction
 P2/P3 stay UNAVAILABLE. `ConfiguredDiagnosisSource` dispatches by explicit policy type, keeps the legacy readiness route, and refuses reused or colliding coverage and candidate IDs.
 
 A candidate is an experimental dist10 exceedance hypothesis, not audible masking, a gain instruction or better mixing. Coordinator composition, CLI enablement and live agent runs are not implemented.
+
+### R5A evidence boundary (2026-11-23; checkpoint reviewed 2026-11-24)
+
+P1 analysis responses now carry durable observation-to-evidence references; the existing router preserves them and the analyzer re-verifies files/manifests without DSP. Explicit provider-run binding freezes settings and experimental diagnosis. The read-only driver evidence source reconstructs the exact R4 request and checks its completed exchange; the coordinator records verified/rejected evidence before using a result or retrying. Resume rechecks both stores and persisted analysis references. Deterministic callers retain empty/None defaults. Run-store schema2 refuses schema1 read-only as unsupported; no migration. Evidence files are also compared semantically with their manifest (geometry, policy, frozen cells, noise reference, baseline sources). `daw status` reports provider-bound runs as `provider_evidence_unavailable` and claims no resumability. Unverifiable provider continuation fails closed before admission. This implements R5A only; programmatic production composition and CLI start/continue remain unavailable, and no live/model/music result is claimed.
+
+
+### Offline gain-only closed-loop engineering verification (2026-11-24)
+
+Phase 1 composes the existing coordinator, FileRunRenderer, FileStateIntegrityInspector, AnalysisRouter,
+FileAudioAnalyzer, DirectionalMaskingAnalyzer, decision packet builder and deterministic verifier. Entry point:
+`core.loop.coordinator.run`; the reproducible executable engineering case is
+`tests/unit/test_offline_gain_closed_loop.py`. No public autonomous CLI activation or DAW operation is added.
+This supersedes earlier format-incompatibility statements only for the explicit new ingress profile.
+
+**Audio boundary.** Rendering remains WAV/DOUBLE with float64 absolute gain from immutable fixed inputs,
+sequential recipe summation, preserved rate/frame count/channels/timeline and exclusive new output files.
+`wav_output` canonicalizes only the RIFF PEAK timestamp to zero before hashing/readback verification;
+peak values/positions and every sample bit remain intact. libsndfile normally writes PEAK metadata for floating
+WAV ([upstream documentation](https://github.com/libsndfile/libsndfile/blob/master/docs/command.md#sfc_set_add_peak_chunk)).
+Actual run times remain in run records. Byte reproducibility is tested in the same dependency environment;
+matching bytes across different libsndfile versions is not promised.
+
+P1 preparation explicitly selects `P1_FLOAT64_PROFILE`
+(`p1.dist10_pcm16_or_float64_rint_even_44100@3`). Both preparation and candidate analysis derive ingress rules
+from this persisted profile. It accepts verified 44,100 Hz PCM_16 or DOUBLE, mono or exact dual mono; stereo
+channels must match over the entire clip **before** rounding. It never averages arbitrary stereo.
+Existing strict mono/v1 and exact-dual-mono PCM_16/v2 behavior remains unchanged.
+
+The dist10 numerical front end still requires signed int16 counts. For DOUBLE only, finite normalized samples
+in [-1, 1] are multiplied by 32768, rounded to nearest ties-to-even, then saturated to [-32768, 32767].
+This explicitly saturates the top half quantization bin, including +1.0; values outside [-1, 1] fail rather
+than silently clipping. No dither, normalization, resampling, alignment adjustment, padding or copied WAV is used.
+PCM_16 counts retain exact identity. Other encodings, rates, non-identical stereo, unsupported layouts and
+malformed/hash-mismatched files are rejected. Rate and physical alignment are never inferred or repaired;
+existing declared alignment provenance is preserved.
+
+The source artifact and its byte hash stay authoritative. Schema-4 P1 evidence additionally records the
+transform identifier (`pcm16_counts_identity@1` or `float64_to_pcm16_rint_even_saturate_no_dither@1`),
+SHA-256 of little-endian mono int16 analysis counts, original subtype and channel mapping. The prepared
+profile is part of its content-addressed manifest/specification identity. Quantization can change P1 measurements
+and threshold outcomes; it is an explicit analytical boundary, not a claim that PCM_16 is the best internal
+DSP representation. Level and guard analysis reads original float64 candidate samples without this quantization.
+The front-end algorithm and experimental screening/diagnosis thresholds are unchanged.
+
+**Execution and recovery.** The case loads and verifies stems, prepares fixed P1 geometry, measures levels and
+raw directional P1 descriptors, builds the actual structured decision packet, supplies a labelled deterministic
+proposal, admits one bounded absolute gain, renders, reanalyzes and verifies configured numerical criteria.
+Roles and unknown producer intent are carried from explicit fixture context. The real admission gate enforces
+bounds and protection. Proposals do not authorize execution. Rejected candidates restore selection of the
+serialized last accepted state after retained-file integrity verification; original files remain byte-identical.
+Candidate files remain as audit evidence, never overwrite accepted audio and need no destructive rollback.
+Rendering/analysis errors remain distinct from a numerical rejection. The existing verifier may retain meaningful
+progress while the target is unmet; a later NoChange or budget stop does not become overall success.
+
+**How to run and retain evidence (PowerShell, repository root):**
+
+```powershell
+uv run pytest -q tests/unit/test_float_analysis_ingress.py tests/unit/test_offline_gain_closed_loop.py --basetemp=results/phase1-engineering
+uv run pytest -q
+uv run ruff check .
+```
+
+Use a fresh `--basetemp` directory for each retained run: pytest removes an existing base directory.
+Each integration case retains immutable input/candidate WAV files, preparation/evidence JSON,
+`report.json` (round-tripped by the existing core record codec), actual `decision-N.json` packets and
+`metadata.json`. Metadata contains input hashes, dependency versions (Python/NumPy/SciPy/soundfile/libsndfile),
+lockfile/source-code hashes, initial audited Git revision and the execution revision where retrievable.
+The report contains exact processing settings, analysis definitions/versions, action parameters, criteria,
+before/after observations, verification results, feedback, budgets and authoritative/verified final states.
+The fixture uses deterministic clock/identity doubles; recorded elapsed values are not performance measurements.
+Two independent runs assert complete report and packet equality. No live LLM or paid provider call is required.
+The unchanged Claude adapter/request/parser suites separately use simulated responses.
+
+**Evidence and limits.** Synthetic sine fixtures are engineering regression data only, explicitly authorized for
+this Phase 1 task; they are not a musical evaluation dataset. The accepted fixture cuts t1 by 6 dB:
+peak -12.041199826559248 -> -18.04119982655925 dBFS, with target <= -17 dBFS, minimum improvement 1 dB,
+and maximum initial-relative peak movement 10 dB. Raw P1 signed-margin median is measured on the same fixed
+support before/after (-5.21947573710734 -> -4.773117689336792 dB); this value is descriptive and is **not** an
+acceptance criterion or evidence of improved masking. Diagnosis eligibility and decisions are labelled doubles.
+Real readiness/experimental diagnosis remains separately configured and is not relabelled scientific ground truth.
+Tests cover guard rejection, inadequate improvement/target, rejection then acceptance, retained intermediate
+progress, protected tracks, out-of-bounds proposals, abstention/no-change, initial/exhausted attempt budgets and
+injected analysis/render failures. Existing strict parser tests cover unsupported operations and malformed responses.
+
+Implemented/tested numerical integration does not establish perceptual quality, autonomous FL Studio integration,
+a validated masking detector, research baselines or comparative evaluation. EQ, dynamics, stereo/phase tools and
+provider/model changes are deliberately deferred. The smallest research step is to freeze an independently justified
+P1 numerical/qualification policy and assess it on owner-provided calibration music before comparative experiments.
+
+
+### Checkpoint review corrections (2026-11-24)
+
+The combined R5A/offline input-profile checkpoint received a fresh read-only review. Reopen verification now requires schema4 transform metadata consistent with PCM16/DOUBLE and a well-formed analysis-count SHA-256, as well as the declared one-channel mapping. Provider continuation checks every recorded P1 reference against the frozen prepared-plan digest before delegating file verification. These are provenance-contract checks, not a DSP rerun or remote authenticity claim. Five regressions reproduced the two gaps before fixes; both fix-removal probes are caught. The prior full-suite baseline passed 7,124 tests, four skipped; final post-fix results are recorded in the research log.

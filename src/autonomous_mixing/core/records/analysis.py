@@ -8,7 +8,7 @@ inspects no path and implies no scientific validity of a measurement method.
 
 from dataclasses import dataclass
 
-from autonomous_mixing.core.records.identifiers import VersionRef
+from autonomous_mixing.core.records.identifiers import ObservationId, VersionRef
 from autonomous_mixing.core.records.integrity import ArtifactRootBinding
 from autonomous_mixing.core.records.invariants import require_instance, require_tuple_of
 from autonomous_mixing.core.records.observation import AnalysisScope, AnalysisSpec, Observation
@@ -133,10 +133,45 @@ class AnalysisRequest:
 
 
 @dataclass(frozen=True)
+class AnalysisEvidenceReference:
+    """Local content-addressed P1 evidence, never an absolute path or a qualification claim."""
+
+    observation_id: ObservationId
+    schema: VersionRef
+    content_sha256: str
+    prepared_digest: str
+
+    def __post_init__(self) -> None:
+        require_instance(self.observation_id, ObservationId, "evidence observation")
+        require_instance(self.schema, VersionRef, "evidence schema")
+        if self.schema.name != "autonomous_mixing.p1_directional_evidence" or self.schema.version not in (
+            "1",
+            "2",
+            "3",
+            "4",
+        ):
+            raise ValueError("unsupported analysis evidence schema")
+        for value in (self.content_sha256, self.prepared_digest):
+            if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise ValueError("evidence identity must be a lowercase SHA-256")
+
+
+@dataclass(frozen=True)
 class AnalysisResponse:
     """Observations produced for a request. Empty is structurally valid; completeness is request-relative."""
 
     observations: tuple[Observation, ...]
+    evidence: tuple[AnalysisEvidenceReference, ...] = ()
 
     def __post_init__(self) -> None:
         _require_unique_observations(self.observations, "AnalysisResponse.observations")
+        require_tuple_of(
+            self.evidence, AnalysisEvidenceReference, "AnalysisResponse.evidence", nonempty=False, distinct=False
+        )
+        ids = [r.observation_id for r in self.evidence]
+        if len(ids) != len(set(ids)) or not set(ids) <= {o.observation_id for o in self.observations}:
+            raise ValueError("evidence references must uniquely name returned observations")
+        by_id = {o.observation_id: o for o in self.observations}
+        for ref in self.evidence:
+            if not by_id[ref.observation_id].analysis_spec.version.endswith("+prepared.sha256." + ref.prepared_digest):
+                raise ValueError("evidence prepared identity differs from the observation specification")

@@ -83,6 +83,8 @@ def _open_store(config, run_id, *, read_only):
         return (SqliteRunJournal.open_read_only if read_only else SqliteRunJournal.open)(path)
     except RunStoreBusy as error:
         raise StoreInUse(f"run {run_id} is in use by another process") from error
+    except RunStoreError as error:
+        raise RecoveryRefused(f"run store cannot be read: {error}") from error
 
 
 def _status_of(config: DawToolConfig, run_id: str) -> dict:
@@ -91,6 +93,22 @@ def _status_of(config: DawToolConfig, run_id: str) -> dict:
         snapshot = store.snapshot().value
     finally:
         store.close()
+    request = (
+        snapshot.events[0].payload if snapshot.events and isinstance(snapshot.events[0].payload, RunRequest) else None
+    )
+    if request is not None and request.provider_binding is not None:
+        # R5A has no operational composition/configuration for opening all provenance stores. Do not infer
+        # resumability or verified termination from run/FL records alone; status stays read-only, without MIDI.
+        return {
+            "run_id": snapshot.run_id.value,
+            "durability": snapshot.durability.value,
+            "classification": "provider_evidence_unavailable",
+            "explanation": "provider-run provenance was not verified by this operator configuration; no continuation is authorized",
+            "authoritative": {
+                "revision": snapshot.accepted.state.revision.value,
+                "sequence": snapshot.accepted.sequence,
+            },
+        }
     journal, controller, facts, fl_problem = _fl_facts(snapshot, config, read_only=True)
     try:
         latest = controller.latest_anchor() if controller is not None else None
@@ -136,6 +154,14 @@ def status(config: DawToolConfig, run_id: str | None) -> list[dict]:
             shown.append(_status_of(config, name))
         except StoreInUse as error:
             shown.append({"run_id": name, "classification": "in_use", "explanation": str(error)})
+        except RecoveryRefused as error:
+            shown.append(
+                {
+                    "run_id": name,
+                    "classification": "unsupported" if "legacy/unsupported" in str(error) else "unavailable",
+                    "explanation": str(error),
+                }
+            )
         except RunStoreError as error:
             shown.append({"run_id": name, "classification": "unreadable", "explanation": str(error)})
     return shown

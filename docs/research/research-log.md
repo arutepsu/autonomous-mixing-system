@@ -2432,3 +2432,95 @@ Final restored-source focused check: 511 passed with warnings treated as errors;
   - **Remaining checks:** ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
   - **Mutation probes:** 13 of 13 caught, two of them new. Every file was restored byte-identically.
 - Uncommitted for re-review. No provider, FL Studio or coordinator changes.
+
+
+## 2026-11-23 — R5 composition planned, no implementation
+
+Owner requested planning after the experimental diagnosis review. Inspected the existing decision round, R3/R4 audit/adapter, analyzer evidence associations, durable stores, runtime/CLI and calibrated FL profile. Proposed three separately reviewable increments in docs/superpowers/plans/2026-11-23-r5-agent-composition.md: A durable observation evidence and mandatory exact provider-exchange validation before use, B real-component programmatic composition under labelled external transports, C validated operator config/start/continue. No second loop, renderer or agent framework.
+
+The plan preserves uncalibrated current values, initial verification, native-channel guards, exact-dual-mono restrictions, acceptance/recovery authority and the hidden-reference boundary. It does not extend calibration beyond the tested FL build/title/Bass insert. New record shapes use explicit run-store schema v2 with old v1 stores refused read-only as unsupported, never migrated silently. The separate exchange store keeps its schema only if its actual record shapes remain compatible. No cross-store atomicity or live/model/musical result is claimed.
+
+One fresh read-only builder check found no material unanswered questions for this staged design. The R5C configuration syntax is deliberately a later review gate. Only documentation changed; no implementation tests, provider/FL operations, installs or study runs. R5A implementation awaits owner approval, and R5B/C remain separate gates.
+
+## 2026-11-23 — R5A provenance and decision-use gate implemented (Claude Code)
+- **Scope:** R5A of `2026-11-23-r5-agent-composition.md`, with ADR-041 (Proposed).
+  - **Implemented:**
+    - durable P1 evidence references in `AnalysisResponse`, preserved by the router;
+    - analyzer re-verification without DSP;
+    - immutable `ProviderRunBinding` and the narrow `DecisionEvidenceSource` port with the driver verifier;
+    - a coordinator gate recording matched audit evidence before use or retry;
+    - continuation provenance verification;
+    - run-store schema 2, with schema 1 refused and no migration.
+  - **Not done:** no R5B composition, CLI activation, provider call, FL operation, install, threshold change or music study.
+- **Earlier verification in this increment:**
+  - The first full suite gave 7,055 passed and 4 skipped, with 2 failures from intentionally changed public-shape pins, which were then updated.
+  - Extended contract checks: 177 passed.
+  - Four process-crash tests passed.
+- **Independent read-only review:** interrupted by a usage limit before completion. Its three reported findings were fixed, each with a regression that failed first:
+  1. core checks the proof's provider, prompt and schema against the frozen binding;
+  2. checkpoint observation caches must exactly equal the recorded analysis, values and alignment included;
+  3. status does not claim provider-run resumability and reports `provider_evidence_unavailable`.
+- **Author review:** a correctly hashed evidence file still needed semantic comparison with its manifest. Seven regressions failed first; geometry, policy, frozen cells, noise reference and baseline identities are now compared.
+- **Continuation in this session:**
+  - The last focused run of the five `test_r5a_*.py` files had completed (49 passed), and a rerun confirmed it.
+  - A completeness pass against plan 4.1–4.4 added regressions that passed on arrival, so they record covered behaviour rather than defects: changed intent, threshold, capability or history behind unchanged IDs; a local oversized request leaving no exchange; a recording failure staying pending and unverified; the exchange schema-1 shape pin with a round trip; and continuation verification of recorded P1 evidence.
+  - Fifteen faithful mutation probes were then run. Three first survived, exposing missing permanent tests:
+    - core accepting a proof for a foreign input or result;
+    - continuation ignoring a failed `verify_run`;
+    - verification ignoring current-state source hashes and missing evidence associations.
+  - Five regressions were added for those gaps; they pass on the current code, so they record behaviour rather than fix defects.
+- **Final checks:**
+  - **R5A tests:** 62 passed (warnings as errors).
+  - **Wider focused set:** 437 passed.
+  - **Architecture:** 276 passed.
+  - **Full suite** (`uv run --locked --extra agent pytest -q`): 7,097 passed, 4 skipped.
+  - **Mutation probes:** 15 of 15 caught, rerun after formatting; every file restored byte-identically.
+  - **Remaining checks:** the fixture verifier, ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
+- **Deviation:** unverifiable provider continuation raises `ValueError`, failing closed before admission, rather than returning a typed refusal.
+- **Limits:**
+  - Provenance is an adapter-checked local claim, not authentication of the remote provider.
+  - There is no cross-store atomicity.
+  - Only process-crash durability is tested.
+- Uncommitted for Codex review.
+
+
+## 2026-11-24 — Phase 1 offline gain feedback engineering verification
+
+The task explicitly authorizes synthetic integration fixtures for engineering checks only, superseding the earlier
+unit-only restriction for this narrowly scoped test. Audited revision: 32d49be5f362ca83fe5d6bdfa56720aceebf7b2f;
+existing dirty R5A work preserved. Verified the DOUBLE/PCM_16 mismatch, reused the existing coordinator and real
+file-backed level/render/integrity components, added an opt-in P1 ingress profile and recorded quantization
+provenance. Repeated-run equality also exposed libsndfile's PEAK wall-clock timestamp; the writer now canonicalizes
+that field to zero before sample-exact verification. No numerical DSP/model/provider changes or paid calls.
+
+Engineering tests use fixed synthetic sine stems, labelled diagnosis/proposals and explicit numerical level criteria.
+Real P1 descriptors are measured before and after; their numerical change is not claimed to improve masking.
+Guard/target rejection, safe retained-state recovery, iteration, abstention, admission refusal, budgets and injected
+render/analysis faults are exercised. Request packets and round-trippable reports retain evidence and source hashes.
+An initial relevant baseline suite passed 396 tests. Broad restricted-filesystem runs exposed hard-link permission
+failures, distinguished from product defects; final verification evidence accompanies the delivered run.
+See the [owning architecture section](../architecture/overview.md#offline-gain-only-closed-loop-engineering-verification-2026-11-24)
+for contracts, commands, fixture values and limitations. No scientific hypothesis is confirmed by this integration.
+
+Final isolated-snapshot verification (2026-11-24): full `python -m pytest -q -p no:cacheprovider` executed with native Windows filesystem access: **7124 passed, 4 skipped**; `ruff check .`: **all checks passed**. The two hard-link failures from the restricted run pass with that access. Source/record inventories and simulated Claude/request/parser tests are included in the full suite. This is engineering evidence only.
+
+
+## 2026-11-24 — System checkpoint review and next-work plan
+
+Owner requested a review of the current work and a next-step plan. Read the actual tree/commits, R5A completion ledger, latest offline engineering changes/tests and architecture/roadmap/research records. HEAD32d49be; R5A and the newer offline profile/feedback work remain uncommitted and overlap in files. No source was changed in this review.
+
+Fresh focused verification of all R5A tests plus float-ingress/offline-feedback cases: 89 passed with warnings as errors. The previous session's isolated native-filesystem full-suite result (7124 passed,4 skipped) is recorded above, not independently rerun here. The offline case uses real files/DSP/render/verification but labelled diagnosis/proposals. It is not the missing real diagnosis/provider composition or musical validation.
+
+Saved docs/research/2026-11-24-system-checkpoint-and-next-steps.md and appended a roadmap status correction without changing its historical timetable or research scope. Order: stabilize/review a coherent checkpoint; R5B real-component programmatic composition; R5C operator configuration/start/continue; separately authorized eligible live development; then frozen fair agent comparisons and bounded musical assessment. Existing calibration/profile limits and current experimental thresholds remain explicit. More music is useful in parallel but is not an implementation prerequisite; no paid listener panel or new correction framework is assumed. No provider/FL operation, installation, study execution, threshold or requirement change.
+
+
+## 2026-11-24 — Authorized checkpoint review before commit
+
+Owner selected step1: review, verify and commit a coherent current checkpoint. Starting HEAD32d49be, preserving the completed R5A and later offline/float-ingress work. Shared evidence/interface files make a combined checkpoint appropriate; no attempt was made to split them into partially valid snapshots. A fresh read-only reviewer completed the combined review and reported two P2 findings, with no further blocking findings identified.
+
+Five new regressions failed before correction: schema4 accepted missing/invalid analysis transform or count hash under a rehashed evidence file, and continuation could trust a configured analyzer's different plan despite frozen provider binding. Reopen now validates schema4 provenance metadata; continuation checks required associations against its exact frozen plan first. A prior positive test fixture was corrected from its placeholder plan to its actual measured plan. Both faithful fix-removal probes are caught; each source was restored byte-identically. The first probe script stopped before writing due to a CRLF anchor mismatch; the corrected probes use the actual line endings.
+
+Fresh pre-fix full suite:7124 passed,4 skipped. Focused post-fix source/evidence/offline tests:52 passed with warnings as errors. Four pre-existing formatting issues and two import-order issues in new regressions were corrected. Fixture verification, dependency lock and CLI loading pass. No provider/FL call, installation, music-study execution or threshold change. Final corrected-source full-suite result follows before commit.
+
+
+Final checkpoint verification after the two fixes and formatting (2026-11-24): native-filesystem `uv run --locked --extra agent python -m pytest -q -p no:cacheprovider` — **7,129 passed, 4 skipped**. `ruff check .`, `ruff format --check src tests` (307 files), fixture verifier, CLI help, dependency lock and diff checks pass. The combined R5A/offline checkpoint is authorized for commit; R5B/C remain unimplemented and live operations remain separately gated.

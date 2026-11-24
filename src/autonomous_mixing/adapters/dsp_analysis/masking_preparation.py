@@ -61,6 +61,7 @@ from autonomous_mixing.core.records.identifiers import ArtifactId, TrackId, Vers
 from autonomous_mixing.core.records.invariants import require_instance, require_text
 from autonomous_mixing.core.records.masking_measurement import (
     P1_EXACT_DUAL_MONO_PROFILE,
+    P1_FLOAT64_PROFILE,
     P1_PROFILE,
     AlignmentProvenance,
     BandRegion,
@@ -609,7 +610,8 @@ class MaskingPreparer:
         try:
             clip = read_dist10_member(artifact, root=self._roots[root_key], max_file_bytes=request.max_file_bytes,
                                       max_decoded_bytes=request.max_decoded_bytes,
-                                      allow_exact_dual_mono=request.profile == P1_EXACT_DUAL_MONO_PROFILE)  # fmt: skip
+                                      allow_exact_dual_mono=request.profile in (P1_EXACT_DUAL_MONO_PROFILE, P1_FLOAT64_PROFILE),
+                                      allow_float64_quantization=request.profile == P1_FLOAT64_PROFILE)  # fmt: skip
         except Dist10ReadError as error:
             raise _Rejected(PortFailureCode.UNAVAILABLE,
                             f"artifact {artifact.artifact_id} under root {root_key!r} could not be read and "

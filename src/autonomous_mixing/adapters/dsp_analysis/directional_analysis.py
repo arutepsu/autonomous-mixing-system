@@ -40,6 +40,7 @@ All legacy raw/qualified IDs retain their meanings; no positive diagnosis is gen
 import hashlib
 import json
 import os
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,13 +63,14 @@ from autonomous_mixing.adapters.dsp_analysis.thresholds import DIST10_LONG_QTHR_
 from autonomous_mixing.adapters.dsp_analysis.wav_input import Dist10Pcm16Clip, Dist10ReadError, read_dist10_member
 from autonomous_mixing.core.ports.analysis import validate_analysis_response
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
-from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
+from autonomous_mixing.core.records.analysis import AnalysisEvidenceReference, AnalysisRequest, AnalysisResponse
 from autonomous_mixing.core.records.artifacts import AudioArtifact
 from autonomous_mixing.core.records.coordinator_runtime import ClockReading
 from autonomous_mixing.core.records.identifiers import ArtifactId, ObservationId, VersionRef
 from autonomous_mixing.core.records.invariants import require_instance, require_text
 from autonomous_mixing.core.records.masking_measurement import (
     P1_EXACT_DUAL_MONO_PROFILE,
+    P1_FLOAT64_PROFILE,
     P1_MODEL_BANDS,
     P1_PROFILE,
     MaskingMeasurementPlan,
@@ -398,7 +400,8 @@ class DirectionalMaskingAnalyzer:
                 try:
                     clip = read_dist10_member(artifact, root=self._roots[root_key], max_file_bytes=self._max_file,
                                               max_decoded_bytes=self._max_decoded,
-                                              allow_exact_dual_mono=plan.prepared.profile == P1_EXACT_DUAL_MONO_PROFILE)  # fmt: skip
+                                              allow_exact_dual_mono=plan.prepared.profile in (P1_EXACT_DUAL_MONO_PROFILE, P1_FLOAT64_PROFILE),
+                                              allow_float64_quantization=plan.prepared.profile == P1_FLOAT64_PROFILE)  # fmt: skip
                 except Dist10ReadError as error:
                     return PortFailure(PortFailureCode.UNAVAILABLE,
                                        f"artifact {artifact.artifact_id} under root {root_key!r} could not be read "
@@ -454,8 +457,150 @@ class DirectionalMaskingAnalyzer:
             except OSError as error:
                 return PortFailure(PortFailureCode.UNAVAILABLE, f"raw evidence could not be persisted: {error}", False)
             written.update((obs.observation_id, digest) for _, obs in members)
+        references = tuple(
+            AnalysisEvidenceReference(
+                obs.observation_id,
+                VersionRef(
+                    EVIDENCE_SCHEMA,
+                    "4"
+                    if plan.prepared.profile == P1_FLOAT64_PROFILE
+                    else "3"
+                    if plan.prepared.experimental_policy is not None
+                    else "2"
+                    if plan.prepared.profile in (P1_EXACT_DUAL_MONO_PROFILE, P1_FLOAT64_PROFILE)
+                    else "1",
+                ),
+                written[obs.observation_id],
+                plan.prepared_digest,
+            )
+            for obs in observations
+        )
+        response = AnalysisResponse(response.observations, references)
+        try:
+            self.verify_evidence(response, state=request.state)
+        except ValueError as error:
+            return PortFailure(PortFailureCode.UNAVAILABLE, str(error), False)
         self._evidence.update(written)
         return Success(response)
+
+    def verify_evidence(self, response: AnalysisResponse, *, state=None) -> None:
+        """Reopen persisted evidence and manifests without DSP; used for current responses and restart."""
+        require_instance(response, AnalysisResponse, "analysis response")
+        by_id = {o.observation_id: o for o in response.observations}
+        p1 = {o.observation_id for o in response.observations if o.analyzer == ANALYZER}
+        if p1 != {r.observation_id for r in response.evidence}:
+            raise ValueError("P1 evidence associations are missing or extraneous")
+        cache = {}
+        try:
+            for ref in response.evidence:
+                obs = by_id[ref.observation_id]
+                plan = self._plans.get(obs.analysis_spec)
+                if plan is None or plan.prepared_digest != ref.prepared_digest:
+                    raise ValueError("evidence references an unconfigured prepared plan")
+                if load_prepared_plan(self._plan_store, ref.prepared_digest) != plan.prepared:
+                    raise ValueError("evidence manifest differs from configured plan")
+                if ref.content_sha256 not in cache:
+                    path = self._evidence_store / (ref.content_sha256 + ".json")
+                    info = path.lstat()
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or info.st_nlink != 1
+                        or getattr(info, "st_file_attributes", 0) & 0x400
+                    ):
+                        raise ValueError("evidence is not a regular local file")
+                    with path.open("rb") as stream:
+                        payload = stream.read(self._max_evidence + 1)
+                    if len(payload) > self._max_evidence or hashlib.sha256(payload).hexdigest() != ref.content_sha256:
+                        raise ValueError("evidence content hash or size differs")
+                    doc = json.loads(payload)
+                    if _canonical(doc) != payload:
+                        raise ValueError("evidence is not canonical")
+                    cache[ref.content_sha256] = doc
+                doc = cache[ref.content_sha256]
+                if (doc["schema"], str(doc["schema_version"])) != (ref.schema.name, ref.schema.version):
+                    raise ValueError("evidence schema differs")
+                if doc["prepared_digest"] != ref.prepared_digest or doc["specification"] != [
+                    obs.analysis_spec.name,
+                    obs.analysis_spec.version,
+                ]:
+                    raise ValueError("evidence specification differs")
+                if doc["analyzer"] != [obs.analyzer.name, obs.analyzer.version]:
+                    raise ValueError("evidence analyzer differs")
+                if {"id": str(obs.observation_id), "metric": [obs.metric.name, obs.metric.version]} not in doc[
+                    "observations"
+                ]:
+                    raise ValueError("evidence does not back this observation")
+                sources = tuple(doc["sources"][role] for role in ("masker", "target"))
+                if tuple(item["artifact_id"] for item in sources) != tuple(str(i) for i in obs.artifact_ids):
+                    raise ValueError("evidence sources differ")
+                if doc["support"]["time_range"] != [
+                    obs.scope.time_range.start_seconds,
+                    obs.scope.time_range.end_seconds,
+                ]:
+                    raise ValueError("evidence scope differs")
+                if doc["support"]["pair"] != [str(t) for t in obs.scope.track_ids]:
+                    raise ValueError("evidence direction differs")
+                pair = MaskingPair(*obs.scope.track_ids)
+                geometry = plan.prepared.support(pair, obs.scope.time_range)
+                if geometry is None or doc["support"]["digest"] != geometry.digest:
+                    raise ValueError("evidence geometry differs from the configured prepared support")
+                if doc["profile"] != [plan.prepared.profile.name, plan.prepared.profile.version]:
+                    raise ValueError("evidence input profile differs")
+                if plan.prepared.profile == P1_FLOAT64_PROFILE:
+                    if ref.schema.version != "4":
+                        raise ValueError("float ingress requires schema-four evidence")
+                    transforms = {
+                        "PCM_16": "pcm16_counts_identity@1",
+                        "DOUBLE": "float64_to_pcm16_rint_even_saturate_no_dither@1",
+                    }
+                    for source in sources:
+                        expected_transform = transforms.get(source["subtype"])
+                        digest = source["analysis_sha256"]
+                        channels = source["source_channel_count"]
+                        mapping = "mono_identity@1" if channels == 1 else "exact_dual_mono_first_channel@1"
+                        if expected_transform is None or source["analysis_transform"] != expected_transform:
+                            raise ValueError("evidence analysis transform differs from the source subtype")
+                        if (
+                            not isinstance(digest, str)
+                            or len(digest) != 64
+                            or any(c not in "0123456789abcdef" for c in digest)
+                        ):
+                            raise ValueError("evidence analysis-count hash is missing or malformed")
+                        if (
+                            type(channels) is not int
+                            or channels not in (1, 2)
+                            or source["analysis_channel_count"] != 1
+                            or source["channel_mapping"] != mapping
+                        ):
+                            raise ValueError("evidence analysis channel mapping differs")
+                if plan.prepared.experimental_policy is not None:
+                    fixed = plan.prepared.experimental_support(pair, obs.scope.time_range)
+                    audit = doc["experimental"]
+                    expected = {
+                        "policy": json.loads(plan.prepared.experimental_policy.canonical_payload),
+                        "policy_digest": plan.prepared.experimental_policy.digest,
+                        "support_digest": fixed.digest,
+                        "geometry_digest": geometry.digest,
+                        "cells": [list(c) for c in fixed.cells],
+                        "cell_count": fixed.cell_count,
+                        "noise_reference_sha256": fixed.noise_reference_sha256,
+                        "band_noise_reference": self._noise.tolist(),
+                        "baseline_sources": {
+                            "masker_artifact_id": str(geometry.masker_artifact_id),
+                            "masker_sha256": geometry.masker_sha256,
+                            "target_artifact_id": str(geometry.target_artifact_id),
+                            "target_sha256": geometry.target_sha256,
+                        },
+                    }
+                    if any(audit[key] != value for key, value in expected.items()):
+                        raise ValueError("experimental evidence policy/support/noise/baseline differs from manifest")
+                if state is not None:
+                    for item, artifact_id in zip(sources, obs.artifact_ids, strict=True):
+                        artifact = state.audio.artifact_for(artifact_id)
+                        if artifact is None or item["sha256"] != artifact.content_hash:
+                            raise ValueError("evidence source hash differs")
+        except (OSError, ValueError, KeyError, TypeError, PreparationStoreError) as error:
+            raise ValueError(f"analysis evidence cannot be verified: {error}") from error
 
     def _verified_plan(self, request: AnalysisRequest) -> MaskingMeasurementPlan:
         plan = self._plans.get(request.specification.ref)
@@ -546,7 +691,7 @@ class DirectionalMaskingAnalyzer:
         masker_clip, masker = clips[job.masker.artifact_id]
         target_clip, target = clips[job.target.artifact_id]
 
-        extended = plan.prepared.profile == P1_EXACT_DUAL_MONO_PROFILE
+        extended = plan.prepared.profile in (P1_EXACT_DUAL_MONO_PROFILE, P1_FLOAT64_PROFILE)
 
         def source(clip: Dist10Pcm16Clip) -> dict:
             artifact = clip.artifact
@@ -560,6 +705,8 @@ class DirectionalMaskingAnalyzer:
                     analysis_channel_count=clip.analysis_channel_count,
                     channel_mapping=clip.channel_mapping,
                 )
+            if plan.prepared.profile == P1_FLOAT64_PROFILE:
+                data.update(analysis_transform=clip.analysis_transform, analysis_sha256=clip.analysis_sha256)
             return data
 
         payload = {
@@ -604,4 +751,6 @@ class DirectionalMaskingAnalyzer:
             payload["masker_energy"] = masker.en.tolist()
         if extended or experimental is not None:
             payload["analysis_profile"] = [P1_PROFILE.name, P1_PROFILE.version]
+        if plan.prepared.profile == P1_FLOAT64_PROFILE:
+            payload["schema_version"] = 4
         return _canonical(payload)

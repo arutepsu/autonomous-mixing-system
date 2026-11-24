@@ -23,7 +23,7 @@ from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisRes
 from autonomous_mixing.core.records.budgets import BudgetOperation
 from autonomous_mixing.core.records.coordinator_progress import RuntimeProgress, Stop
 from autonomous_mixing.core.records.coordinator_runtime import DiagnosisRequest
-from autonomous_mixing.core.records.diagnosis import DiagnosisReport
+from autonomous_mixing.core.records.diagnosis import DiagnosisReport, ProblemFamily
 from autonomous_mixing.core.records.identifiers import ArtifactId, ConditionId
 from autonomous_mixing.core.records.integrity import (
     ArtifactRootBinding,
@@ -177,6 +177,12 @@ def analyze(
         require_instance(result, Success, "analysis result")
         require_instance(result.value, AnalysisResponse, "analysis response")
         validate_analysis_response(analysis_request, result.value)
+        if progress.request.provider_binding is not None:
+            required = {o.observation_id for o in result.value.observations if o.metric.name.startswith("p1.")}
+            refs = {r.observation_id: r for r in result.value.evidence}
+            digest = progress.request.provider_binding.diagnosis_policy.measurement_plan.prepared_digest
+            if not required <= set(refs) or any(refs[i].prepared_digest != digest for i in required):
+                raise ValueError("provider P1 observations require their exact persisted plan/evidence associations")
     except ValueError as error:
         progress, stop = observed(
             progress,
@@ -254,6 +260,15 @@ def diagnose(
     try:
         require_instance(result, Success, "diagnosis result")
         validate_diagnosis_response(diagnosis_request, result.value)
+        if progress.request.provider_binding is not None:
+            policy = progress.request.provider_binding.diagnosis_policy
+            rows = [r for r in result.value.coverage if r.family is ProblemFamily.MASKING]
+            if (
+                len(rows) != len(policy.jobs)
+                or {r.scope for r in rows} != {j.measurements[0].selector.scope for j in policy.jobs}
+                or any(r.method != policy.method for r in rows)
+            ):
+                raise ValueError("provider diagnosis does not use its frozen experimental policy/scopes")
     except ValueError as error:
         progress, stop = observed(
             progress,

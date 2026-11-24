@@ -1,4 +1,11 @@
-"""WAV input boundary of the dist10 front end (front-end contract §2.1 profiles v1/v2; Task 3P; ADR-029, Proposed).
+"""WAV input boundary of the dist10 front end (profiles v1/v2/v3; ADR-029, Proposed).
+
+Explicit v3 additionally accepts WAV/DOUBLE via ``allow_float64_quantization=True``. Verified finite
+normalized samples in [-1, 1] are scaled by 32768, rounded to nearest ties-to-even and saturated to
+[-32768, 32767] (the top half bin saturates). Overload is rejected, never clipped to hide it. No dither,
+resampling, normalization, padding or shift occurs. Exact dual mono is checked before quantization.
+The source artifact/hash stays unchanged; analysis_transform and analysis_sha256 identify derived counts.
+This is an analysis representation only; rendering and level/guard measurements remain float64.
 
 Profile v1 accepts exactly one kind of file: verified **mono, 44,100 Hz WAV with PCM_16 samples** (WAV, WAVEX or
 RF64 container, as the shared verifier detects them). The file is read and verified only through the shared
@@ -30,6 +37,7 @@ no sample-rate conversion on export. Dither and any gain change happen, if at al
 and are part of the exported audio; this boundary reads the exported counts as they are.
 """
 
+import hashlib
 from dataclasses import dataclass
 from enum import Enum
 
@@ -100,6 +108,17 @@ class Dist10Pcm16Clip:
     verified_sha256: str
 
     @property
+    def analysis_transform(self) -> str:
+        return (
+            "float64_to_pcm16_rint_even_saturate_no_dither@1" if self.subtype == "DOUBLE" else "pcm16_counts_identity@1"
+        )
+
+    @property
+    def analysis_sha256(self) -> str:
+        """Digest of mono counts in explicit little-endian signed int16 order."""
+        return hashlib.sha256(self.samples.astype("<i2").tobytes()).hexdigest()
+
+    @property
     def analysis_channel_count(self) -> int:
         """The numerical front end always consumes one unchanged count per frame."""
         return 1
@@ -136,7 +155,9 @@ def _require_profile(artifact: AudioArtifact, where: str, allow_exact_dual_mono:
         )
 
 
-def pcm16_counts(audio: CheckedAudio, *, allow_exact_dual_mono: bool = False) -> np.ndarray:
+def pcm16_counts(
+    audio: CheckedAudio, *, allow_exact_dual_mono: bool = False, allow_float64_quantization: bool = False
+) -> np.ndarray:
     """The original signed 16-bit counts of verified audio, as a fresh read-only ``int16`` array.
 
     Raises ``ValueError`` for an argument that is not ``CheckedAudio`` and ``Dist10InputError`` for another
@@ -149,6 +170,27 @@ def pcm16_counts(audio: CheckedAudio, *, allow_exact_dual_mono: bool = False) ->
         raise ValueError(f"audio must be CheckedAudio, got {type(audio).__name__}")
     where = audio.artifact.location
     _require_profile(audio.artifact, where, allow_exact_dual_mono)
+    if type(allow_float64_quantization) is not bool:
+        raise ValueError("allow_float64_quantization must be bool")
+    if allow_float64_quantization and audio.subtype == "DOUBLE":
+        samples = np.asarray(audio.samples)
+        if samples.shape != (audio.artifact.frame_count, audio.artifact.channel_count):
+            raise Dist10InputError(Dist10InputFailureCode.DECODED_SHAPE_MISMATCH, "decoded shape differs")
+        if not np.all(np.isfinite(samples) & (samples >= -1.0) & (samples <= 1.0)):
+            raise Dist10InputError(
+                Dist10InputFailureCode.OUT_OF_RANGE_SAMPLES,
+                "DOUBLE samples must be finite and in range [-1, 1]; overload is rejected",
+            )
+        if audio.artifact.channel_count == 2 and not np.array_equal(samples[:, 0], samples[:, 1]):
+            raise Dist10InputError(
+                Dist10InputFailureCode.NON_IDENTICAL_CHANNELS,
+                "DOUBLE channels must match before quantization; no fold-down",
+            )
+        # Exact power-of-two scaling; IEEE ties-to-even rounding; saturate the top quantization bin.
+        # No random dither, normalization, resampling, padding, shifting or on-disk conversion.
+        counts = np.clip(np.rint(samples[:, 0] * PCM16_SCALE), INT16_MIN, INT16_MAX).astype(np.int16)
+        counts.flags.writeable = False
+        return counts
     if audio.subtype != PROFILE_SUBTYPE:
         raise Dist10InputError(
             Dist10InputFailureCode.UNSUPPORTED_SUBTYPE,
@@ -194,7 +236,11 @@ def pcm16_counts(audio: CheckedAudio, *, allow_exact_dual_mono: bool = False) ->
 
 
 def read_dist10_pcm16(
-    location: ResolvedArtifactLocation, *, limits: AudioReadLimits, allow_exact_dual_mono: bool = False
+    location: ResolvedArtifactLocation,
+    *,
+    limits: AudioReadLimits,
+    allow_exact_dual_mono: bool = False,
+    allow_float64_quantization: bool = False,
 ) -> Dist10Pcm16Clip:
     """Verify one resolved artifact through the shared path and return its PCM_16 counts for the dist10 front end.
 
@@ -207,13 +253,17 @@ def read_dist10_pcm16(
         raise ValueError(f"location must be a ResolvedArtifactLocation, got {type(location).__name__}")
     if not isinstance(limits, AudioReadLimits):
         raise ValueError(f"limits must be AudioReadLimits, got {type(limits).__name__}")
+    if type(allow_float64_quantization) is not bool:
+        raise ValueError("allow_float64_quantization must be bool")
     _require_profile(location.artifact, location.artifact.location, allow_exact_dual_mono)
     audio = check_resolved_wav_integrity(
         location, max_file_bytes=limits.max_file_bytes, max_decoded_bytes=limits.max_decoded_bytes
     )
     return Dist10Pcm16Clip(
         artifact=audio.artifact,
-        samples=pcm16_counts(audio, allow_exact_dual_mono=allow_exact_dual_mono),
+        samples=pcm16_counts(
+            audio, allow_exact_dual_mono=allow_exact_dual_mono, allow_float64_quantization=allow_float64_quantization
+        ),
         container=audio.container,
         subtype=audio.subtype,
         verified_sha256=audio.verified_sha256,
@@ -221,7 +271,8 @@ def read_dist10_pcm16(
 
 
 def read_dist10_member(artifact: AudioArtifact, *, root: str, max_file_bytes: int,
-                       max_decoded_bytes: int, allow_exact_dual_mono: bool = False) -> Dist10Pcm16Clip:  # fmt: skip
+                       max_decoded_bytes: int, allow_exact_dual_mono: bool = False,
+                       allow_float64_quantization: bool = False) -> Dist10Pcm16Clip:  # fmt: skip
     """Resolve one current member under its configured physical ``root`` and read it with ``read_dist10_pcm16``.
 
     Resolution is ``resolve_artifact_location`` (the location must stay inside ``root``); the read is exactly
@@ -234,6 +285,11 @@ def read_dist10_member(artifact: AudioArtifact, *, root: str, max_file_bytes: in
     limits = AudioReadLimits(max_file_bytes, max_decoded_bytes)
     try:
         location = resolve_artifact_location(artifact, root=root)
-        return read_dist10_pcm16(location, limits=limits, allow_exact_dual_mono=allow_exact_dual_mono)
+        return read_dist10_pcm16(
+            location,
+            limits=limits,
+            allow_exact_dual_mono=allow_exact_dual_mono,
+            allow_float64_quantization=allow_float64_quantization,
+        )
     except (LocationResolutionError, IntegrityError, Dist10InputError) as error:
         raise Dist10ReadError(error.code.value, str(error)) from error

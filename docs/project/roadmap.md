@@ -39,3 +39,8 @@ See the [accepted staged plan and owner clarifications](../superpowers/plans/202
 ### Historical M0 checkpoint (retained)
 
 2026-10-14: M0 "validated WAV reading" is met (input validation with tested error paths; 17 tests pass on a uv-synced Python 3.11 environment). M0 "reproducible feature report" is **partial**: output is deterministic, but the report still lacks part of the provenance metadata (FR-12 in `requirements.md`). M0 remains open.
+
+
+### Current engineering checkpoint — 2026-11-24
+
+This status supersedes the older engineering-status rows above, not the historical timetable or P2/P3 scope. Experimental fixed-support measurement and deterministic diagnosis are committed (62133c3 and 32d49be). R5A evidence/audit gating and the newer offline gain-feedback/float-ingress engineering case are implemented; the 24 November checkpoint review records verification and compatibility limits. The offline case uses labelled diagnosis/proposals; real diagnosis/provider production composition (R5B), operator run activation (R5C) and live integrated development validation remain pending. Current experimental thresholds are permitted for engineering development without a new calibration search; they are not scientifically qualified. CLI start/continue still refuse. See the [current-state review and next steps](../research/2026-11-24-system-checkpoint-and-next-steps.md). The next priority is a reviewed coherent checkpoint, then bounded real-component composition, not additional tools or a larger dataset prerequisite.

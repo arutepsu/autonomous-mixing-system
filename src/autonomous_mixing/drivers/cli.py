@@ -117,7 +117,14 @@ def _daw(args) -> int:
                 print(json.dumps(shown if args.run_id is None else shown[0], indent=2))
             else:
                 print("\n".join(f"{s['run_id']}: {s['classification']} - {s['explanation']}" for s in shown))
-            return 4 if any(s["classification"] == "in_use" for s in shown) else 0
+            return (
+                4
+                if any(
+                    s["classification"] in ("in_use", "unsupported", "unavailable", "provider_evidence_unavailable")
+                    for s in shown
+                )
+                else 0
+            )
         run_id = None if args.orphans else args.run_id
         if args.authorize is None:
             shown = daw_commands.recover_view(config, run_id)
