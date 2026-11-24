@@ -765,3 +765,10 @@ P1 numerical/qualification policy and assess it on owner-provided calibration mu
 ### Checkpoint review corrections (2026-11-24)
 
 The combined R5A/offline input-profile checkpoint received a fresh read-only review. Reopen verification now requires schema4 transform metadata consistent with PCM16/DOUBLE and a well-formed analysis-count SHA-256, as well as the declared one-channel mapping. Provider continuation checks every recorded P1 reference against the frozen prepared-plan digest before delegating file verification. These are provenance-contract checks, not a DSP rerun or remote authenticity claim. Five regressions reproduced the two gaps before fixes; both fix-removal probes are caught. The prior full-suite baseline passed 7,124 tests, four skipped; final post-fix results are recorded in the research log.
+
+
+### R5B owned programmatic composition — 2026-11-24
+
+`drivers.agent_runtime.DawAgentRuntime` composes the real preparation, P1/level analyzers, experimental diagnosis, audited Claude adapter and existing DAW coordinator, verifier, recovery, stores and export handoff. Typed caller configuration declares producer intent and acceptance criteria. Additive `DawAgentBinding` freezes local settings separately from the public packet; credentials remain separate. Owned resources close on failure/context exit. A recorded suspension reopens its exact plan/configuration/evidence without regeneration or resend, and inventory follows intermediate accepted checkpoints. See [ADR-042](../decisions/0042-programmatic-daw-agent-composition.md), Proposed.
+
+This supersedes earlier statements that programmatic composition is missing. Numerical integration uses only labelled external replies/device simulation, not fabricated diagnosis or verification. CLI run activation remains R5C; live integrated development and scientific/perceptual qualification remain unperformed. Thresholds, calibrated profile and unsupported stereo limits are unchanged.

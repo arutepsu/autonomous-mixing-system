@@ -230,7 +230,7 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
-    "provider_run": ("ProviderRunBinding",),
+    "provider_run": ("ProviderRunBinding", "DawAgentBinding"),
     "decision_evidence": ("DecisionEvidenceVerified", "DecisionEvidenceRejected"),
     "masking_diagnosis": (
         "READINESS_METRICS",

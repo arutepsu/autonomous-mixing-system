@@ -154,3 +154,20 @@ Live development is R6, separately authorized after review, with licensed inputs
 ## Planning review
 
 A fresh read-only builder check found no material unanswered questions for this staged design. The final schema decision above and initial-verification clarification are explicit planning decisions; R5C field syntax remains its own review artifact. Only this plan and an append-only research-log entry changed. No implementation tests were run for this documentation-only task.
+
+
+## R5B implementation outcome — 2026-11-24 (uncommitted)
+
+Section5 is implemented by `drivers.agent_runtime.DawAgentRuntime`, with ADR-042 Proposed. Real preparation/measurement, experimental diagnosis, audited Claude adapter and DAW coordinator are composed without changing CLI activation. Caller supplies a typed request factory consuming the verified plan/diagnosis definitions; all producer criteria and budgets remain explicit. Only external transports and clock/IDs are replaced in the numerical integration tests.
+
+An additive `DawAgentBinding` freezes local operational settings without changing existing record shapes or store schemas. The per-run runtime folder owns plans/evidence/audit, separate from the run-store glob. Creation refuses existing artifacts; failures close resources and retain diagnostic files. Reopen reconstructs the exact recorded request, refuses configuration/evidence/manifest drift and never prepares or resends. Current accepted-checkpoint inventory supports a second suspension/export.
+
+Fresh read-only review found one P2: native export timeline/render metadata were checked only after a provider decision. Four regressions failed first; creation now checks them before constructing external collaborators. Failure coverage also includes actual lost apply replies and acceptance acknowledgement loss through the real controllers/stores, unsupported stereo candidate recovery and missing-manifest refusal. These demonstrate engineering behavior only. Final commands and counts are recorded in the research log.
+
+Rulings: a cohesive driver module extends the current composition responsibility; no new adapter or framework. The typed callback avoids prematurely implementing R5C's run JSON language. The additive binding avoids a needless incompatible schema bump. Failed startup leaves owned artifacts for diagnosis rather than automatically removing/reusing them. No changes to current experimental thresholds or requirements.
+
+R5C remains the next reviewable schema/CLI increment; R6 live trials need separate authorization. `daw start`/`daw continue` still refuse. No live provider/device operation or musical-quality result is claimed.
+
+## R5C detailed design — 2026-11-24 (planning only)
+
+The R5C schema, CLI and test plan is in [2026-11-24-r5c-operator-cli.md](2026-11-24-r5c-operator-cli.md), Proposed, with an illustrative example file. It records the contradictions and decisions D1–D11 that need approval before coding. `daw start`/`daw continue` still refuse.

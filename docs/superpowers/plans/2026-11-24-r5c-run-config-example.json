@@ -1,0 +1,1317 @@
+{
+  "schema": 1,
+  "kind": "autonomous_mixing.daw_agent_run",
+  "run": {
+    "initial_state": {
+      "$t": "project.ProjectState",
+      "f": {
+        "snapshot": {
+          "$t": "project.ProjectSnapshot",
+          "f": {
+            "project_id": {
+              "$t": "identifiers.ProjectId",
+              "f": {
+                "value": "p1"
+              }
+            },
+            "revision": {
+              "$t": "identifiers.Revision",
+              "f": {
+                "value": "r1"
+              }
+            },
+            "captured_at": {
+              "$dt": "2026-11-24T00:00:00+00:00"
+            },
+            "tracks": [
+              {
+                "$t": "project.Track",
+                "f": {
+                  "track_id": {
+                    "$t": "identifiers.TrackId",
+                    "f": {
+                      "value": "t1"
+                    }
+                  },
+                  "name": "bass"
+                }
+              },
+              {
+                "$t": "project.Track",
+                "f": {
+                  "track_id": {
+                    "$t": "identifiers.TrackId",
+                    "f": {
+                      "value": "t2"
+                    }
+                  },
+                  "name": "kick"
+                }
+              }
+            ]
+          }
+        },
+        "processing": {
+          "$t": "project.ProjectProcessingState",
+          "f": {
+            "project_id": {
+              "$t": "identifiers.ProjectId",
+              "f": {
+                "value": "p1"
+              }
+            },
+            "revision": {
+              "$t": "identifiers.Revision",
+              "f": {
+                "value": "r1"
+              }
+            },
+            "track_gains": []
+          }
+        },
+        "audio": {
+          "$t": "project.ArtifactCheckpoint",
+          "f": {
+            "checkpoint_id": {
+              "$t": "identifiers.CheckpointId",
+              "f": {
+                "value": "c1"
+              }
+            },
+            "project_id": {
+              "$t": "identifiers.ProjectId",
+              "f": {
+                "value": "p1"
+              }
+            },
+            "revision": {
+              "$t": "identifiers.Revision",
+              "f": {
+                "value": "r1"
+              }
+            },
+            "artifacts": [
+              {
+                "$t": "artifacts.AudioArtifact",
+                "f": {
+                  "artifact_id": {
+                    "$t": "identifiers.ArtifactId",
+                    "f": {
+                      "value": "s1"
+                    }
+                  },
+                  "project_id": {
+                    "$t": "identifiers.ProjectId",
+                    "f": {
+                      "value": "p1"
+                    }
+                  },
+                  "revision": {
+                    "$t": "identifiers.Revision",
+                    "f": {
+                      "value": "r1"
+                    }
+                  },
+                  "source_track_ids": [
+                    {
+                      "$t": "identifiers.TrackId",
+                      "f": {
+                        "value": "t1"
+                      }
+                    }
+                  ],
+                  "kind": {
+                    "$e": "artifacts.ArtifactKind",
+                    "v": "stem"
+                  },
+                  "location": "s1.wav",
+                  "timeline_start_seconds": 0.0,
+                  "sample_rate_hz": 44100,
+                  "channel_count": 2,
+                  "frame_count": 34560,
+                  "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "render_spec": {
+                    "$t": "identifiers.VersionRef",
+                    "f": {
+                      "name": "render",
+                      "version": "1"
+                    }
+                  }
+                }
+              },
+              {
+                "$t": "artifacts.AudioArtifact",
+                "f": {
+                  "artifact_id": {
+                    "$t": "identifiers.ArtifactId",
+                    "f": {
+                      "value": "s2"
+                    }
+                  },
+                  "project_id": {
+                    "$t": "identifiers.ProjectId",
+                    "f": {
+                      "value": "p1"
+                    }
+                  },
+                  "revision": {
+                    "$t": "identifiers.Revision",
+                    "f": {
+                      "value": "r1"
+                    }
+                  },
+                  "source_track_ids": [
+                    {
+                      "$t": "identifiers.TrackId",
+                      "f": {
+                        "value": "t2"
+                      }
+                    }
+                  ],
+                  "kind": {
+                    "$e": "artifacts.ArtifactKind",
+                    "v": "stem"
+                  },
+                  "location": "s2.wav",
+                  "timeline_start_seconds": 0.0,
+                  "sample_rate_hz": 44100,
+                  "channel_count": 2,
+                  "frame_count": 34560,
+                  "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "render_spec": {
+                    "$t": "identifiers.VersionRef",
+                    "f": {
+                      "name": "render",
+                      "version": "1"
+                    }
+                  }
+                }
+              },
+              {
+                "$t": "artifacts.AudioArtifact",
+                "f": {
+                  "artifact_id": {
+                    "$t": "identifiers.ArtifactId",
+                    "f": {
+                      "value": "mix"
+                    }
+                  },
+                  "project_id": {
+                    "$t": "identifiers.ProjectId",
+                    "f": {
+                      "value": "p1"
+                    }
+                  },
+                  "revision": {
+                    "$t": "identifiers.Revision",
+                    "f": {
+                      "value": "r1"
+                    }
+                  },
+                  "source_track_ids": [
+                    {
+                      "$t": "identifiers.TrackId",
+                      "f": {
+                        "value": "t1"
+                      }
+                    },
+                    {
+                      "$t": "identifiers.TrackId",
+                      "f": {
+                        "value": "t2"
+                      }
+                    }
+                  ],
+                  "kind": {
+                    "$e": "artifacts.ArtifactKind",
+                    "v": "mix"
+                  },
+                  "location": "mix.wav",
+                  "timeline_start_seconds": 0.0,
+                  "sample_rate_hz": 44100,
+                  "channel_count": 2,
+                  "frame_count": 34560,
+                  "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "render_spec": {
+                    "$t": "identifiers.VersionRef",
+                    "f": {
+                      "name": "render",
+                      "version": "1"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "daw": {
+          "$t": "project.DawParameterState",
+          "f": {
+            "project_id": {
+              "$t": "identifiers.ProjectId",
+              "f": {
+                "value": "p1"
+              }
+            },
+            "revision": {
+              "$t": "identifiers.Revision",
+              "f": {
+                "value": "r1"
+              }
+            },
+            "tracks": [
+              {
+                "$t": "project.DawTrackParameter",
+                "f": {
+                  "binding": {
+                    "$t": "daw_binding.DawTrackBinding",
+                    "f": {
+                      "reference": {
+                        "$t": "identifiers.VersionRef",
+                        "f": {
+                          "name": "binding",
+                          "version": "1"
+                        }
+                      },
+                      "project_id": {
+                        "$t": "identifiers.ProjectId",
+                        "f": {
+                          "value": "p1"
+                        }
+                      },
+                      "track_id": {
+                        "$t": "identifiers.TrackId",
+                        "f": {
+                          "value": "t1"
+                        }
+                      },
+                      "project_title": "Thesis Bass Bridge Test",
+                      "insert_index": 2,
+                      "insert_name": "Bass",
+                      "baseline_gain_db": 2.0,
+                      "baseline_fader": {
+                        "$t": "daw_binding.DawFaderReading",
+                        "f": {
+                          "normalized": 0.76,
+                          "db": -1.1527416706085205
+                        }
+                      }
+                    }
+                  },
+                  "selected_gain_db": 2.0,
+                  "confirmed_fader": {
+                    "$t": "daw_binding.DawFaderReading",
+                    "f": {
+                      "normalized": 0.76,
+                      "db": -1.1527416706085205
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "root_bindings": [
+      {
+        "$t": "integrity.ArtifactRootBinding",
+        "f": {
+          "artifact_id": {
+            "$t": "identifiers.ArtifactId",
+            "f": {
+              "value": "s1"
+            }
+          },
+          "root_key": "inputs"
+        }
+      },
+      {
+        "$t": "integrity.ArtifactRootBinding",
+        "f": {
+          "artifact_id": {
+            "$t": "identifiers.ArtifactId",
+            "f": {
+              "value": "s2"
+            }
+          },
+          "root_key": "inputs"
+        }
+      },
+      {
+        "$t": "integrity.ArtifactRootBinding",
+        "f": {
+          "artifact_id": {
+            "$t": "identifiers.ArtifactId",
+            "f": {
+              "value": "mix"
+            }
+          },
+          "root_key": "inputs"
+        }
+      }
+    ],
+    "scope": {
+      "$t": "observation.AnalysisScope",
+      "f": {
+        "track_ids": [
+          {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t1"
+            }
+          },
+          {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t2"
+            }
+          }
+        ],
+        "time_range": {
+          "$t": "observation.TimeRange",
+          "f": {
+            "start_seconds": 0,
+            "end_seconds": 0.7836734693877551
+          }
+        },
+        "frequency_range": null
+      }
+    },
+    "render_spec": {
+      "$t": "observation.RenderSpec",
+      "f": {
+        "ref": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "render",
+            "version": "1"
+          }
+        },
+        "sample_rate_hz": 44100,
+        "channel_count": 2
+      }
+    },
+    "context": {
+      "$t": "context.MusicalContext",
+      "f": {
+        "context_id": {
+          "$t": "identifiers.ContextId",
+          "f": {
+            "value": "c1"
+          }
+        },
+        "version": "1",
+        "track_roles": [
+          {
+            "$t": "context.TrackRole",
+            "f": {
+              "track_id": {
+                "$t": "identifiers.TrackId",
+                "f": {
+                  "value": "t1"
+                }
+              },
+              "role": "role-a",
+              "source": {
+                "$t": "context.AssertionSource",
+                "f": {
+                  "source_id": "labelled-fixture",
+                  "recorded_at": {
+                    "$dt": "2026-11-09T12:00:00+00:00"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "$t": "context.TrackRole",
+            "f": {
+              "track_id": {
+                "$t": "identifiers.TrackId",
+                "f": {
+                  "value": "t2"
+                }
+              },
+              "role": "role-b",
+              "source": {
+                "$t": "context.AssertionSource",
+                "f": {
+                  "source_id": "labelled-fixture",
+                  "recorded_at": {
+                    "$dt": "2026-11-09T12:00:00+00:00"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "preferences": [],
+        "protected_track_ids": {
+          "$fs": []
+        }
+      }
+    },
+    "criteria": {
+      "$t": "verification.AcceptanceCriteria",
+      "f": {
+        "criteria_id": {
+          "$t": "identifiers.CriteriaId",
+          "f": {
+            "value": "engineering"
+          }
+        },
+        "version": "1",
+        "targets": [
+          {
+            "$t": "verification.TargetCondition",
+            "f": {
+              "condition_id": {
+                "$t": "identifiers.ConditionId",
+                "f": {
+                  "value": "target"
+                }
+              },
+              "selector": {
+                "$t": "verification.MetricSelector",
+                "f": {
+                  "metric": {
+                    "$t": "identifiers.VersionRef",
+                    "f": {
+                      "name": "audio.sample_peak_dbfs",
+                      "version": "1"
+                    }
+                  },
+                  "scope": {
+                    "$t": "observation.AnalysisScope",
+                    "f": {
+                      "track_ids": [
+                        {
+                          "$t": "identifiers.TrackId",
+                          "f": {
+                            "value": "t1"
+                          }
+                        }
+                      ],
+                      "time_range": {
+                        "$t": "observation.TimeRange",
+                        "f": {
+                          "start_seconds": 0,
+                          "end_seconds": 0.7836734693877551
+                        }
+                      },
+                      "frequency_range": null
+                    }
+                  }
+                }
+              },
+              "operator": {
+                "$e": "verification.ComparisonOperator",
+                "v": "le"
+              },
+              "threshold": {
+                "$t": "observation.MeasuredScalar",
+                "f": {
+                  "value": -12.8,
+                  "unit": "dBFS"
+                }
+              }
+            }
+          }
+        ],
+        "improvements": [
+          {
+            "$t": "verification.ImprovementCondition",
+            "f": {
+              "condition_id": {
+                "$t": "identifiers.ConditionId",
+                "f": {
+                  "value": "improve"
+                }
+              },
+              "selector": {
+                "$t": "verification.MetricSelector",
+                "f": {
+                  "metric": {
+                    "$t": "identifiers.VersionRef",
+                    "f": {
+                      "name": "audio.sample_peak_dbfs",
+                      "version": "1"
+                    }
+                  },
+                  "scope": {
+                    "$t": "observation.AnalysisScope",
+                    "f": {
+                      "track_ids": [
+                        {
+                          "$t": "identifiers.TrackId",
+                          "f": {
+                            "value": "t1"
+                          }
+                        }
+                      ],
+                      "time_range": {
+                        "$t": "observation.TimeRange",
+                        "f": {
+                          "start_seconds": 0,
+                          "end_seconds": 0.7836734693877551
+                        }
+                      },
+                      "frequency_range": null
+                    }
+                  }
+                }
+              },
+              "direction": {
+                "$e": "verification.ImprovementDirection",
+                "v": "lower"
+              },
+              "minimum_delta": {
+                "$t": "observation.MeasuredScalar",
+                "f": {
+                  "value": 0.5,
+                  "unit": "dBFS"
+                }
+              }
+            }
+          }
+        ],
+        "guards": [
+          {
+            "$t": "verification.DeltaGuard",
+            "f": {
+              "condition_id": {
+                "$t": "identifiers.ConditionId",
+                "f": {
+                  "value": "master-guard"
+                }
+              },
+              "selector": {
+                "$t": "verification.MetricSelector",
+                "f": {
+                  "metric": {
+                    "$t": "identifiers.VersionRef",
+                    "f": {
+                      "name": "audio.sample_peak_dbfs",
+                      "version": "1"
+                    }
+                  },
+                  "scope": {
+                    "$t": "observation.AnalysisScope",
+                    "f": {
+                      "track_ids": [
+                        {
+                          "$t": "identifiers.TrackId",
+                          "f": {
+                            "value": "t1"
+                          }
+                        },
+                        {
+                          "$t": "identifiers.TrackId",
+                          "f": {
+                            "value": "t2"
+                          }
+                        }
+                      ],
+                      "time_range": {
+                        "$t": "observation.TimeRange",
+                        "f": {
+                          "start_seconds": 0,
+                          "end_seconds": 0.7836734693877551
+                        }
+                      },
+                      "frequency_range": null
+                    }
+                  }
+                }
+              },
+              "baseline": {
+                "$e": "verification.BaselineReference",
+                "v": "initial"
+              },
+              "maximum_absolute_delta": {
+                "$t": "observation.MeasuredScalar",
+                "f": {
+                  "value": 5.0,
+                  "unit": "dBFS"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "controller": {
+      "$t": "decision.ControllerIdentity",
+      "f": {
+        "name": "labelled-responses",
+        "version": "0.1"
+      }
+    },
+    "budget_limits": {
+      "$t": "budgets.BudgetLimits",
+      "f": {
+        "max_decision_calls": 4,
+        "max_attempts": 3,
+        "max_render_calls": 0,
+        "max_recovery_operations": 7,
+        "max_elapsed_seconds": 120.0,
+        "max_daw_writes": 3
+      }
+    },
+    "retry_policy": {
+      "$t": "coordinator_runtime.DecisionRetryPolicy",
+      "f": {
+        "reference": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "retry",
+            "version": "1"
+          }
+        },
+        "max_retries": 1
+      }
+    },
+    "policy": {
+      "$t": "admission.ActionAdmissionPolicy",
+      "f": {
+        "reference": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "policy",
+            "version": "1"
+          }
+        },
+        "project_id": {
+          "$t": "identifiers.ProjectId",
+          "f": {
+            "value": "p1"
+          }
+        },
+        "gain_permissions": [
+          {
+            "$t": "admission.TrackGainPermission",
+            "f": {
+              "track_id": {
+                "$t": "identifiers.TrackId",
+                "f": {
+                  "value": "t1"
+                }
+              },
+              "minimum_db": -6.0,
+              "maximum_db": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "renderer_capabilities": {
+      "$t": "capabilities.RendererCapabilities",
+      "f": {
+        "reference": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "renderer",
+            "version": "1"
+          }
+        },
+        "gain_bounds": {
+          "$t": "capabilities.GainBounds",
+          "f": {
+            "minimum_db": -12.0,
+            "maximum_db": 12.0
+          }
+        }
+      }
+    },
+    "processing_spec": {
+      "$t": "mix.ProcessingSpec",
+      "f": {
+        "reference": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "gain-mix-processing",
+            "version": "1"
+          }
+        },
+        "precision": {
+          "$e": "mix.NumericalPrecision",
+          "v": "float64"
+        },
+        "gain_rule": {
+          "$e": "mix.GainRule",
+          "v": "db_amplitude"
+        },
+        "summation_order": {
+          "$e": "mix.SummationOrder",
+          "v": "recipe_sequential"
+        },
+        "level_policy": {
+          "$e": "mix.LevelPolicy",
+          "v": "preserve"
+        },
+        "output_container": {
+          "$e": "mix.OutputContainer",
+          "v": "wav"
+        },
+        "sample_encoding": {
+          "$e": "mix.SampleEncoding",
+          "v": "float64"
+        }
+      }
+    },
+    "recipe": {
+      "$t": "mix.MixRecipe",
+      "f": {
+        "reference": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "recipe",
+            "version": "1"
+          }
+        },
+        "track_ids": [
+          {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t1"
+            }
+          },
+          {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t2"
+            }
+          }
+        ],
+        "summing_policy": {
+          "$e": "mix.SummingPolicy",
+          "v": "sample_sum"
+        }
+      }
+    },
+    "stem_bindings": [
+      {
+        "$t": "admission.StemBinding",
+        "f": {
+          "track_id": {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t1"
+            }
+          },
+          "artifact_id": {
+            "$t": "identifiers.ArtifactId",
+            "f": {
+              "value": "s1"
+            }
+          }
+        }
+      },
+      {
+        "$t": "admission.StemBinding",
+        "f": {
+          "track_id": {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t2"
+            }
+          },
+          "artifact_id": {
+            "$t": "identifiers.ArtifactId",
+            "f": {
+              "value": "s2"
+            }
+          }
+        }
+      }
+    ],
+    "mix_artifact_id": {
+      "$t": "identifiers.ArtifactId",
+      "f": {
+        "value": "mix"
+      }
+    },
+    "alignment": {
+      "$t": "identifiers.VersionRef",
+      "f": {
+        "name": "alignment.common_export_selection",
+        "version": "1"
+      }
+    },
+    "definitions": [
+      {
+        "name": "s1-sample-peak",
+        "selector": {
+          "$t": "verification.MetricSelector",
+          "f": {
+            "metric": {
+              "$t": "identifiers.VersionRef",
+              "f": {
+                "name": "audio.sample_peak_dbfs",
+                "version": "1"
+              }
+            },
+            "scope": {
+              "$t": "observation.AnalysisScope",
+              "f": {
+                "track_ids": [
+                  {
+                    "$t": "identifiers.TrackId",
+                    "f": {
+                      "value": "t1"
+                    }
+                  }
+                ],
+                "time_range": {
+                  "$t": "observation.TimeRange",
+                  "f": {
+                    "start_seconds": 0,
+                    "end_seconds": 0.7836734693877551
+                  }
+                },
+                "frequency_range": null
+              }
+            }
+          }
+        },
+        "unit": "dBFS",
+        "analyzer": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "autonomous_mixing.file_level_analyzer",
+            "version": "1"
+          }
+        },
+        "alignment": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "alignment.common_export_selection",
+            "version": "1"
+          }
+        },
+        "sources": [
+          {
+            "$t": "verification_evidence.SourceRequirement",
+            "f": {
+              "kind": {
+                "$e": "artifacts.ArtifactKind",
+                "v": "stem"
+              },
+              "source_track_ids": [
+                {
+                  "$t": "identifiers.TrackId",
+                  "f": {
+                    "value": "t1"
+                  }
+                }
+              ],
+              "render_spec": {
+                "$t": "identifiers.VersionRef",
+                "f": {
+                  "name": "render",
+                  "version": "1"
+                }
+              },
+              "sample_rate_hz": 44100,
+              "channel_count": 2,
+              "timeline_start_seconds": 0.0,
+              "frame_count": 34560
+            }
+          }
+        ]
+      },
+      {
+        "name": "mix-sample-peak",
+        "selector": {
+          "$t": "verification.MetricSelector",
+          "f": {
+            "metric": {
+              "$t": "identifiers.VersionRef",
+              "f": {
+                "name": "audio.sample_peak_dbfs",
+                "version": "1"
+              }
+            },
+            "scope": {
+              "$t": "observation.AnalysisScope",
+              "f": {
+                "track_ids": [
+                  {
+                    "$t": "identifiers.TrackId",
+                    "f": {
+                      "value": "t1"
+                    }
+                  },
+                  {
+                    "$t": "identifiers.TrackId",
+                    "f": {
+                      "value": "t2"
+                    }
+                  }
+                ],
+                "time_range": {
+                  "$t": "observation.TimeRange",
+                  "f": {
+                    "start_seconds": 0,
+                    "end_seconds": 0.7836734693877551
+                  }
+                },
+                "frequency_range": null
+              }
+            }
+          }
+        },
+        "unit": "dBFS",
+        "analyzer": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "autonomous_mixing.file_level_analyzer",
+            "version": "1"
+          }
+        },
+        "alignment": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "alignment.common_export_selection",
+            "version": "1"
+          }
+        },
+        "sources": [
+          {
+            "$t": "verification_evidence.SourceRequirement",
+            "f": {
+              "kind": {
+                "$e": "artifacts.ArtifactKind",
+                "v": "mix"
+              },
+              "source_track_ids": [
+                {
+                  "$t": "identifiers.TrackId",
+                  "f": {
+                    "value": "t1"
+                  }
+                },
+                {
+                  "$t": "identifiers.TrackId",
+                  "f": {
+                    "value": "t2"
+                  }
+                }
+              ],
+              "render_spec": {
+                "$t": "identifiers.VersionRef",
+                "f": {
+                  "name": "render",
+                  "version": "1"
+                }
+              },
+              "sample_rate_hz": 44100,
+              "channel_count": 2,
+              "timeline_start_seconds": 0.0,
+              "frame_count": 34560
+            }
+          }
+        ]
+      }
+    ],
+    "measurements": [
+      {
+        "condition_id": {
+          "$t": "identifiers.ConditionId",
+          "f": {
+            "value": "target"
+          }
+        },
+        "definition": "s1-sample-peak"
+      },
+      {
+        "condition_id": {
+          "$t": "identifiers.ConditionId",
+          "f": {
+            "value": "improve"
+          }
+        },
+        "definition": "s1-sample-peak"
+      },
+      {
+        "condition_id": {
+          "$t": "identifiers.ConditionId",
+          "f": {
+            "value": "master-guard"
+          }
+        },
+        "definition": "mix-sample-peak"
+      }
+    ],
+    "daw_session": {
+      "binding": {
+        "$t": "daw_binding.DawTrackBinding",
+        "f": {
+          "reference": {
+            "$t": "identifiers.VersionRef",
+            "f": {
+              "name": "binding",
+              "version": "1"
+            }
+          },
+          "project_id": {
+            "$t": "identifiers.ProjectId",
+            "f": {
+              "value": "p1"
+            }
+          },
+          "track_id": {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t1"
+            }
+          },
+          "project_title": "Thesis Bass Bridge Test",
+          "insert_index": 2,
+          "insert_name": "Bass",
+          "baseline_gain_db": 2.0,
+          "baseline_fader": {
+            "$t": "daw_binding.DawFaderReading",
+            "f": {
+              "normalized": 0.76,
+              "db": -1.1527416706085205
+            }
+          }
+        }
+      },
+      "permission": {
+        "$t": "admission.TrackGainPermission",
+        "f": {
+          "track_id": {
+            "$t": "identifiers.TrackId",
+            "f": {
+              "value": "t1"
+            }
+          },
+          "minimum_db": -6.0,
+          "maximum_db": 2.0
+        }
+      },
+      "routing": {
+        "$t": "daw_export.DawRoutingDeclaration",
+        "f": {
+          "reference": {
+            "$t": "identifiers.VersionRef",
+            "f": {
+              "name": "routing",
+              "version": "1"
+            }
+          },
+          "status": {
+            "$e": "daw_export.DawDependencyStatus",
+            "v": "declared"
+          },
+          "dependent_track_ids": [],
+          "effect_notes": []
+        }
+      },
+      "export_format": {
+        "$t": "daw_export.DawExportFormat",
+        "f": {
+          "container": "WAV",
+          "subtype": "DOUBLE"
+        }
+      },
+      "export_timeline": {
+        "$t": "daw_export.DawExportTimeline",
+        "f": {
+          "start_seconds": 0.0,
+          "sample_rate_hz": 44100,
+          "frame_count": 34560
+        }
+      },
+      "render_spec": {
+        "$t": "identifiers.VersionRef",
+        "f": {
+          "name": "render",
+          "version": "1"
+        }
+      },
+      "export_root_key": "daw-exports"
+    }
+  },
+  "preparation": {
+    "profile": {
+      "$t": "identifiers.VersionRef",
+      "f": {
+        "name": "p1.dist10_pcm16_or_float64_rint_even_44100",
+        "version": "3"
+      }
+    },
+    "jobs": [
+      {
+        "$t": "masking_measurement.MaskingPreparationJob",
+        "f": {
+          "pair": {
+            "$t": "masking_measurement.MaskingPair",
+            "f": {
+              "masker": {
+                "$t": "identifiers.TrackId",
+                "f": {
+                  "value": "t1"
+                }
+              },
+              "target": {
+                "$t": "identifiers.TrackId",
+                "f": {
+                  "value": "t2"
+                }
+              }
+            }
+          },
+          "time_range": {
+            "$t": "observation.TimeRange",
+            "f": {
+              "start_seconds": 0,
+              "end_seconds": 0.7836734693877551
+            }
+          },
+          "region": {
+            "$t": "masking_measurement.BandRegion",
+            "f": {
+              "name": "all-supported",
+              "bands": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20
+              ]
+            }
+          },
+          "masker_source": {
+            "$t": "verification_evidence.SourceRequirement",
+            "f": {
+              "kind": {
+                "$e": "artifacts.ArtifactKind",
+                "v": "stem"
+              },
+              "source_track_ids": [
+                {
+                  "$t": "identifiers.TrackId",
+                  "f": {
+                    "value": "t1"
+                  }
+                }
+              ],
+              "render_spec": {
+                "$t": "identifiers.VersionRef",
+                "f": {
+                  "name": "render",
+                  "version": "1"
+                }
+              },
+              "sample_rate_hz": 44100,
+              "channel_count": 2,
+              "timeline_start_seconds": 0.0,
+              "frame_count": 34560
+            }
+          },
+          "target_source": {
+            "$t": "verification_evidence.SourceRequirement",
+            "f": {
+              "kind": {
+                "$e": "artifacts.ArtifactKind",
+                "v": "stem"
+              },
+              "source_track_ids": [
+                {
+                  "$t": "identifiers.TrackId",
+                  "f": {
+                    "value": "t2"
+                  }
+                }
+              ],
+              "render_spec": {
+                "$t": "identifiers.VersionRef",
+                "f": {
+                  "name": "render",
+                  "version": "1"
+                }
+              },
+              "sample_rate_hz": 44100,
+              "channel_count": 2,
+              "timeline_start_seconds": 0.0,
+              "frame_count": 34560
+            }
+          },
+          "alignment": {
+            "$t": "masking_measurement.AlignmentProvenance",
+            "f": {
+              "method": {
+                "$t": "identifiers.VersionRef",
+                "f": {
+                  "name": "alignment.common_export_selection",
+                  "version": "1"
+                }
+              },
+              "statement": "labelled test declaration: both stems exported from one selection"
+            }
+          }
+        }
+      }
+    ],
+    "experimental_policy": {
+      "$t": "masking_measurement.ExperimentalMaskingPolicy",
+      "f": {
+        "method": {
+          "$t": "identifiers.VersionRef",
+          "f": {
+            "name": "p1.experimental_screen",
+            "version": "1"
+          }
+        },
+        "energy_above_noise_db": 40.0,
+        "quiet_elevation_db": 0.02,
+        "margin_deadband_db": 0.02,
+        "minimum_cells": 100,
+        "minimum_robust_fraction": 0.25,
+        "minimum_consecutive_calls": 4
+      }
+    },
+    "max_elapsed_seconds": 60.0,
+    "known_alignments": [
+      {
+        "$t": "identifiers.VersionRef",
+        "f": {
+          "name": "alignment.common_export_selection",
+          "version": "1"
+        }
+      }
+    ]
+  },
+  "provider": {
+    "model": "explicit-test-model",
+    "api_version": "2023-06-01",
+    "max_tokens": 1024,
+    "temperature": 0.0,
+    "timeout_seconds": 20.0,
+    "max_request_bytes": 200000,
+    "max_response_bytes": 50000
+  },
+  "limits": {
+    "max_evidence_bytes": 16777216,
+    "max_audit_record_bytes": 16777216
+  }
+}

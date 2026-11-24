@@ -47,6 +47,9 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 
 | [041](0041-provider-run-evidence-gate.md) | Provider-run evidence gate and durable P1 associations (R5A) | 2026-11-23 | Proposed |
 
+| [042](0042-programmatic-daw-agent-composition.md) | Owned programmatic DAW agent composition (R5B) | 2026-11-24 | Proposed |
+| [043](0043-validated-daw-agent-run-configuration.md) | Validated run configuration for the DAW agent runtime (R5C C1) | 2026-11-24 | Proposed |
+
 ## Template
 
 ```markdown

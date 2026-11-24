@@ -2524,3 +2524,82 @@ Fresh pre-fix full suite:7124 passed,4 skipped. Focused post-fix source/evidence
 
 
 Final checkpoint verification after the two fixes and formatting (2026-11-24): native-filesystem `uv run --locked --extra agent python -m pytest -q -p no:cacheprovider` — **7,129 passed, 4 skipped**. `ruff check .`, `ruff format --check src tests` (307 files), fixture verifier, CLI help, dependency lock and diff checks pass. The combined R5A/offline checkpoint is authorized for commit; R5B/C remain unimplemented and live operations remain separately gated.
+
+
+## 2026-11-24 — R5B real-component programmatic composition
+
+Owner authorized continuing R5B after checkpoint5528b61. Implemented drivers.agent_runtime.DawAgentRuntime tests-first, with additive DawAgentBinding, real preparation/manifest/evidence, P1/level router, experimental diagnosis, audited Claude adapter, durable run/acceptance store, integrity inspector, FL controller/journal and existing export handoff/coordinator. Typed request factory keeps producer roles, criteria, permissions and budgets explicit; only external provider/device transports and clock/IDs are replaced in numerical integration. No new adapter, loop, dependency registry, JSON run language or musical acceptance default.
+
+The runtime owns per-run stores/resources, refuses overwrites, closes on failure, and retains diagnostic artifacts instead of deleting/repreparing. Reopen checks exact stored local/provider settings, frozen manifest and evidence, then existing suspension classification without resend. Current checkpoint inventory supports a second accepted-state export. Credentials stay separate and tests check local physical paths remain outside public packets. The base provider record fields/run schema2/exchange schema1 remain unchanged; the additional binding uses a distinct codec tag.
+
+Fresh read-only final review found one P2: incompatible native export timing/render metadata reached provider dispatch before later admission refusal. Four regressions failed before correction; creation now compares frame count, start, rate and render spec before external construction. No other confirmed P1/P2 was reported. Additional integration covers genuine incomplete/below-threshold abstention, initial inconclusive/satisfied gates, malformed/refused/timeout provider replies, denied action, rejected guard followed by exact recovery and revised feedback, missing evidence/manifest, local/provider configuration drift, partial-construction cleanup, intermediate acceptance/second suspension, lost apply reply and lost acceptance acknowledgement. Accepted authority is retained; unsupported nonidentical stereo candidate recovers without fold-down. These are software engineering results on synthetic files and labelled external doubles, not real-model/FL/music validation.
+
+Eight faithful mutations are caught, each restored byte-identically. Two initially survived because tests did not isolate local MIDI-settings comparison or manifest refusal before external construction; the permanent tests now do. Fixture mistakes (missing json import, wrong content_hash field and escaped Windows path assertion) were corrected without changing production behavior. Preparation/diagnosis tests observed missing-module/import RED before implementation; the review regression observed four RED failures before its fix.
+
+Final verification: `uv run --locked --extra agent pytest -q` — **7162 passed,4 skipped** (213.34s). Composition33 plus architecture276: **309 passed with warnings as errors**. Ruff check, format check (310 files), frozen dist10 fixture verification, CLI/daw help, dependency lock and diff checks pass. Proposed ADR-042, index, plan outcome, architecture and roadmap updated; requirement status and accepted ADRs untouched. Everything is uncommitted for review. No provider/FL call, installation, save/export operation or threshold change. CLI start/continue still refuse; R5C schema/operator activation remains next, live trials separately authorized.
+
+
+## 2026-11-24 — R5C operator configuration/CLI plan (planning only)
+
+Owner requested an R5C plan without implementation. Read the uncommitted R5B tree, the R5 plan, ADR-040/042, the CLI, the DAW runtime/commands, the codec, restart/continuation and the export handoff. Saved docs/superpowers/plans/2026-11-24-r5c-operator-cli.md (Proposed).
+
+The plan proposes a separate allowlisted run file (schema 1) of codec-encoded core records. Every preparation-derived field (analysis specification/digest, diagnosis jobs, DAW profile, binding, limits) is absent from the file, which removes the digest cycle; a provisional request validates structure before any write. Further proposals:
+- first-session confirmation repeats both fader coordinates against a fresh inspection;
+- `continue` rebuilds nothing from flags and requires an export ID and an operator;
+- exit codes stay 0/2/4;
+- status changes are additive only.
+
+The plan also records these findings:
+- no existing environment-variable credential mechanism;
+- conflicting ADR-040/H9 proposals;
+- R5B preflight after preparation writes;
+- untyped runtime refusals;
+- no production constant for the reviewed experimental policy.
+
+An example run file was generated in memory from unit-test fixture records with the real codec. Its values are illustrative, not thresholds or defaults.
+
+No source code, requirement status, threshold or ADR changed. No provider or FL operation, audio change or test run took place.
+
+Review corrections to the R5C plan (2026-11-24, planning only). These are applied in place in the plan's §5.0, §6.1, §7.1, §8, §10–§14:
+1. **Outcome wording.** Keywords name the termination only. A recorded-state block is printed: DAW writes, acceptances, authoritative and verified state, and uncertainty. Exit 4 separates refusal before effects from STOPPED with effects possible, so "ABSTAINED" no longer implies that nothing was written.
+2. **File safety before hashing.** The manifest builder reuses the importer's workspace, link/reparse, listing and identity checks through one new `FileExportHandoff` method, before any output file is opened.
+3. **Strict, bounded run-file parsing.** It adds a size bound with a bounded read, refusals for duplicate keys, non-finite numbers and over-long integers, and a nesting pre-scan. Every refusal exits 2 before any resource is created.
+
+D3 (level-only acceptance) is relabelled as a scope choice, not a scientific requirement or masking-improvement evidence. The reviewer recommends starting with C1 only. The example run file's measured nesting depth is 14. No source code, tests or ADRs changed.
+
+## 2026-11-24 — R5C increment C1: run configuration, factory and pre-write check (implementation)
+
+The owner approved C1 only. C1 was implemented tests-first (ADR-043 Proposed; plan outcome in `2026-11-24-r5c-operator-cli.md`).
+
+**What changed:**
+- `drivers.daw_runtime`:
+  - `read_strict_json`: a regular unlinked file; at most 4 MiB through a bounded read; strict UTF-8 without a byte-order mark; nesting depth at most 64 by a pre-scan; no duplicate keys or non-finite numbers; integers of at most 20 digits;
+  - the allowlisted schema 1 run envelope of codec records, in which derived fields cannot be declared;
+  - a provisional request validated before any write;
+  - the prepared request factory;
+  - a pinned reviewed experimental policy and level-only declared jobs (a scope choice).
+- `drivers.agent_runtime`: `RuntimeRefusal`, the pre-write `DawAgentRuntime.check`, and an explicit preflight ingress profile.
+- CLI `start`/`continue` still refuse; C2–C4 are not started.
+
+**Review fixes (two defects, regressions written first):**
+1. On reopen, a missing, altered or unreadable stored preparation manifest (or one decoding to another plan) raised `PreparationStoreError` or a raw `OSError`. It is now a `RuntimeRefusal` and is never regenerated.
+2. An `OSError` during `fstat` or `read` of a run file escaped unchanged. It is now `ConfigError`, with the descriptor still closed; programming errors propagate unchanged.
+
+Five regressions failed before the fixes, for the intended reasons. One survivor of the fix-removal probes (the unreachable-by-file-damage "differs from the run" comparison) received a loader-substitution regression.
+
+**Process note:** one full-suite run was started while mutation probes were temporarily rewriting sources. It stalled in a restart-subprocess test, was stopped and is **not** counted. Probes and the full suite were then run strictly in sequence.
+
+**Final evidence (sources restored byte-identically, SHA-256 checked):**
+- **Mutation probes:** 15 of 15 for C1 guards and 4 of 4 for the review fixes.
+- **Clean full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,258 passed, 4 skipped** (172.81 s). An earlier pre-fix C1 run gave 7,251 passed, 4 skipped.
+- **Focused C1/R5B/CLI/architecture with `-W error`:** 425 passed. The C1 file passed alone after its final formatting-only change (96 passed).
+- **Other checks:** `ruff check` and `ruff format --check` (312 files), fixture verifier, `uv lock --check`, `git diff --check` and `daw --help` pass.
+
+No provider/FL operation, installation, audio change, threshold or requirement-status change. Everything is uncommitted pending the R5B+C1 checkpoint review.
+
+
+## 2026-11-24 — Combined R5B + R5C C1 checkpoint review
+
+Owner requested review and a combined checkpoint commit. Reviewed the composition/configuration boundary and both prior C1 fixes; no further blocking implementation finding identified. C2 specification is recorded for later review only; CLI, daw_commands and core admission are unchanged by this checkpoint, so start/continue remain unavailable. ADR-042/043 implementation-review status updated while both remain Proposed.
+
+Independent fresh verification on the final source, run alone without mutations: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7258 passed,4 skipped**, 197.84s. Ruff check and format (312 files), frozen fixture verification, dependency lock, daw help and diff checks pass. The earlier implementation evidence (19 C1/fix probes, byte restoration and 425 focused tests) is recorded above and was not rerun as mutation work during this review. The checkpoint includes the reviewed R5B composition, C1 configuration/factory/preflight, tests and corresponding documentation/planning artifacts; it includes no C2 implementation, live provider/FL action, script installation, threshold change or scientific-quality claim. Approved for the requested combined commit.
