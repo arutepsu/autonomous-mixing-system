@@ -42,10 +42,19 @@ import sys
 import numpy as np
 import soundfile as sf
 
-from autonomous_mixing.adapters.dsp_analysis.bands import DIST10_LONG_BO_44100, DIST10_LONG_BU_44100, dist10_long_bands
+from autonomous_mixing.adapters.dsp_analysis.bands import DIST10_LONG_BO_44100, DIST10_LONG_BU_44100
 from autonomous_mixing.adapters.dsp_analysis.front_end import dist10_clip_to_bands
 from autonomous_mixing.adapters.dsp_analysis.levels import sample_peak_dbfs, sample_rms_dbfs
 from autonomous_mixing.adapters.dsp_analysis.masking import directional_masking_margin_db
+from autonomous_mixing.adapters.dsp_analysis.masking_preparation import (
+    rounding_noise_band_energy,
+)
+from autonomous_mixing.adapters.dsp_analysis.masking_preparation import (
+    rounding_noise_partition_energy as rounding_noise_partition_energy,
+)
+from autonomous_mixing.adapters.dsp_analysis.masking_preparation import (
+    rounding_noise_per_bin as rounding_noise_per_bin,
+)
 from autonomous_mixing.adapters.dsp_analysis.partitions import dist10_long_partition_map
 
 RATE = 44100
@@ -110,32 +119,6 @@ def band_spans_hz() -> list[tuple[float, float]]:
         bins = [k for k in range(465) if bu <= partition[k] <= bo]
         spans.append((bins[0] * RATE / WINDOW, bins[-1] * RATE / WINDOW))
     return spans
-
-
-def rounding_noise_per_bin() -> float:
-    """Expected unnormalised FFT energy per bin of int16 rounding noise: (1/12) x sum(w^2), dist10's long window."""
-    i = np.arange(WINDOW)
-    window = 0.5 * (1.0 - np.cos(2.0 * 3.14159265358979 * (i - 0.5) / WINDOW))
-    return float(np.sum(window * window)) / 12.0
-
-
-def rounding_noise_partition_energy() -> np.ndarray:
-    """Partition energy (63,) of rounding noise over every bin 0..512 the partition mapping consumes.
-
-    Nyquist (bin 512) is included: the FFT energy floor excludes it, but the reproduced dist10 mapping accumulates it,
-    with bins 465..511, into partition 0.
-    """
-    partition = dist10_long_partition_map()
-    eb = np.zeros(63)
-    for k in range(partition.size):  # 513 bins, Nyquist included
-        eb[partition[k]] += rounding_noise_per_bin()
-    return eb
-
-
-def rounding_noise_band_energy() -> np.ndarray:
-    """Band energy (21,) of int16 rounding noise, through the partitions and the long-band mapping."""
-    eb = rounding_noise_partition_energy()[None, :]
-    return dist10_long_bands(eb, eb.copy()).en[0]
 
 
 def window_centre_seconds(call: int) -> float:

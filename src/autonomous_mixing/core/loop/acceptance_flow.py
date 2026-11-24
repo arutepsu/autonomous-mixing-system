@@ -139,13 +139,19 @@ def accept(
             on_progress=on_progress,
         )
         return (progress, failed_attempt_result_4)
+    # Dispatch can commit before raising: authority is unknown until a validated definitive answer.
+    progress = replace(progress, authority_known=False, verified=None,
+                       pending_effect=TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN)  # fmt: skip
+    on_progress(progress)
     response = journal.commit(event)
     try:
         validate_acceptance_commit_response(event, response)
     except ValueError as error:
         response = AcceptanceCommitUnknown(event.acceptance_id, f"invalid commit response: {error}")
     if isinstance(response, AcceptanceCommitted):
-        progress = replace(progress, commits=progress.commits + (response,))
+        # Establish journal authority before promotion or recording can fail.
+        progress = replace(progress, accepted=response.accepted, authority_known=True, verified=None,
+                           commits=progress.commits + (response,), pending_effect=None)  # fmt: skip
         on_progress(progress)
         progress, promote_result = promote(progress, response.accepted, ctx, on_progress=on_progress)
         progress, stop = record(progress, response, identities=identities, journal=journal, on_progress=on_progress)
@@ -156,6 +162,8 @@ def accept(
             )
         return (progress, pending_stop)
     if isinstance(response, AcceptanceNotCommitted):
+        progress = replace(progress, authority_known=True, pending_effect=None)
+        on_progress(progress)
         progress, stop = record(progress, response, identities=identities, journal=journal, on_progress=on_progress)
         original = stop or (TerminationReason.RECORDING_FAILED, f"acceptance not committed: {response.explanation}")
         progress, failed_attempt_result_5 = failed_attempt(

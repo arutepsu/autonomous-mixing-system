@@ -45,6 +45,11 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 | [039](0039-durable-run-journal-and-restart.md) | Durable run and acceptance journals, restart and orphan detection (Increment 5) | 2026-11-20 | Proposed |
 | [040](0040-operator-cli-for-the-daw-path.md) | Operator CLI for the DAW path: start, continue, status and authorized recovery (Increment 6) | 2026-11-20 | Proposed |
 
+| [041](0041-provider-run-evidence-gate.md) | Provider-run evidence gate and durable P1 associations (R5A) | 2026-11-23 | Proposed |
+
+| [042](0042-programmatic-daw-agent-composition.md) | Owned programmatic DAW agent composition (R5B) | 2026-11-24 | Proposed |
+| [043](0043-validated-daw-agent-run-configuration.md) | Validated run configuration for the DAW agent runtime (R5C C1) | 2026-11-24 | Proposed |
+
 ## Template
 
 ```markdown

@@ -28,13 +28,13 @@ from autonomous_mixing.core.records.verification_evidence import StateEvidence
 
 Stop = tuple[TerminationReason, str]
 
-# Review fix 2026-11-19 (ADR-036): the terminal reason an unexpected exception must keep once a DAW write may have
-# taken effect. ``None`` means nothing is pending (an unexpected error is then a runtime contract failure).
+# The terminal reason an unexpected exception must keep while an external effect or acceptance authority is
+# unresolved. ``None`` means nothing is pending (an unexpected error is then a runtime contract failure).
 _PENDING_EFFECT_REASONS = frozenset({
     TerminationReason.DAW_COMMAND_UNRESOLVED,
     TerminationReason.DAW_CONVERSION_BLOCKED,
     TerminationReason.REQUIRED_RECOVERY_NOT_PERFORMED,
-    TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN,  # Increment 3 (A1): set immediately before a DAW commit
+    TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN,  # set before offline or DAW acceptance dispatch
     TerminationReason.RESTORATION_UNCERTAIN,  # Increment 4 (ADR-038): restored, rollback not yet established
 })  # fmt: skip
 
@@ -61,7 +61,7 @@ class RuntimeProgress:
     roots: tuple[ArtifactRootBinding, ...]
     observations: tuple[StateEvidence, ...]
     diagnosed: tuple[Revision, DiagnosisReport] | None
-    pending_effect: TerminationReason | None = None  # ADR-036 review fix; trailing, so offline progress is unchanged
+    pending_effect: TerminationReason | None = None  # phase-aware exception reason; default preserves callers
     # Increment 3 (C2): controller time before the current clock segment, and that segment's first reading. A
     # resumed run starts a new segment, so the operator pause is never charged. Offline runs keep one segment.
     elapsed_before: float = 0.0
@@ -107,7 +107,7 @@ class RuntimeProgress:
         if self.segment_start is not None:
             require_instance(self.segment_start, ClockReading, "RuntimeProgress.segment_start")
         if self.pending_effect is not None and self.pending_effect not in _PENDING_EFFECT_REASONS:
-            raise ValueError("RuntimeProgress.pending_effect must name a DAW effect that is not recovered")
+            raise ValueError("RuntimeProgress.pending_effect must name an unresolved effect or acceptance authority")
 
 
 @dataclass(frozen=True)

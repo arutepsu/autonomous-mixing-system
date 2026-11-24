@@ -10,3 +10,27 @@
   - `tests/architecture/test_adapters.py` lists the new client edge and the module's exact edges. `tests/architecture/test_shared_audio_access.py` adds allowed and forbidden import cases (private names, package form, rendering, `front_end` and `framing` importing the component) and a fresh-process isolation check (loads the shared reader and soundfile, no other `dsp_analysis` module, adapter or forbidden layer).
   - Producers must export profile-v1 stems as WAV, 44,100 Hz, mono, 16-bit signed integer PCM, with no sample-rate conversion; anything else is rejected with a named code.
   - Pair alignment, directional measurements and analyzer integration are not part of this decision. No requirement status changes.
+
+## Implementation note (2026-11-20, P1 R1 handoff; Proposed, for Codex review)
+- **Addition:** `read_dist10_member(artifact, *, root, max_file_bytes, max_decoded_bytes)` resolves one current member under its configured root (`resolve_artifact_location`) and calls `read_dist10_pcm16` unchanged.
+- **Errors:** its expected resolution, integrity and profile failures are raised as one `Dist10ReadError` carrying the original code, with the original error chained. `read_dist10_pcm16` itself still propagates `IntegrityError` and `LocationResolutionError` unchanged.
+- **Why here:** the new P1 modules (`masking_preparation`, `directional_analysis`) need verified, root-resolved reads. Routing them through this boundary keeps the edges exact:
+  - no new `audio_io` client;
+  - this module's edges are unchanged;
+  - the new modules import only `wav_input`, never `audio_io`.
+- **Pinned by:** `tests/architecture/test_adapters.py` (`ANALYSIS_EDGES`) and new regressions in `tests/unit/test_dsp_wav_input.py`.
+
+## Implementation note (2026-11-22, exact dual mono; still Proposed)
+
+The existing three reader/conversion functions gain keyword-only `allow_exact_dual_mono: bool = False`. The default retains native-mono v1. Explicit opt-in permits mono or exactly equal stereo PCM_16 at 44,100 Hz, after shared verification and full decoded shape/range/integrality checks of both channels. It selects channel 0 unchanged, retains the original verified stereo artifact/hash, and charges actual source channels. Unequal stereo is rejected. No new adapter, shared-reader client, conversion subsystem or copied WAV is introduced. Preparation and analysis derive opt-in only from the persisted v2 profile, with legacy pre-read admission preserved. Numerical kernels remain file-free and unchanged.
+
+
+## Implementation note (2026-11-24, Phase 1 float renderer feedback; still Proposed)
+
+The explicit `P1_FLOAT64_PROFILE` accepts PCM_16 or normalized DOUBLE at 44.1 kHz with mono or exact-dual-mono
+semantics. `allow_float64_quantization=False` preserves existing reader defaults. Opt-in converts DOUBLE to
+int16 counts by scale 32768, nearest ties-to-even and saturation of the top bin; it rejects overload outside
+[-1, 1], never dithers/resamples and compares stereo before conversion. Original hash/timeline metadata remains
+unchanged; schema-4 evidence records transform/count hash. Preparation and analysis use the same persisted
+profile. No new shared-reader client or architecture edge is added. Full rules, engineering fixture evidence,
+recovery semantics and commands: [architecture overview](../architecture/overview.md#offline-gain-only-closed-loop-engineering-verification-2026-11-24).

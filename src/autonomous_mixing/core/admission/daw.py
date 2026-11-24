@@ -348,6 +348,17 @@ def daw_recovery_decision(
                                reconciliation.reconciliation_id, reconciliation.finding)  # fmt: skip
 
 
+def exact_fader(a: DawFaderReading, b: DawFaderReading) -> bool:
+    """Exactly the same fader reading: both coordinates equal and with equal signs (``-0.0`` differs from ``0.0``).
+
+    The one definition of exact equality for the run-start check and the operator's first-session confirmation.
+    """
+    require_instance(a, DawFaderReading, "a")
+    require_instance(b, DawFaderReading, "b")
+    return all(x == y and math.copysign(1.0, x) == math.copysign(1.0, y)
+               for x, y in ((a.normalized, b.normalized), (a.db, b.db)))  # fmt: skip
+
+
 def daw_start_check(
     control_state: DawControlState,
     latest: DawLatestState | None,
@@ -378,9 +389,7 @@ def daw_start_check(
     anchor = latest.anchor
     if anchor is None:
         return None
-    exact = all(a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
-                for a, b in ((anchor.reading.normalized, confirmed.normalized), (anchor.reading.db, confirmed.db)))  # fmt: skip
-    if anchor.binding != binding or not exact:
+    if anchor.binding != binding or not exact_fader(anchor.reading, confirmed):
         return DawStartRefused(TerminationReason.DAW_CONTINUITY_FAILED, (anchor.source_id,),
                                f"the latest FL state ({anchor.source_id}) is not exactly the configured confirmed "
                                "fader: the DAW state is unexplained")  # fmt: skip

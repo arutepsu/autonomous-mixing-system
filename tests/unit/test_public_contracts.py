@@ -75,7 +75,7 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
     from autonomous_mixing.core.ports.analysis import AudioAnalyzer, validate_analysis_response
     from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
     from autonomous_mixing.core.records.actions import Action
-    from autonomous_mixing.core.records.analysis import AnalysisRequest, AnalysisResponse
+    from autonomous_mixing.core.records.analysis import AnalysisEvidenceReference, AnalysisRequest, AnalysisResponse
     from autonomous_mixing.core.records.budgets import BudgetLimits, BudgetUsage
     from autonomous_mixing.core.records.capabilities import ActionCapabilityView
     from autonomous_mixing.core.records.context import MusicalContext
@@ -148,6 +148,10 @@ def test_task1_constructor_function_and_protocol_signatures_match_the_baseline()
         AudioAnalyzer.analyze: _method(("request", AnalysisRequest), returns=PortResult[AnalysisResponse]),
         DecisionMaker.decide: _method(("request", Situation), returns=PortResult[DecisionResponse]),
     }
+    # R5A deliberate extension: durable references are optional for existing non-provider callers.
+    expected[AnalysisResponse][1:1] = [
+        ("evidence", Parameter.POSITIONAL_OR_KEYWORD, (), tuple[AnalysisEvidenceReference, ...])
+    ]
     for obj, signature in expected.items():
         assert _params(obj) == signature, obj.__qualname__
 

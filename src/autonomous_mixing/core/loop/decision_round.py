@@ -28,6 +28,7 @@ from autonomous_mixing.core.loop.runtime import (
 )
 from autonomous_mixing.core.ports.coordinator_runtime import DiagnosisSource, IdentitySource, RunClock
 from autonomous_mixing.core.ports.decision import DecisionMaker, validate_decision_response
+from autonomous_mixing.core.ports.decision_evidence import DecisionEvidenceSource
 from autonomous_mixing.core.ports.run_journal import RunJournal
 from autonomous_mixing.core.records.admission import (
     ActionAdmissionRequest,
@@ -41,6 +42,8 @@ from autonomous_mixing.core.records.budgets import BudgetBlock, BudgetOperation
 from autonomous_mixing.core.records.capabilities import ActionCapabilityView
 from autonomous_mixing.core.records.coordinator_progress import PreparedCorrection, RuntimeProgress, Stop
 from autonomous_mixing.core.records.decision import Decision, DecisionResponse, ProposeAction, Situation
+from autonomous_mixing.core.records.decision_evidence import DecisionEvidenceRejected, DecisionEvidenceVerified
+from autonomous_mixing.core.records.decision_exchange import call_key_of
 from autonomous_mixing.core.records.decision_gate import (
     DeclineAction,
     EvidenceBlocked,
@@ -77,6 +80,7 @@ def decision_round(
     *,
     clock: RunClock,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     diagnosis_source: DiagnosisSource,
     identities: IdentitySource,
     journal: RunJournal,
@@ -151,6 +155,35 @@ def decision_round(
         if stop:
             return (progress, stop)
         result = decision_maker.decide(situation)
+        if progress.request.provider_binding is not None:
+            proof = decision_evidence.verify(situation, result)
+            actual = result.value if isinstance(result, Success) else result
+            if isinstance(proof, DecisionEvidenceVerified):
+                expected_binding = progress.request.provider_binding
+                request = proof.exchange.request
+                if (request.provider, request.prompt, request.response_schema) != (
+                    expected_binding.provider,
+                    expected_binding.prompt,
+                    expected_binding.response_schema,
+                ):
+                    proof = DecisionEvidenceRejected(
+                        call_key_of(situation), "proof provider/prompt/schema differs from frozen run"
+                    )
+            if isinstance(proof, DecisionEvidenceVerified) and (proof.situation != situation or proof.result != actual):
+                proof = DecisionEvidenceRejected(
+                    call_key_of(situation), "evidence source returned a foreign input/result"
+                )
+            if not isinstance(proof, (DecisionEvidenceVerified, DecisionEvidenceRejected)) or (
+                isinstance(proof, DecisionEvidenceRejected) and proof.call != call_key_of(situation)
+            ):
+                proof = DecisionEvidenceRejected(call_key_of(situation), "invalid decision evidence response")
+            progress, proof_stop = record(
+                progress, proof, identities=identities, journal=journal, on_progress=on_progress
+            )
+            if proof_stop:
+                return progress, proof_stop
+            if isinstance(proof, DecisionEvidenceRejected):
+                return progress, (TerminationReason.DECISION_FAILED, f"unverified provider result: {proof.reason}")
         if isinstance(result, PortFailure):
             progress, stop = observed(
                 progress,

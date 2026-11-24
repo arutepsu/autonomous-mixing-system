@@ -10,7 +10,7 @@
 ## Target pipeline (planned)
 Audio I/O -> deterministic features -> detectors -> structured problem candidates -> Claude proposal (`decision_agent`) -> action validator -> DSP execution -> verification -> accept/revert -> experiment report.
 
-Structure ([ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md), Accepted 2026-11-03; implemented by migration steps M0–M5, completed 2026-11-04, M6 skipped): a hexagonal modular monolith whose `core` will run this pipeline as a MAPE-K-style control loop over immutable records, with DSP analysis, rendering and the Claude `decision_agent` as adapters behind `core.ports`, and `evaluation` reachable only from the experiment runner. The control loop itself does not exist yet. Layout, import and immutability rules: [`engineering-conventions.md`](../project/engineering-conventions.md); migration record and guarantee ledger: [`adr-027-migration-plan.md`](adr-027-migration-plan.md). ADR-027 supersedes ADR-017 and ADR-022.
+Structure ([ADR-027](../decisions/0027-hexagonal-control-loop-architecture.md), Accepted 2026-11-03; implemented by migration steps M0–M5, completed 2026-11-04, M6 skipped): a hexagonal modular monolith whose `core` will run this pipeline as a MAPE-K-style control loop over immutable records, with DSP analysis, rendering and the Claude `decision_agent` as adapters behind `core.ports`, and `evaluation` reachable only from the experiment runner. Status correction 2026-11-22: controlled offline and operator-assisted DAW coordinators now exist, including verification, acceptance, recovery and durable restart. Their connected tests use labelled decision/diagnosis doubles or a simulated FL host; production diagnosis/provider components and live integrated agent validation remain missing. Descriptive P1 measurement adapters are implemented at `0242c99`; qualified diagnosis is not established. The earlier no-control-loop status is superseded. Layout, import and immutability rules: [`engineering-conventions.md`](../project/engineering-conventions.md); migration record and guarantee ledger: [`adr-027-migration-plan.md`](adr-027-migration-plan.md). ADR-027 supersedes ADR-017 and ADR-022.
 
 Hidden-reference boundary ([ADR-010](../decisions/0010-hidden-reference-boundary.md), requirements SR-10): everything up to accept/revert is runtime and never reads the original reference audio or defect-injection ground truth. Run records hold runtime inputs and the action history. Research evaluation joins them with the separately stored hidden evaluation data only after execution.
 
@@ -636,3 +636,143 @@ Limits:
 - Should `scripts/generate_test_audio.py` be removed or retained (and if retained, for which documented purpose)? Requires owner approval.
 - ADR-027 migration follow-ups (2026-11-04): SR-10 acceptance tests for hidden-data fields in runtime inputs and configuration do not exist yet (ledger G12); cycles between modules inside one stage, port or adapter package are not asserted statically (G2); the contract questions of the loop walkthrough (merging `ExecutionRequest` with `ActionAdmissionRequest`, `ExecutionReceipt` with `RenderedCandidate`, dropping `DecisionResponse`, simplifying `RollbackReceipt`, history and problem candidates in `Situation`) are open for the loop work (migration plan, section 5).
 - Domain records (ADR-011): how will units be checked against a future metric catalog? Should artifact time coverage allow a tolerance (tied to D3)? Is any zero-offset timezone acceptable as UTC, as currently implemented?
+
+
+### R4 audited Claude adapter (2026-11-22; implemented, review pending)
+
+`adapters.decision_agent` now contains explicit configuration, a versioned public request, bounded synchronous SDK transport and `ClaudeDecisionMaker`. It implements the existing decision port through the R3 audit collaborator, without importing a concrete journal or coordinator. Requests are recorded before one possible dispatch; response evidence precedes decision interpretation; a usable decision requires an exact completion acknowledgement. Completed replay sends nothing, and incomplete exchanges never automatically resend.
+
+Locked-SDK mock HTTP tests and real temporary exchange-store tests establish implementation behavior only. Structural envelope extraction happens before response persistence; both selected decision-text bytes and the bounded raw provider body/hash are retained. No live model/API capability, musical quality or perceptual-masking result is established. SDK optionality is tested with imports blocked. Native coordinators/CLI are not rewired in R4, and production diagnosis remains missing. See the R4 handoff and implementation note in the diagnosis-and-decision plan for the audit, timeout and byte-bound limitations.
+
+
+### R2A configured diagnosis readiness (2026-11-22; implemented, review pending)
+
+`core.records.masking_diagnosis` binds the exact prepared support and required metric definitions; `core.diagnosis.masking.diagnose_masking` classifies evidence readiness; `drivers.diagnosis_runtime.ConfiguredDiagnosisSource` implements the existing port without changing CLI or coordinator composition. It validates each report and refuses reused coverage IDs. Source resolution is unique over all declared fields and ordered observation IDs, not first/latest revision. P1 remains INCOMPLETE, P2/P3 UNAVAILABLE, and candidates empty. Finite scalar presence is not qualification.
+
+The pure source has no I/O, arrays, hidden evaluation input or provider dependency. Its small SourceRequirement matcher is parity-tested against R1 because importing the verification stage or an adapter would violate the boundary. Preparation/authenticated input still comes from R1; core cannot independently verify physical alignment, PCM subtype or manifest bytes. Real-analyzer/router integration tests exercise silence and nonzero unit-test WAVs without establishing calibration or model performance. The R2B positive rule and R5 integration remain pending. The earlier statement that no diagnosis source exists is superseded for readiness only.
+
+### Exact dual-mono ingress (2026-11-22; implemented, review pending)
+
+The existing `dsp_analysis.wav_input` boundary accepts exactly duplicated stereo PCM_16 only with explicit opt-in, derived in P1 from prepared profile v2. Both full decoded channels are verified before channel 0 is selected; original artifact/hash/channel metadata remain unchanged. Native-mono v1 admission and persisted evidence bytes stay unchanged. DSP, geometric cell identity and qualified-metric availability are unchanged. Extended evidence distinguishes source channels from mono analysis. No new adapter, I/O client, port or copied audio; genuinely different stereo remains unsupported. HT01 has not been analyzed by this implementation.
+
+
+### Experimental P1 measurement extension (2026-11-23)
+
+The existing `masking_measurement` records, `masking_preparation` and `directional_analysis` own the optional uncalibrated fixed-support path. No new adapter boundary or port is introduced. Preparation persists policy/source/noise-bound baseline cells; the analyzer measures the same cells on current artifacts under separate `p1.experimental.*@1` IDs. Legacy geometric/qualified meanings and no-policy behavior stay unchanged. The reviewed noise and quiet-floor helpers are shared from preparation, with the research script retaining compatible imports. This is measurement plumbing only: experimental positive diagnosis, composition and live agent validation remain later work. *(Superseded 2026-11-23 for experimental diagnosis only; see below. Composition and live validation remain later work.)*
+
+
+### Experimental P1 diagnosis (2026-11-23; implemented)
+
+`core.records.masking_diagnosis` adds `ExperimentalMaskingDiagnosisJob`/`Policy` beside the legacy readiness records. The method identity is bound to the complete prepared plan, and thresholds are read only from its experimental screening policy.
+
+`core.diagnosis.masking.diagnose_experimental_masking` is pure: no files, manifests, DSP or provider. It turns exactly bound `p1.experimental.*@1` scalars into one MASKING coverage row per configured job.
+- **INCOMPLETE:** missing, unavailable, ambiguous, wrongly bound or inconsistent evidence, or support below the minimum.
+- **ASSESSED:** the rule ran on usable evidence, with an uncalibrated candidate only when both inclusive predicates hold.
+
+P2/P3 stay UNAVAILABLE. `ConfiguredDiagnosisSource` dispatches by explicit policy type, keeps the legacy readiness route, and refuses reused or colliding coverage and candidate IDs.
+
+A candidate is an experimental dist10 exceedance hypothesis, not audible masking, a gain instruction or better mixing. Coordinator composition, CLI enablement and live agent runs are not implemented.
+
+### R5A evidence boundary (2026-11-23; checkpoint reviewed 2026-11-24)
+
+P1 analysis responses now carry durable observation-to-evidence references; the existing router preserves them and the analyzer re-verifies files/manifests without DSP. Explicit provider-run binding freezes settings and experimental diagnosis. The read-only driver evidence source reconstructs the exact R4 request and checks its completed exchange; the coordinator records verified/rejected evidence before using a result or retrying. Resume rechecks both stores and persisted analysis references. Deterministic callers retain empty/None defaults. Run-store schema2 refuses schema1 read-only as unsupported; no migration. Evidence files are also compared semantically with their manifest (geometry, policy, frozen cells, noise reference, baseline sources). `daw status` reports provider-bound runs as `provider_evidence_unavailable` and claims no resumability. Unverifiable provider continuation fails closed before admission. This implements R5A only; programmatic production composition and CLI start/continue remain unavailable, and no live/model/music result is claimed.
+
+
+### Offline gain-only closed-loop engineering verification (2026-11-24)
+
+Phase 1 composes the existing coordinator, FileRunRenderer, FileStateIntegrityInspector, AnalysisRouter,
+FileAudioAnalyzer, DirectionalMaskingAnalyzer, decision packet builder and deterministic verifier. Entry point:
+`core.loop.coordinator.run`; the reproducible executable engineering case is
+`tests/unit/test_offline_gain_closed_loop.py`. No public autonomous CLI activation or DAW operation is added.
+This supersedes earlier format-incompatibility statements only for the explicit new ingress profile.
+
+**Audio boundary.** Rendering remains WAV/DOUBLE with float64 absolute gain from immutable fixed inputs,
+sequential recipe summation, preserved rate/frame count/channels/timeline and exclusive new output files.
+`wav_output` canonicalizes only the RIFF PEAK timestamp to zero before hashing/readback verification;
+peak values/positions and every sample bit remain intact. libsndfile normally writes PEAK metadata for floating
+WAV ([upstream documentation](https://github.com/libsndfile/libsndfile/blob/master/docs/command.md#sfc_set_add_peak_chunk)).
+Actual run times remain in run records. Byte reproducibility is tested in the same dependency environment;
+matching bytes across different libsndfile versions is not promised.
+
+P1 preparation explicitly selects `P1_FLOAT64_PROFILE`
+(`p1.dist10_pcm16_or_float64_rint_even_44100@3`). Both preparation and candidate analysis derive ingress rules
+from this persisted profile. It accepts verified 44,100 Hz PCM_16 or DOUBLE, mono or exact dual mono; stereo
+channels must match over the entire clip **before** rounding. It never averages arbitrary stereo.
+Existing strict mono/v1 and exact-dual-mono PCM_16/v2 behavior remains unchanged.
+
+The dist10 numerical front end still requires signed int16 counts. For DOUBLE only, finite normalized samples
+in [-1, 1] are multiplied by 32768, rounded to nearest ties-to-even, then saturated to [-32768, 32767].
+This explicitly saturates the top half quantization bin, including +1.0; values outside [-1, 1] fail rather
+than silently clipping. No dither, normalization, resampling, alignment adjustment, padding or copied WAV is used.
+PCM_16 counts retain exact identity. Other encodings, rates, non-identical stereo, unsupported layouts and
+malformed/hash-mismatched files are rejected. Rate and physical alignment are never inferred or repaired;
+existing declared alignment provenance is preserved.
+
+The source artifact and its byte hash stay authoritative. Schema-4 P1 evidence additionally records the
+transform identifier (`pcm16_counts_identity@1` or `float64_to_pcm16_rint_even_saturate_no_dither@1`),
+SHA-256 of little-endian mono int16 analysis counts, original subtype and channel mapping. The prepared
+profile is part of its content-addressed manifest/specification identity. Quantization can change P1 measurements
+and threshold outcomes; it is an explicit analytical boundary, not a claim that PCM_16 is the best internal
+DSP representation. Level and guard analysis reads original float64 candidate samples without this quantization.
+The front-end algorithm and experimental screening/diagnosis thresholds are unchanged.
+
+**Execution and recovery.** The case loads and verifies stems, prepares fixed P1 geometry, measures levels and
+raw directional P1 descriptors, builds the actual structured decision packet, supplies a labelled deterministic
+proposal, admits one bounded absolute gain, renders, reanalyzes and verifies configured numerical criteria.
+Roles and unknown producer intent are carried from explicit fixture context. The real admission gate enforces
+bounds and protection. Proposals do not authorize execution. Rejected candidates restore selection of the
+serialized last accepted state after retained-file integrity verification; original files remain byte-identical.
+Candidate files remain as audit evidence, never overwrite accepted audio and need no destructive rollback.
+Rendering/analysis errors remain distinct from a numerical rejection. The existing verifier may retain meaningful
+progress while the target is unmet; a later NoChange or budget stop does not become overall success.
+
+**How to run and retain evidence (PowerShell, repository root):**
+
+```powershell
+uv run pytest -q tests/unit/test_float_analysis_ingress.py tests/unit/test_offline_gain_closed_loop.py --basetemp=results/phase1-engineering
+uv run pytest -q
+uv run ruff check .
+```
+
+Use a fresh `--basetemp` directory for each retained run: pytest removes an existing base directory.
+Each integration case retains immutable input/candidate WAV files, preparation/evidence JSON,
+`report.json` (round-tripped by the existing core record codec), actual `decision-N.json` packets and
+`metadata.json`. Metadata contains input hashes, dependency versions (Python/NumPy/SciPy/soundfile/libsndfile),
+lockfile/source-code hashes, initial audited Git revision and the execution revision where retrievable.
+The report contains exact processing settings, analysis definitions/versions, action parameters, criteria,
+before/after observations, verification results, feedback, budgets and authoritative/verified final states.
+The fixture uses deterministic clock/identity doubles; recorded elapsed values are not performance measurements.
+Two independent runs assert complete report and packet equality. No live LLM or paid provider call is required.
+The unchanged Claude adapter/request/parser suites separately use simulated responses.
+
+**Evidence and limits.** Synthetic sine fixtures are engineering regression data only, explicitly authorized for
+this Phase 1 task; they are not a musical evaluation dataset. The accepted fixture cuts t1 by 6 dB:
+peak -12.041199826559248 -> -18.04119982655925 dBFS, with target <= -17 dBFS, minimum improvement 1 dB,
+and maximum initial-relative peak movement 10 dB. Raw P1 signed-margin median is measured on the same fixed
+support before/after (-5.21947573710734 -> -4.773117689336792 dB); this value is descriptive and is **not** an
+acceptance criterion or evidence of improved masking. Diagnosis eligibility and decisions are labelled doubles.
+Real readiness/experimental diagnosis remains separately configured and is not relabelled scientific ground truth.
+Tests cover guard rejection, inadequate improvement/target, rejection then acceptance, retained intermediate
+progress, protected tracks, out-of-bounds proposals, abstention/no-change, initial/exhausted attempt budgets and
+injected analysis/render failures. Existing strict parser tests cover unsupported operations and malformed responses.
+
+Implemented/tested numerical integration does not establish perceptual quality, autonomous FL Studio integration,
+a validated masking detector, research baselines or comparative evaluation. EQ, dynamics, stereo/phase tools and
+provider/model changes are deliberately deferred. The smallest research step is to freeze an independently justified
+P1 numerical/qualification policy and assess it on owner-provided calibration music before comparative experiments.
+
+
+### Checkpoint review corrections (2026-11-24)
+
+The combined R5A/offline input-profile checkpoint received a fresh read-only review. Reopen verification now requires schema4 transform metadata consistent with PCM16/DOUBLE and a well-formed analysis-count SHA-256, as well as the declared one-channel mapping. Provider continuation checks every recorded P1 reference against the frozen prepared-plan digest before delegating file verification. These are provenance-contract checks, not a DSP rerun or remote authenticity claim. Five regressions reproduced the two gaps before fixes; both fix-removal probes are caught. The prior full-suite baseline passed 7,124 tests, four skipped; final post-fix results are recorded in the research log.
+
+
+### R5B owned programmatic composition — 2026-11-24
+
+`drivers.agent_runtime.DawAgentRuntime` composes the real preparation, P1/level analyzers, experimental diagnosis, audited Claude adapter and existing DAW coordinator, verifier, recovery, stores and export handoff. Typed caller configuration declares producer intent and acceptance criteria. Additive `DawAgentBinding` freezes local settings separately from the public packet; credentials remain separate. Owned resources close on failure/context exit. A recorded suspension reopens its exact plan/configuration/evidence without regeneration or resend, and inventory follows intermediate accepted checkpoints. See [ADR-042](../decisions/0042-programmatic-daw-agent-composition.md), Proposed.
+
+This supersedes earlier statements that programmatic composition is missing. Numerical integration uses only labelled external replies/device simulation, not fabricated diagnosis or verification. CLI run activation remains R5C; live integrated development and scientific/perceptual qualification remain unperformed. Thresholds, calibrated profile and unsupported stereo limits are unchanged.
+
+R5C C2 (2026-11-24, ADR-043 Proposed): `drivers.cli`/`drivers.daw_commands` activate `daw start` over the existing `DawAgentRuntime`. There is no new loop, adapter or port; `core.admission.daw.exact_fader` is the single exact-reading rule shared by the run-start check and first-session confirmation. `daw continue` remains R5C C3.
+
+R5C C3 (2026-11-24, ADR-043 Proposed): `daw continue` reopens the recorded suspension through `DawAgentRuntime.reopen` with the recorded provider identity (`adapters.decision_agent.prompt.config_from_identity`). It builds the operator manifest through one new `FileExportHandoff.attestation_digests` method (the port is unchanged), then calls the existing `continue_export`. There is no new loop, port or adapter. `daw start` and `daw continue` share the process-local retention of blocked MIDI controllers.

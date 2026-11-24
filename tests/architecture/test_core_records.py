@@ -28,6 +28,9 @@ RECORDS_DIR = CORE_DIR / "records"
 
 # Migration plan, section 3: each records module may import only the records modules listed for it.
 ALLOWED_RECORD_IMPORTS = {
+    "provider_run": {"decision_exchange", "identifiers", "invariants", "masking_diagnosis"},
+    "decision_evidence": {"decision", "decision_exchange", "invariants", "results"},
+    "masking_diagnosis": {"identifiers", "invariants", "masking_measurement", "verification_evidence"},
     "daw_binding": {"identifiers", "invariants"},  # coordinator-integration Increment 1 (ADR-035)
     "daw": {"identifiers", "invariants", "actions", "daw_binding"},
     "daw_control": {"identifiers", "invariants", "daw", "daw_binding", "admission"},  # DAW control contract, 2026-11-18
@@ -99,6 +102,8 @@ ALLOWED_RECORD_IMPORTS = {
     "actions": {"identifiers", "invariants", "artifacts", "project", "daw_binding"},
     "budgets": {"identifiers", "invariants"},
     "results": {"identifiers", "invariants"},
+    # R3 decision packet and exchange audit, 2026-11-22.
+    "decision_exchange": {"decision", "identifiers", "invariants", "results"},
     "decision": {
         "identifiers",
         "invariants",
@@ -116,6 +121,15 @@ ALLOWED_RECORD_IMPORTS = {
     # Analysis-jobs plan, 2026-11-10: explicit jobs (verification_evidence) and current-artifact roots (integrity).
     "analysis": {"identifiers", "integrity", "invariants", "observation", "project", "verification_evidence"},
     "diagnosis": {"identifiers", "invariants", "observation", "project"},
+    # P1 R1 handoff, 2026-11-20: preparation and measurement-plan records (geometric support only).
+    "masking_measurement": {
+        "identifiers",
+        "integrity",
+        "invariants",
+        "observation",
+        "project",
+        "verification_evidence",
+    },
     "capabilities": {"identifiers", "invariants", "observation"},
     "feedback": {
         "identifiers",
@@ -139,6 +153,7 @@ ALLOWED_RECORD_IMPORTS = {
     "reconciliation": {"acceptance", "invariants"},  # acceptance-reconciliation plan, 2026-11-09
     # Coordinator-runtime-contracts plan, 2026-11-09 (no reverse edges into this module).
     "coordinator_runtime": {
+        "provider_run",
         "daw_correction",  # ADR-035: the optional DAW session
         "actions",
         "admission",
@@ -174,6 +189,7 @@ ALLOWED_RECORD_IMPORTS = {
     },
     "termination": set(),
     "run_trace": {
+        "decision_evidence",
         "daw_control",  # ADR-035: DAW-path operation records
         "daw_correction",
         "daw_export",
@@ -214,6 +230,20 @@ ALLOWED_RECORD_IMPORTS = {
 
 # G9: the complete public inventory, owner module -> public names (type aliases included).
 INVENTORY = {
+    "provider_run": ("ProviderRunBinding", "DawAgentBinding"),
+    "decision_evidence": ("DecisionEvidenceVerified", "DecisionEvidenceRejected"),
+    "masking_diagnosis": (
+        "READINESS_METRICS",
+        "MaskingDiagnosisJob",
+        "MaskingDiagnosisPolicy",
+        # Experimental fixed-support diagnosis (handoff 2026-11-23).
+        "EXPERIMENTAL_DIAGNOSIS_METRICS",
+        "EXPERIMENTAL_DIAGNOSIS_METHOD_NAME",
+        "EXPERIMENTAL_DIAGNOSIS_METHOD_VERSION",
+        "experimental_diagnosis_method",
+        "ExperimentalMaskingDiagnosisJob",
+        "ExperimentalMaskingDiagnosisPolicy",
+    ),
     "daw_binding": ("DawFaderReading", "DawTrackBinding"),  # moved from daw (ADR-035)
     "daw": ("DawTrackState", "DawGainResolution"),
     "daw_control": (  # DAW control contract, 2026-11-18
@@ -420,6 +450,35 @@ INVENTORY = {
         "BudgetAssessment",
     ),
     "results": ("Success", "PortFailureCode", "PortFailure", "PortResult"),
+    "decision_exchange": (
+        "sha256_text",
+        "canonical_json",
+        "DecisionCallKey",
+        "call_key_of",
+        "AliasKind",
+        "AliasBinding",
+        "alias_fingerprint",
+        "WithheldDetail",
+        "DecisionPacketBinding",
+        "DecisionPacket",
+        "ProviderRequestIdentity",
+        "DecisionExchangeRequest",
+        "ResponseEnvelope",
+        "RecordedDecisionResponse",
+        "ExchangeCompletion",
+        "CompletedDecisionExchange",
+        "ExchangeStatus",
+        "DecisionExchangeRecord",
+        "AuditRecorded",
+        "AuditRefusal",
+        "AuditNotRecorded",
+        "AuditRecordUnknown",
+        "AuditWriteResult",
+        "ExchangeFound",
+        "ExchangeAbsent",
+        "ExchangeReadUnavailable",
+        "ExchangeReadResult",
+    ),
     "decision": (
         "ControllerIdentity",
         "ActionJustification",  # increment 2E
@@ -441,6 +500,7 @@ INVENTORY = {
         "DecisionGateResult",
     ),
     "analysis": (
+        "AnalysisEvidenceReference",
         "AnalysisRequest",
         "AnalysisResponse",
         "deduplicate_analysis_definitions",  # analysis-jobs plan
@@ -462,6 +522,38 @@ INVENTORY = {
         "DecisionFeedback",
         "DecisionHistory",
         "validate_decision_history",
+    ),
+    "masking_measurement": (
+        "P1_PROFILE",
+        "P1_EXACT_DUAL_MONO_PROFILE",
+        "P1_FLOAT64_PROFILE",
+        "P1_EXPERIMENTAL_METHOD",
+        "ExperimentalMaskingPolicy",
+        "ExperimentalSupport",
+        "P1_SAMPLE_RATE_HZ",
+        "P1_CHANNEL_COUNT",
+        "P1_MODEL_BANDS",
+        "P1_REGION_BANDS",
+        "CALL_HOP_SAMPLES",
+        "WINDOW_LEAD_SAMPLES",
+        "WINDOW_TAIL_SAMPLES",
+        "FIRST_ELIGIBLE_CALL",
+        "QualificationStatus",
+        "SupportKind",
+        "interval_samples",
+        "complete_window_calls",
+        "MaskingPair",
+        "AlignmentProvenance",
+        "BandRegion",
+        "MaskingPreparationJob",
+        "MaskingPreparationRequest",
+        "support_digest",
+        "PreparedSupport",
+        "PreparationTiming",
+        "MaskingPreparedPlan",
+        "PREPARED_DIGEST_MARKER",
+        "bound_specification",
+        "MaskingMeasurementPlan",
     ),
     "diagnosis": (
         "ProblemFamily",

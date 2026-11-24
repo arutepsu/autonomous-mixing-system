@@ -56,6 +56,7 @@ from autonomous_mixing.adapters.rendering.workspaces import (
 from autonomous_mixing.core.records.daw_export import (
     DAW_EXPORT_REQUEST_FILE,
     DawExportAwaiting,
+    DawExportedFile,
     DawExportPreparationCode,
     DawExportPreparationFailure,
     DawExportRequest,
@@ -86,6 +87,7 @@ _INTEGRITY_CODES = {
 }
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _READ_CHUNK = 1 << 16
 
 
@@ -120,6 +122,11 @@ def _observed(status: os.stat_result) -> tuple:
     """Change-relevant metadata of one file object (in-place review fix, 2026-11-18)."""
     return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns, status.st_ctime_ns, status.st_nlink,
             status.st_mode, getattr(status, "st_file_attributes", 0))  # fmt: skip
+
+
+def _handle_observed(status: os.stat_result) -> tuple:
+    """Change-relevant metadata comparable between an open handle (``fstat``) and the path (``lstat``)."""
+    return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns)
 
 
 def _linked(status: os.stat_result) -> bool:
@@ -243,6 +250,66 @@ class FileExportHandoff:
             return DawImportRejected(export_id, rejection.code, str(rejection) or rejection.code.value)
         except OSError as error:
             return DawImportRejected(export_id, _Code.UNAVAILABLE, str(error) or "the workspace cannot be read")
+
+    def attestation_digests(self, awaiting: DawExportAwaiting) -> tuple[DawExportedFile, ...] | DawImportRejected:
+        """SHA-256 of each declared output for the operator's manifest (R5C C3), after the importer's own checks.
+
+        Workspace identity, request file, exact listing and per-file link/hard-link/physical-file/containment checks
+        run before any output is opened; each output is opened without following links where possible, its handle
+        must be the inspected file, and at most ``max_file_bytes + 1`` bytes are read. Nothing is written. Hashing is
+        not import: ``import_files`` still verifies everything. Not race-free against a hostile local process.
+        """
+        require_instance(awaiting, DawExportAwaiting, "awaiting")
+        export = awaiting.request
+        try:
+            return self._digests(awaiting)
+        except _Rejected as rejection:
+            return DawImportRejected(export.export_id, rejection.code, str(rejection) or rejection.code.value)
+        except OSError as error:
+            return DawImportRejected(export.export_id, _Code.UNAVAILABLE, str(error) or "the workspace cannot be read")
+
+    def _digests(self, awaiting: DawExportAwaiting) -> tuple[DawExportedFile, ...]:
+        export = awaiting.request
+        context = self._context(export)
+        if context is None:
+            raise _Rejected(_Code.REQUEST_MISMATCH, "no configured state has the request's before checkpoint")
+        directory = self._check_workspace(awaiting, context)
+        request_status = self._check_request_file(awaiting, directory / DAW_EXPORT_REQUEST_FILE)
+        self._check_listing(export, directory)
+        statuses = self._check_objects(awaiting, directory)
+        limit = self._limits.max_file_bytes
+        files = []
+        for output, status in zip(export.outputs, statuses, strict=True):
+            path = directory / output.file_name
+            descriptor = os.open(path, os.O_RDONLY | _BINARY | _NOFOLLOW)
+            try:
+                if _identity(os.fstat(descriptor)) != _identity(status):
+                    raise _Rejected(_Code.WORKSPACE_CHANGED, f"{output.file_name} changed before it was opened")
+                digest, remaining = hashlib.sha256(), limit + 1
+                while remaining > 0:
+                    chunk = os.read(descriptor, min(_READ_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+                # Fail fast, per output and before the next one is opened: the read handle and the path must still be
+                # the inspected, unchanged file. The final whole-workspace re-check below stays as well.
+                if _handle_observed(os.fstat(descriptor)) != _handle_observed(status) or _observed(
+                    os.lstat(path)
+                ) != _observed(status):
+                    raise _Rejected(_Code.WORKSPACE_CHANGED, f"{output.file_name} changed while it was hashed")
+            finally:
+                os.close(descriptor)
+            if remaining <= 0:
+                raise _Rejected(_Code.RESOURCE_LIMIT, f"{output.file_name} exceeds the {limit}-byte read limit")
+            files.append(DawExportedFile(output.artifact_id, output.file_name, digest.hexdigest()))
+        observed = [(DAW_EXPORT_REQUEST_FILE, request_status), *zip((o.file_name for o in export.outputs), statuses)]
+        for name, status in observed:
+            if _observed(os.lstat(directory / name)) != _observed(status):
+                raise _Rejected(_Code.WORKSPACE_CHANGED, f"{name} changed while it was hashed")
+        if _identity(os.lstat(directory)) != awaiting.directory_identity:
+            raise _Rejected(_Code.WORKSPACE_CHANGED, "the workspace changed while it was hashed")
+        return tuple(files)
 
     def _import(self, request: DawImportRequest) -> DawFilesVerified:
         awaiting, manifest = request.awaiting, request.manifest

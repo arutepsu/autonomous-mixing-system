@@ -29,6 +29,7 @@ from autonomous_mixing.core.ports.daw import DawParameterController
 from autonomous_mixing.core.ports.daw_export import DawExportHandoff
 from autonomous_mixing.core.ports.daw_recovery import DawRecoveryController
 from autonomous_mixing.core.ports.decision import DecisionMaker
+from autonomous_mixing.core.ports.decision_evidence import DecisionEvidenceSource
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
 from autonomous_mixing.core.ports.run_journal import (
     RunJournal,
@@ -66,6 +67,7 @@ def ordinary(
     analyzer: AudioAnalyzer,
     clock: RunClock,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     diagnosis_source: DiagnosisSource,
     identities: IdentitySource,
     integrity_inspector: StateIntegrityInspector,
@@ -170,7 +172,7 @@ def ordinary(
                 )
         case _:
             raise ValueError(f"an INITIAL verification cannot take route {route.name}")
-    return _rounds(progress, clock=clock, decision_maker=decision_maker, diagnosis_source=diagnosis_source,
+    return _rounds(progress, clock=clock, decision_maker=decision_maker, decision_evidence=decision_evidence, diagnosis_source=diagnosis_source,
                    identities=identities, journal=journal, execute=execute, on_progress=on_progress)  # fmt: skip
 
 
@@ -179,6 +181,7 @@ def _rounds(
     *,
     clock: RunClock,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     diagnosis_source: DiagnosisSource,
     identities: IdentitySource,
     journal: RunJournal,
@@ -191,6 +194,7 @@ def _rounds(
             progress,
             clock=clock,
             decision_maker=decision_maker,
+            decision_evidence=decision_evidence,
             diagnosis_source=diagnosis_source,
             identities=identities,
             journal=journal,
@@ -208,6 +212,7 @@ def run(
     analyzer: AudioAnalyzer,
     diagnosis_source: DiagnosisSource,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     renderer: RunRenderer,
     integrity_inspector: StateIntegrityInspector,
     journal: RunJournal,
@@ -230,7 +235,7 @@ def run(
     execute = partial(render, analyzer=analyzer, clock=clock, identities=identities,
                       integrity_inspector=integrity_inspector, journal=journal, renderer=renderer)  # fmt: skip
 
-    return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker,
+    return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker, decision_evidence=decision_evidence,
                 integrity_inspector=integrity_inspector, journal=journal, clock=clock, identities=identities,
                 execute=execute)  # fmt: skip
 
@@ -241,6 +246,7 @@ def run_daw(
     analyzer: AudioAnalyzer,
     diagnosis_source: DiagnosisSource,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     integrity_inspector: StateIntegrityInspector,
     journal: RunJournal,
     clock: RunClock,
@@ -266,7 +272,7 @@ def run_daw(
 
     start_check = partial(daw_start, clock=clock, identities=identities, journal=journal,
                           recovery_controller=recovery_controller)  # fmt: skip
-    return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker,
+    return _run(request, analyzer=analyzer, diagnosis_source=diagnosis_source, decision_maker=decision_maker, decision_evidence=decision_evidence,
                 integrity_inspector=integrity_inspector, journal=journal, clock=clock, identities=identities,
                 execute=execute, start_check=start_check)  # fmt: skip
 
@@ -277,6 +283,7 @@ def _run(
     analyzer: AudioAnalyzer,
     diagnosis_source: DiagnosisSource,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     integrity_inspector: StateIntegrityInspector,
     journal: RunJournal,
     clock: RunClock,
@@ -284,6 +291,10 @@ def _run(
     execute: Callable,
     start_check: Callable | None = None,
 ) -> RunReport | RunSuspended:
+    if request.provider_binding is not None and (
+        decision_evidence is None or decision_evidence.binding != request.provider_binding
+    ):
+        raise ValueError("provider run requires its exact configured decision evidence source")
     initial = AcceptedReference(request.initial_state, 0)
     opened = journal.snapshot()
     if not isinstance(opened, Success) or not isinstance(opened.value, RunJournalSnapshot):
@@ -317,7 +328,7 @@ def _run(
         observations=(),
         diagnosed=None,
     )
-    step = partial(ordinary, analyzer=analyzer, clock=clock, decision_maker=decision_maker,
+    step = partial(ordinary, analyzer=analyzer, clock=clock, decision_maker=decision_maker, decision_evidence=decision_evidence,
                    diagnosis_source=diagnosis_source, identities=identities, integrity_inspector=integrity_inspector,
                    journal=journal, execute=execute, start_check=start_check)  # fmt: skip
     return _complete(progress, step, clock=clock, identities=identities, journal=journal)
@@ -341,15 +352,21 @@ def _complete(
     try:
         progress, stop = step(progress, on_progress=remember)
     except Exception as error:
-        # Phase-aware (review fix 2026-11-19): once a DAW write may have taken effect, the pending reason is kept; the
-        # original exception still propagates, nothing is restored and no journal state is cleared.
+        # Keep unresolved effects (DAW writes or acceptance dispatch) through unexpected errors.
+        # The original exception propagates; no speculative retry or recovery is attempted here.
         reason, explanation = TerminationReason.RUNTIME_CONTRACT_FAILED, "an unexpected error interrupted the run"
         if latest.pending_effect is not None:
             reason = latest.pending_effect
-            explanation = (
-                f"an unexpected error ({type(error).__name__}: {error}) interrupted the run after a DAW write may "
-                "have taken effect; the fader is not restored and no journal state is cleared"
-            )
+            if latest.request.daw_session is None and reason is TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN:
+                explanation = (
+                    f"an unexpected error ({type(error).__name__}: {error}) interrupted the run while acceptance "
+                    "authority is unknown; the commit was not retried and no rollback is claimed"
+                )
+            else:
+                explanation = (
+                    f"an unexpected error ({type(error).__name__}: {error}) interrupted the run after a DAW write may "
+                    "have taken effect; the fader is not restored and no journal state is cleared"
+                )
         try:
             finalize(
                 latest,
@@ -394,6 +411,7 @@ def resume_daw(
     analyzer: AudioAnalyzer,
     diagnosis_source: DiagnosisSource,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     integrity_inspector: StateIntegrityInspector,
     journal: RunJournal,
     clock: RunClock,
@@ -425,6 +443,12 @@ def resume_daw(
         initial = AcceptedReference(request.initial_state, 0)
         validate_run_journal_snapshot(request.run_id, initial, snapshot)
         require_snapshot_durability(journal, snapshot)
+        if request.provider_binding is not None:
+            if decision_evidence is None or decision_evidence.binding != request.provider_binding:
+                raise ValueError("provider continuation requires its exact decision evidence source")
+            problem = decision_evidence.verify_run(snapshot)
+            if problem is not None:
+                raise ValueError(f"provider continuation evidence cannot be verified: {problem}")
         refusal = admit_continuation(snapshot, request, checkpoint_event, manifest)
         if refusal is not None:
             return refusal
@@ -450,7 +474,7 @@ def resume_daw(
                           daw_controller=daw_controller, recovery_controller=recovery_controller,
                           export_handoff=export_handoff, integrity_inspector=integrity_inspector)  # fmt: skip
         step = partial(_resumed, checkpoint_event=checkpoint_event, manifest=manifest, analyzer=analyzer, clock=clock,
-                       decision_maker=decision_maker, diagnosis_source=diagnosis_source, identities=identities,
+                       decision_maker=decision_maker, decision_evidence=decision_evidence, diagnosis_source=diagnosis_source, identities=identities,
                        integrity_inspector=integrity_inspector, journal=journal,
                        recovery_controller=recovery_controller, export_handoff=export_handoff,
                        daw_controller=daw_controller, execute=execute)  # fmt: skip
@@ -467,6 +491,7 @@ def _resumed(
     analyzer: AudioAnalyzer,
     clock: RunClock,
     decision_maker: DecisionMaker,
+    decision_evidence: DecisionEvidenceSource | None = None,
     diagnosis_source: DiagnosisSource,
     identities: IdentitySource,
     integrity_inspector: StateIntegrityInspector,
@@ -506,5 +531,5 @@ def _resumed(
         return (progress, result)
     if marker_stop:
         return (progress, marker_stop)
-    return _rounds(progress, clock=clock, decision_maker=decision_maker, diagnosis_source=diagnosis_source,
+    return _rounds(progress, clock=clock, decision_maker=decision_maker, decision_evidence=decision_evidence, diagnosis_source=diagnosis_source,
                    identities=identities, journal=journal, execute=execute, on_progress=on_progress)  # fmt: skip

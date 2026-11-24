@@ -78,6 +78,7 @@ from autonomous_mixing.core.records.daw_recovery import (
 )
 from autonomous_mixing.core.records.daw_rollback import DawRollbackRecord
 from autonomous_mixing.core.records.decision import DecisionResponse, Situation
+from autonomous_mixing.core.records.decision_evidence import DecisionEvidenceRejected, DecisionEvidenceVerified
 from autonomous_mixing.core.records.decision_gate import (
     DeclineAction,
     EvidenceBlocked,
@@ -391,6 +392,8 @@ class TerminalSnapshot:
 
 RunTracePayload = (
     RunRequest
+    | DecisionEvidenceVerified
+    | DecisionEvidenceRejected
     | DispatchIntent
     | OperationObserved
     | InvalidResponse
@@ -474,6 +477,14 @@ class RunTraceEvent:
                 raise ValueError("terminal event usage differs from the snapshot")
         elif isinstance(payload, (DawRollbackRecord, RunInterrupted, OperatorRecoveryAuthorization)):
             run_id = payload.run_id
+        elif isinstance(payload, DecisionEvidenceVerified):
+            run_id = payload.situation.run_id
+            if payload.situation.usage.decision_calls != self.usage.decision_calls:
+                raise ValueError("decision evidence ordinal differs from trace usage")
+        elif isinstance(payload, DecisionEvidenceRejected):
+            run_id = payload.call.run_id
+            if payload.call.decision_call_ordinal != self.usage.decision_calls:
+                raise ValueError("decision evidence ordinal differs from trace usage")
         elif isinstance(payload, DispatchIntent):
             if isinstance(payload.request, (Situation, AcceptanceQuery)):
                 run_id = payload.request.run_id

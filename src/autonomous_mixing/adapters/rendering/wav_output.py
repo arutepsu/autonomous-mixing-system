@@ -354,6 +354,31 @@ def _payload_problem(payload: bytes, snapshot: np.ndarray, render_spec: RenderSp
     return None, found[0], found[1]
 
 
+def _canonical_peak_timestamp(payload: bytes) -> bytes:
+    """Set the encoder's PEAK wall-clock field to zero; retain peaks, positions and sample bits.
+
+    Walk RIFF chunks by their declared padded lengths, never search inside audio data. This is
+    encoding metadata canonicalization, not signal processing. All output is decoded/verified below.
+    """
+    if payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+        raise WavOutputError(_Code.ENCODING_FAILED, "expected RIFF/WAVE before metadata canonicalization")
+    result = bytearray(payload)
+    offset = 12
+    while offset < len(result):
+        if offset + 8 > len(result):
+            raise WavOutputError(_Code.ENCODING_FAILED, "truncated RIFF chunk header")
+        size = int.from_bytes(result[offset + 4 : offset + 8], "little")
+        end = offset + 8 + size
+        if end + (size % 2) > len(result):
+            raise WavOutputError(_Code.ENCODING_FAILED, "truncated RIFF chunk")
+        if result[offset : offset + 4] == b"PEAK":
+            if size < 8 or result[offset + 8 : offset + 12] != b"\x01\x00\x00\x00":
+                raise WavOutputError(_Code.ENCODING_FAILED, "unsupported PEAK chunk")
+            result[offset + 12 : offset + 16] = b"\x00" * 4
+        offset = end + (size % 2)
+    return bytes(result)
+
+
 def _encode(snapshot: np.ndarray, render_spec: RenderSpec, container: str, subtype: str, max_file_bytes: int) -> bytes:
     """Encode into memory and validate the completed payload before any destination exists."""
     buffer = io.BytesIO()
@@ -369,7 +394,7 @@ def _encode(snapshot: np.ndarray, render_spec: RenderSpec, container: str, subty
             handle.write(snapshot)
     except sf.LibsndfileError as exc:
         raise WavOutputError(_Code.ENCODING_FAILED, f"libsndfile could not encode: {exc.error_string}") from exc
-    payload = buffer.getvalue()
+    payload = _canonical_peak_timestamp(buffer.getvalue())
     if len(payload) > max_file_bytes:
         raise WavOutputError(
             _Code.RESOURCE_LIMIT, f"encoded payload of {len(payload)} bytes exceeds max_file_bytes={max_file_bytes}"

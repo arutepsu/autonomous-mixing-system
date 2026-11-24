@@ -1,10 +1,23 @@
-"""WAV input boundary of the dist10 front end (front-end contract §2.1 profile v1; Task 3P; ADR-029, Proposed).
+"""WAV input boundary of the dist10 front end (profiles v1/v2/v3; ADR-029, Proposed).
+
+Explicit v3 additionally accepts WAV/DOUBLE via ``allow_float64_quantization=True``. Verified finite
+normalized samples in [-1, 1] are scaled by 32768, rounded to nearest ties-to-even and saturated to
+[-32768, 32767] (the top half bin saturates). Overload is rejected, never clipped to hide it. No dither,
+resampling, normalization, padding or shift occurs. Exact dual mono is checked before quantization.
+The source artifact/hash stays unchanged; analysis_transform and analysis_sha256 identify derived counts.
+This is an analysis representation only; rendering and level/guard measurements remain float64.
 
 Profile v1 accepts exactly one kind of file: verified **mono, 44,100 Hz WAV with PCM_16 samples** (WAV, WAVEX or
 RF64 container, as the shared verifier detects them). The file is read and verified only through the shared
 ``adapters.audio_io`` path (``check_resolved_wav_integrity``: bounded single capture, SHA-256 against the declared
 hash, declared rate/channel/frame metadata, finite samples), and its failures (``IntegrityError``,
 ``LocationResolutionError``) reach the caller unchanged.
+
+Explicit opt-in ``allow_exact_dual_mono=True`` additionally accepts two-channel PCM_16 only when both decoded
+channels contain exactly the same counts over the entire verified clip. Shape, range and integrality are checked
+for both channels before selection. Channel 0 is selected without averaging; original artifact metadata and hash
+remain stereo. The P1 prepared profile v2 persists this choice; the default v1 remains strictly mono. Shared read
+limits charge the actual source channels. A one-count difference anywhere is rejected.
 
 Conversion: libsndfile decodes PCM_16 to float64 by dividing each signed 16-bit count by 32768 (0x8000), so the
 original count is ``sample x 32768``. That product is exact (a power-of-two scale of a value with at most 16
@@ -14,7 +27,7 @@ so no out-of-range value is ever scaled. The result is a one-dimensional, read-o
 array for ``dist10_clip_to_bands``, together with the verified artifact record, whose ``timeline_start_seconds``,
 ``sample_rate_hz`` and ``frame_count`` later pair alignment needs.
 
-Rejected explicitly, never converted: other sample rates and channel counts (checked against the declared record
+Rejected explicitly, never converted: other sample rates and unsupported channel counts (checked against the declared record
 before any file access, and again on the verified audio) and other subtypes (PCM_24, PCM_32, PCM_U8, FLOAT, DOUBLE,
 ...; checked on the verified audio). Resampling, stereo fold-down, and the clipping or quantization of float or
 higher-bit-depth exports belong to a separately specified profile, not to this boundary.
@@ -24,14 +37,19 @@ no sample-rate conversion on export. Dither and any gain change happen, if at al
 and are part of the exported audio; this boundary reads the exported counts as they are.
 """
 
+import hashlib
 from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
 
-from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio, check_resolved_wav_integrity
+from autonomous_mixing.adapters.audio_io.integrity import CheckedAudio, IntegrityError, check_resolved_wav_integrity
 from autonomous_mixing.adapters.audio_io.limits import AudioReadLimits
-from autonomous_mixing.adapters.audio_io.locations import ResolvedArtifactLocation
+from autonomous_mixing.adapters.audio_io.locations import (
+    LocationResolutionError,
+    ResolvedArtifactLocation,
+    resolve_artifact_location,
+)
 from autonomous_mixing.core.records.artifacts import AudioArtifact
 
 PROFILE_SAMPLE_RATE_HZ = 44100
@@ -48,22 +66,37 @@ class Dist10InputFailureCode(Enum):
     UNSUPPORTED_SUBTYPE = "unsupported_subtype"
     NON_INTEGRAL_SAMPLES = "non_integral_samples"
     OUT_OF_RANGE_SAMPLES = "out_of_range_samples"
+    DECODED_SHAPE_MISMATCH = "decoded_shape_mismatch"
+    NON_IDENTICAL_CHANNELS = "non_identical_channels"
 
 
 class Dist10InputError(ValueError):
-    """Verified audio outside profile v1, or decoded samples that are not PCM_16 counts; ``code`` names which."""
+    """Verified audio outside the selected input profile, or decoded samples that are not PCM_16 counts; ``code`` names which."""
 
     def __init__(self, code: Dist10InputFailureCode, message: str) -> None:
         super().__init__(f"{code.value}: {message}")
         self.code = code
 
 
+class Dist10ReadError(ValueError):
+    """A current member could not be resolved under its root, verified, or accepted by the selected input profile.
+
+    Raised only by ``read_dist10_member``; ``code`` is the underlying failure code's value (location resolution,
+    integrity or ``Dist10InputFailureCode``) and the original error is chained as ``__cause__``. It lets the P1
+    preparation and analysis modules read through this boundary without importing ``adapters.audio_io``.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+
+
 @dataclass(frozen=True, eq=False)
 class Dist10Pcm16Clip:
-    """Profile-v1 input of one verified artifact (adapter-local, not a core record).
+    """One verified artifact under the selected input profile (adapter-local, not a core record).
 
     ``artifact`` is the verified record itself (timeline start, rate, frame count, hash); ``samples`` is a
-    read-only one-dimensional ``int16`` array of the original counts, one per frame. ``container`` and ``subtype``
+    read-only one-dimensional ``int16`` array of the original counts, one per frame (channel 0 for verified exact dual mono). ``container`` and ``subtype``
     are libsndfile's names for the detected format and ``verified_sha256`` the hash of the captured payload.
     Equality is identity.
     """
@@ -74,88 +107,189 @@ class Dist10Pcm16Clip:
     subtype: str
     verified_sha256: str
 
+    @property
+    def analysis_transform(self) -> str:
+        return (
+            "float64_to_pcm16_rint_even_saturate_no_dither@1" if self.subtype == "DOUBLE" else "pcm16_counts_identity@1"
+        )
 
-def _require_profile(artifact: AudioArtifact, where: str) -> None:
+    @property
+    def analysis_sha256(self) -> str:
+        """Digest of mono counts in explicit little-endian signed int16 order."""
+        return hashlib.sha256(self.samples.astype("<i2").tobytes()).hexdigest()
+
+    @property
+    def analysis_channel_count(self) -> int:
+        """The numerical front end always consumes one unchanged count per frame."""
+        return 1
+
+    @property
+    def channel_mapping(self) -> str:
+        """Fixed representation rule applied by the verified reader; original metadata stays intact."""
+        if self.artifact.channel_count == 1:
+            return "mono_identity@1"
+        if self.artifact.channel_count == 2:
+            return "exact_dual_mono_first_channel@1"
+        raise ValueError("clip has an unsupported source channel count")
+
+
+def _require_dual_mono_option(value: bool) -> None:
+    if type(value) is not bool:
+        raise ValueError("allow_exact_dual_mono must be bool")
+
+
+def _require_profile(artifact: AudioArtifact, where: str, allow_exact_dual_mono: bool = False) -> None:
+    _require_dual_mono_option(allow_exact_dual_mono)
     if artifact.sample_rate_hz != PROFILE_SAMPLE_RATE_HZ:
         raise Dist10InputError(
             Dist10InputFailureCode.UNSUPPORTED_SAMPLE_RATE,
             f"{where}: sample rate {artifact.sample_rate_hz} Hz, profile v1 needs {PROFILE_SAMPLE_RATE_HZ} Hz "
             "(no resampling)",
         )
-    if artifact.channel_count != PROFILE_CHANNEL_COUNT:
+    if artifact.channel_count not in ((1, 2) if allow_exact_dual_mono else (1,)):
         raise Dist10InputError(
             Dist10InputFailureCode.UNSUPPORTED_CHANNEL_COUNT,
-            f"{where}: {artifact.channel_count} channels, profile v1 needs mono (no fold-down)",
+            f"{where}: {artifact.channel_count} channels, "
+            + ("selected profile permits mono or exact dual mono" if allow_exact_dual_mono else "profile v1 needs mono")
+            + " (no fold-down)",
         )
 
 
-def pcm16_counts(audio: CheckedAudio) -> np.ndarray:
-    """The original signed 16-bit counts of verified profile-v1 audio, as a fresh read-only ``int16`` array.
+def pcm16_counts(
+    audio: CheckedAudio, *, allow_exact_dual_mono: bool = False, allow_float64_quantization: bool = False
+) -> np.ndarray:
+    """The original signed 16-bit counts of verified audio, as a fresh read-only ``int16`` array.
 
     Raises ``ValueError`` for an argument that is not ``CheckedAudio`` and ``Dist10InputError`` for another
     sample rate, channel count or subtype, for decoded values outside ``[-32768, 32767] / 32768`` (checked first,
     before any scaling, NaN included) and for scaled values that are not integral, naming the first such frame. The
-    result does not depend on the caller's NumPy error policy. The verified samples are never modified.
+    Optional exact dual mono requires both channels to pass these checks and match everywhere before selection.
+    The result does not depend on the caller's NumPy error policy. The verified samples are never modified.
     """
     if not isinstance(audio, CheckedAudio):
         raise ValueError(f"audio must be CheckedAudio, got {type(audio).__name__}")
     where = audio.artifact.location
-    _require_profile(audio.artifact, where)
+    _require_profile(audio.artifact, where, allow_exact_dual_mono)
+    if type(allow_float64_quantization) is not bool:
+        raise ValueError("allow_float64_quantization must be bool")
+    if allow_float64_quantization and audio.subtype == "DOUBLE":
+        samples = np.asarray(audio.samples)
+        if samples.shape != (audio.artifact.frame_count, audio.artifact.channel_count):
+            raise Dist10InputError(Dist10InputFailureCode.DECODED_SHAPE_MISMATCH, "decoded shape differs")
+        if not np.all(np.isfinite(samples) & (samples >= -1.0) & (samples <= 1.0)):
+            raise Dist10InputError(
+                Dist10InputFailureCode.OUT_OF_RANGE_SAMPLES,
+                "DOUBLE samples must be finite and in range [-1, 1]; overload is rejected",
+            )
+        if audio.artifact.channel_count == 2 and not np.array_equal(samples[:, 0], samples[:, 1]):
+            raise Dist10InputError(
+                Dist10InputFailureCode.NON_IDENTICAL_CHANNELS,
+                "DOUBLE channels must match before quantization; no fold-down",
+            )
+        # Exact power-of-two scaling; IEEE ties-to-even rounding; saturate the top quantization bin.
+        # No random dither, normalization, resampling, padding, shifting or on-disk conversion.
+        counts = np.clip(np.rint(samples[:, 0] * PCM16_SCALE), INT16_MIN, INT16_MAX).astype(np.int16)
+        counts.flags.writeable = False
+        return counts
     if audio.subtype != PROFILE_SUBTYPE:
         raise Dist10InputError(
             Dist10InputFailureCode.UNSUPPORTED_SUBTYPE,
             f"{where}: subtype {audio.subtype}, profile v1 needs {PROFILE_SUBTYPE} (no quantization)",
         )
     samples = np.asarray(audio.samples)
-    if samples.ndim != 2 or samples.shape[1] != PROFILE_CHANNEL_COUNT:
+    expected = (audio.artifact.frame_count, audio.artifact.channel_count)
+    if samples.shape != expected:
         raise Dist10InputError(
-            Dist10InputFailureCode.UNSUPPORTED_CHANNEL_COUNT, f"{where}: decoded shape {samples.shape} is not mono"
+            Dist10InputFailureCode.DECODED_SHAPE_MISMATCH,
+            f"{where}: decoded shape {samples.shape} differs from verified source metadata {expected}",
         )
-    decoded = samples[:, 0]
+    decoded = samples
     # Range first, on the decoded values: [-32768/32768, 32767/32768] are exact doubles, so this is the count range
     # exactly, and no value outside it is ever scaled (a huge value would overflow x 32768). Written as "not within",
     # so NaN is rejected too.
     out_of_range = np.flatnonzero(~((decoded >= DECODED_MIN) & (decoded <= DECODED_MAX)))
     if out_of_range.size:
-        frame = int(out_of_range[0])
+        frame, channel = divmod(int(out_of_range[0]), audio.artifact.channel_count)
         raise Dist10InputError(
             Dist10InputFailureCode.OUT_OF_RANGE_SAMPLES,
-            f"{where}: frame {frame} decodes to {decoded[frame]!r}, outside the PCM_16 range "
+            f"{where}: frame {frame}, channel {channel} decodes to {decoded[frame, channel]!r}, outside the PCM_16 range "
             f"[{INT16_MIN}, {INT16_MAX}] / 32768",
         )
     scaled = decoded * PCM16_SCALE  # exact: a power-of-two scale of a value in range; cannot overflow
     non_integral = np.flatnonzero(scaled != np.floor(scaled))
     if non_integral.size:
-        frame = int(non_integral[0])
+        frame, channel = divmod(int(non_integral[0]), audio.artifact.channel_count)
         raise Dist10InputError(
             Dist10InputFailureCode.NON_INTEGRAL_SAMPLES,
-            f"{where}: frame {frame} decodes to {scaled[frame]!r} x 1/32768, not an integer PCM_16 count",
+            f"{where}: frame {frame}, channel {channel} decodes to {scaled[frame, channel]!r} x 1/32768, not an integer PCM_16 count",
         )
-    counts = scaled.astype(np.int16)
+    if audio.artifact.channel_count == 2:
+        differences = np.flatnonzero(scaled[:, 0] != scaled[:, 1])
+        if differences.size:
+            raise Dist10InputError(
+                Dist10InputFailureCode.NON_IDENTICAL_CHANNELS,
+                f"{where}: channels differ at frame {int(differences[0])}; exact equality is required",
+            )
+    counts = scaled[:, 0].astype(np.int16)
     counts.flags.writeable = False
     return counts
 
 
-def read_dist10_pcm16(location: ResolvedArtifactLocation, *, limits: AudioReadLimits) -> Dist10Pcm16Clip:
+def read_dist10_pcm16(
+    location: ResolvedArtifactLocation,
+    *,
+    limits: AudioReadLimits,
+    allow_exact_dual_mono: bool = False,
+    allow_float64_quantization: bool = False,
+) -> Dist10Pcm16Clip:
     """Verify one resolved artifact through the shared path and return its PCM_16 counts for the dist10 front end.
 
-    Order: argument types (``ValueError``); the declared sample rate and channel count against profile v1
+    Order: argument types (``ValueError``); the declared sample rate and channel count against the selected input profile
     (``Dist10InputError``, before any file access); ``check_resolved_wav_integrity`` with ``limits`` (its
     ``IntegrityError`` and ``LocationResolutionError`` propagate unchanged); then ``pcm16_counts`` on exactly the
-    verified samples (subtype, integrality and range).
+    verified samples (shape, subtype, integrality, range and, when opted in, full-clip channel equality).
     """
     if not isinstance(location, ResolvedArtifactLocation):
         raise ValueError(f"location must be a ResolvedArtifactLocation, got {type(location).__name__}")
     if not isinstance(limits, AudioReadLimits):
         raise ValueError(f"limits must be AudioReadLimits, got {type(limits).__name__}")
-    _require_profile(location.artifact, location.artifact.location)
+    if type(allow_float64_quantization) is not bool:
+        raise ValueError("allow_float64_quantization must be bool")
+    _require_profile(location.artifact, location.artifact.location, allow_exact_dual_mono)
     audio = check_resolved_wav_integrity(
         location, max_file_bytes=limits.max_file_bytes, max_decoded_bytes=limits.max_decoded_bytes
     )
     return Dist10Pcm16Clip(
         artifact=audio.artifact,
-        samples=pcm16_counts(audio),
+        samples=pcm16_counts(
+            audio, allow_exact_dual_mono=allow_exact_dual_mono, allow_float64_quantization=allow_float64_quantization
+        ),
         container=audio.container,
         subtype=audio.subtype,
         verified_sha256=audio.verified_sha256,
     )
+
+
+def read_dist10_member(artifact: AudioArtifact, *, root: str, max_file_bytes: int,
+                       max_decoded_bytes: int, allow_exact_dual_mono: bool = False,
+                       allow_float64_quantization: bool = False) -> Dist10Pcm16Clip:  # fmt: skip
+    """Resolve one current member under its configured physical ``root`` and read it with ``read_dist10_pcm16``.
+
+    Resolution is ``resolve_artifact_location`` (the location must stay inside ``root``); the read is exactly
+    ``read_dist10_pcm16`` with ``AudioReadLimits(max_file_bytes, max_decoded_bytes)``. Expected resolution,
+    integrity and profile failures are raised as ``Dist10ReadError``; argument and limit errors stay ``ValueError``.
+    Added for the P1 R1 handoff (2026-11-20) so that new P1 modules gain no ``audio_io`` edge; behaviour of
+    ``allow_exact_dual_mono`` is forwarded unchanged; its default remains strict mono.
+    """
+    _require_dual_mono_option(allow_exact_dual_mono)
+    limits = AudioReadLimits(max_file_bytes, max_decoded_bytes)
+    try:
+        location = resolve_artifact_location(artifact, root=root)
+        return read_dist10_pcm16(
+            location,
+            limits=limits,
+            allow_exact_dual_mono=allow_exact_dual_mono,
+            allow_float64_quantization=allow_float64_quantization,
+        )
+    except (LocationResolutionError, IntegrityError, Dist10InputError) as error:
+        raise Dist10ReadError(error.code.value, str(error)) from error

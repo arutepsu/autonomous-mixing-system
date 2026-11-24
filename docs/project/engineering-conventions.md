@@ -34,14 +34,20 @@ autonomous_mixing/
                     append-only ledger, plus journal-backed state anchors and coherent continuity snapshots for
                     ADR-033 (ADR-030/031/032/033 Proposed; no driver or export automation); its FL device
                     script v2 lives outside the package in device/fl_studio/ and is never imported
-    journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance)
-    decision_agent/ implements DecisionMaker with Claude (ADR-005 name)
+    journal/        implements AcceptanceJournal (memory: NON_DURABLE, one run per instance); R3 adds the separate
+                    append-only decision-exchange store implementing DecisionAuditTrail
+    decision_agent/ implements DecisionMaker with Claude (ADR-005 name); R3 provides the explicit packet projection
+                    and strict response parser (no provider call yet; DecisionMaker planned for R4)
     baselines/      other DecisionMaker implementations for comparison conditions
   drivers/
     cli.py
     experiments/    the only importer of evaluation
   evaluation/       hidden reference, injected-defect ground truth, research metrics
 ```
+
+## Design restraint
+
+Owner clarification (2026-11-22): prefer extending an existing module when the responsibility is unchanged. Add an adapter, port, abstraction or intermediate artifact only when a distinct responsibility or concrete requirement justifies it. A small input-format extension should not create a parallel pipeline. Keep necessary validation, explicit provenance and compatibility versioning; avoid speculative infrastructure. Separate modules where responsibilities actually differ rather than growing a module without bounds.
 
 ## Import rules
 1. `core` imports nothing outside `core`: no NumPy, soundfile, provider SDK or filesystem access.
@@ -89,3 +95,7 @@ Do not name anything "model" (ambiguous with the LLM), and do not use "analysis"
 
 ## Working with two assistants
 Claude Code and Codex share files, not live state. They do not edit the same files at the same time ([agent-team README](../../agent-team/README.md)). Decisions are recorded in ADRs and the research log, never only in a chat session.
+
+## R5A provenance extension (2026-11-23; ADR-041 Proposed)
+
+An explicitly provider-bound RunRequest requires the decision evidence port; its driver implementation verifies existing provider/audit records and local P1 evidence without dispatch or DSP. AnalysisResponse stores content-addressed references. Optional trailing fields preserve in-memory callers; run-store schema2 deliberately refuses old serialized schema1 without migration. CLI run activation/composition remain separate.

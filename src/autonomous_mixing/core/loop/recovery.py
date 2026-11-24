@@ -13,7 +13,10 @@ from autonomous_mixing.core.loop.feedback import _effect_feedback, add_feedback,
 from autonomous_mixing.core.loop.observation import inspect
 from autonomous_mixing.core.loop.reconciliation import reconcile_acceptance
 from autonomous_mixing.core.loop.runtime import _invalid, gate, observed, promote, record
-from autonomous_mixing.core.ports.acceptance import validate_acceptance_query_response
+from autonomous_mixing.core.ports.acceptance import (
+    validate_acceptance_commit_response,
+    validate_acceptance_query_response,
+)
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
 from autonomous_mixing.core.ports.integrity import StateIntegrityInspector
 from autonomous_mixing.core.ports.run_journal import RunJournal
@@ -257,9 +260,8 @@ def reconcile_unknown(
     journal: RunJournal,
     on_progress: Callable[[RuntimeProgress], None],
 ) -> tuple[RuntimeProgress, Stop | VerificationRoute | None]:
-    progress = replace(progress, authority_known=False)
-    on_progress(progress)
-    progress = replace(progress, verified=None)
+    progress = replace(progress, authority_known=False, verified=None,
+                       pending_effect=TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN)  # fmt: skip
     on_progress(progress)
     query = AcceptanceQuery(progress.request.run_id, event.acceptance_id)
     progress, (intent_id, _, stop, _) = gate(
@@ -280,6 +282,8 @@ def reconcile_unknown(
     answer = journal.query(query)
     try:
         validate_acceptance_query_response(query, answer)
+        if isinstance(answer, AcceptanceFound):
+            validate_acceptance_commit_response(event, AcceptanceCommitted(answer.event, answer.accepted))
     except ValueError as error:
         progress, query_stop = observed(
             progress,
@@ -295,6 +299,17 @@ def reconcile_unknown(
             progress.request.run_id, event.acceptance_id, f"invalid authority answer: {error}"
         )
     else:
+        # Preserve the validated answer even if recording the observation raises.
+        if isinstance(answer, AcceptanceFound):
+            commits = progress.commits
+            if not any(c.event == answer.event for c in commits):
+                commits = commits + (AcceptanceCommitted(answer.event, answer.accepted),)
+            progress = replace(progress, accepted=answer.accepted, authority_known=True, verified=None,
+                               commits=commits, pending_effect=None)  # fmt: skip
+            on_progress(progress)
+        elif isinstance(answer, AcceptanceAbsent):
+            progress = replace(progress, authority_known=True, pending_effect=None)
+            on_progress(progress)
         progress, query_stop = observed(
             progress,
             intent_id,
@@ -315,18 +330,8 @@ def reconcile_unknown(
             (TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN, f"acceptance authority unknown: {answer.explanation}"),
         )
     if isinstance(answer, AcceptanceFound):
-        selection = (answer.accepted, True)
-        progress = replace(progress, accepted=selection[0], authority_known=selection[1])
-        on_progress(progress)
-        if not any((c.event == answer.event for c in progress.commits)):
-            progress = replace(
-                progress, commits=progress.commits + (AcceptanceCommitted(answer.event, answer.accepted),)
-            )
-            on_progress(progress)
         target_state = answer.accepted.state
     elif isinstance(answer, AcceptanceAbsent):
-        progress = replace(progress, authority_known=True)
-        on_progress(progress)
         target_state = progress.accepted.state
     else:
         assert_never(answer)

@@ -2057,3 +2057,811 @@ Owner-authorized technical feasibility trial under ADR-009; FR-14 stays withdraw
   - **Remaining checks:** clean.
 - **Status unchanged:** operator tooling ready; autonomous runs unavailable.
 - Uncommitted, together with the earlier requirements update.
+
+## 2026-11-20 — R0 P1 method draft (Codex)
+- The owner approved the staged diagnosis/provider/composition plan and authorized drafting R0; no implementation was authorized by this documentation step.
+- New specification: `docs/superpowers/specs/2026-11-20-p1-diagnosis-method.md`.
+- Defines mono 44.1 kHz PCM_16 inputs, ordered directions, declared alignment provenance, fixed initial support, quiet-floor treatment, scalar summaries and a limited candidate-rule form.
+- Proposed first frequency-specific diagnosis excludes model band 0 because its reproduced mapping includes high-frequency bins; all bands remain descriptive evidence.
+- Numerical deadbands, low-energy qualification and sufficiency thresholds remain blocked pending a registered development calibration; no values or results were fabricated.
+- A read-only builder check led to an explicit temporal-persistence scalar and separate support preparation before immutable run construction. Preparation cost is recorded separately; there is no existing counted analysis budget.
+- Source provenance: reused the existing thesis equation trace; a fresh readable thesis PDF was unavailable through the browser. The withdrawn related arXiv submission is not used as validation.
+- Planning checks only: documentation whitespace and scope. No implementation tests, experiments, provider calls, installs or live FL Studio actions.
+- The staged plan is marked owner-approved; R0 remains a proposed scientific specification, uncommitted for review.
+
+## 2026-11-20 — R1 P1 descriptive directional measurements (Claude Code)
+- **Scope:** implements the R1 handoff (`docs/superpowers/plans/2026-11-20-p1-r1-claude-handoff.md`) against the R0 method specification. Descriptive measurements and support preparation only; no calibration value, qualified support S0, diagnosis, provider call, coordinator wiring, CLI change, install or live FL Studio action.
+- **New code:**
+  - `core/records/masking_measurement.py`: the ordered pair, alignment provenance, band region (bands 1-20; band 0 refused), preparation request and job, prepared geometric support with recomputed digest, preparation timing, prepared plan and measurement plan. Qualification is only `UNCALIBRATED` and the support kind only `GEOMETRIC`, so no qualified plan can be constructed.
+  - `adapters/dsp_analysis/masking_preparation.py`: verified reads, complete-window geometry and a canonical, content-addressed manifest written atomically. Reload refuses missing, altered, non-canonical, unsupported-schema or self-inconsistent manifests and never regenerates support. Cancellation and time are checked before each read; no budget is charged.
+  - `adapters/dsp_analysis/directional_analysis.py`: whole-clip front end from call 0, the reviewed margin kernel and Q from the qthr table through the existing band mapping.
+    - `p1.raw.*@1` summaries have denominator |U|; the qualified `p1.*@1` IDs are always `Unavailable` (uncalibrated policy).
+    - Raw evidence (all calls, all 21 bands, null for undefined margins, silence and quiet-floor flags) is persisted before success.
+  - `adapters/dsp_analysis/analysis_router.py`: dispatch by declared analyzer identity with no relabeling. The merged response is validated against the original request, with no partial success.
+- **Architecture:** `wav_input.read_dist10_member` (dated note in ADR-029, Proposed) lets the new modules read without any new `audio_io` edge. Inventories are updated in `test_core_records.py` and `test_adapters.py`. No new ADR: no new architecture decision beyond that note.
+- **Evidence:**
+  - Q equals probe B `thm_quiet` exactly.
+  - The quiet-floor flags equal probe B's `thm == thm_quiet`.
+  - Capture-replay arithmetic agrees to below 1e-9 dB.
+  - The unchanged `compare_band_margins.py` reports a largest full-chain margin difference of 5.552e-03 dB with no sign change. This is a finite-corpus observation, not a tolerance.
+- **Proposed deviations** are recorded in the specification's new R1 section:
+  - preparation computes U without DSP;
+  - integral boundaries are equality with the declared frame time;
+  - "known" alignment means a configured set of documented methods;
+  - quiet-floor comparison is exact equality;
+  - evidence is linked by observation ID in memory, and durable linkage is left to R5.
+- **Checks:**
+  - **Focused tests** (`-W error`): 203 passed across the five R1 test files, and 264 with the level-analyzer tests added.
+  - **Architecture:** 261 passed.
+  - **Full suite:** 6,507 passed, 4 skipped.
+  - **Remaining checks:** the fixture verifier, ruff check and format, `uv lock --check`, `git diff --check` and CLI help are all clean.
+  - **Mutation probes:** 18 of 19 caught. The survivor (`k >= 2` lower bound removed) is equivalent, because full-window containment with start >= 0 already implies `k >= 2`. Every file was restored byte-identically.
+- Uncommitted for Codex review.
+
+## 2026-11-20 — R1 P1 measurements: review fixes (Claude Code)
+- **Findings (Codex, P2) and fixes, with regressions written first:**
+  1. **The specification identity was not bound to the prepared support.**
+     - **Fix:** `bound_specification` places the prepared-plan digest in the specification version, and `MaskingMeasurementPlan` refuses an unbound specification or one bound to another digest.
+  2. **The router validated only the merged response.**
+     - **Fix:** each subresponse is validated against its subrequest first. An invalid one is an `INVALID_RESPONSE` attributed to that analyzer, and later analyzers are not called.
+  3. **Preparation did not check cancellation or the time limit at completion.**
+     - **Fix:** the completion reading is checked like the per-read checks, and nothing is written on failure.
+- **Not addressed:** the fourth P2 finding was not visible in the review summary.
+- **Checks:**
+  - **Full suite:** 6,515 passed, 4 skipped.
+  - **Architecture:** 261 passed.
+  - **Mutation probes:** 21 of 22 caught. The survivor is the known equivalent mutant (`k >= 2` bound), and every file was restored byte-identically.
+  - **Remaining checks:** ruff check and format are clean.
+- Uncommitted for review.
+
+## 2026-11-22 — R1 P1 measurements: fourth review fix (Claude Code)
+- **Finding (Codex, P2):** preparation could save and report success for a manifest that `load_prepared_plan` then rejects as too large.
+- **Fix:** the plan is encoded once, and a payload longer than `MAX_MANIFEST_BYTES` returns `UNAVAILABLE` (not retryable) before anything is written.
+- **Regressions, written first:**
+  - an oversized preparation fails and leaves the store empty;
+  - the inclusive boundary: exactly the limit succeeds and reloads, one byte less fails, and the loader agrees at the boundary;
+  - every successful preparation in the tests now reloads under the active limit.
+- **Checks:**
+  - **Full suite:** 6,517 passed, 4 skipped.
+  - **Architecture:** 261 passed.
+  - **Mutation probes:** 23 of 24 caught. The two new probes are caught; the known equivalent `k >= 2` mutant survives. Every file was restored byte-identically.
+  - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
+- Uncommitted for review.
+
+## 2026-11-22 — Proposed P1 calibration registration (Codex)
+- Owner authorized using the calibration handoff to draft the protocol; documentation only.
+- New: `docs/superpowers/specs/2026-11-22-p1-calibration-registration.md`, revision 1, Proposed, pinned to R1 commit `0242c99dba54abcb59398833cf74b16c0b2fd0e6`.
+- Separates numerical reproduction, quantization qualification, development rule selection and later held-out evaluation. Proposes 36 qualification-gate pairs and 18 sufficiency-rule configurations with fixed caps, score, tie rule, stopping and a no-policy outcome. Values are proposals, not calibration results.
+- Documents corpus gaps: the existing trap pilot is stereo/already development, source-sample rights are not established by its reports, and six development/nine held-out projects remain planning targets without verified manifests. No dataset rows or rights conclusions were invented.
+- Proposes three deciding listeners for a six-project, two-source development pilot; annotation and reference data remain outside runtime roots. Protocol, execution and policy-freeze approvals are separate.
+- Read-only builder review resolved waveform-recipe, musical-domain confirmation and panel-voting ambiguities. Self-review distinguished penalized selection rates from actual diagnoses and future generated-input hashes from preregistered recipes.
+- Checks: local document links, whitespace and declared search/item counts; source check of the primary publisher abstract. Thesis-page verification remains blocked. No audio loaded, generated or auditioned; no numerical experiment, model/DAW call, code/test change, install or commit.
+- Left uncommitted for scientific/Codex review; no registration lock, calibrated threshold or diagnosis readiness is claimed.
+
+## 2026-11-22 — Checkpoint correction 1: dataset and engineering dependencies (Codex)
+- Owner clarified that the FL Studio dataset is under development as planned and asked to address the checkpoint corrections step by step.
+- Corrected the overly broad implication that a finished calibration corpus must precede all further implementation. R3 packet/parser/audit and R4 provider engineering can be scheduled with labelled test fixtures; R2 mechanics may report incomplete evidence until a calibrated policy exists.
+- Updated the staged plan's execution order and factual R0/R1 status. The proposed calibration protocol is revision 2 for dependency clarification only; its scientific values and workload remain unapproved.
+- Dataset-dependent calibration, qualified S0, actionable diagnosis and evaluation remain gated on real evidence. No fabricated diagnoses, live-call authorization or CLI enablement is introduced.
+- Documentation only; no code, tests, dataset files, experiments or live services changed. Broader workload review, remaining stale status documents and the separate offline acceptance issue are not marked resolved by this first correction.
+
+## 2026-11-22 — Checkpoint correction 2: agent-thesis focus and feasible workload (Codex)
+- Owner confirmed that correct mixing decisions and a correct system are required, with agent/tool/loop behavior as the main thesis topics, and stated that paid professional listeners are unavailable.
+- Updated the staged plan with this priority and separated software correctness, mixing relevance and agent evaluation. Numerical trustworthiness and honest scientific claims remain required.
+- Calibration registration revision 3 marks the assistant-proposed six-project/three-listener/36-and-18-grid study as optional and not adopted. Those counts are not prerequisites for implementation or the core contribution. The original handoff carries the superseding clarification.
+- Volunteer listening may supplement a feasible study; owner assessment is producer-intent evidence, not independent perceptual validation. No paid panel or fixed panel size is assumed.
+- No substitute policy/threshold, diagnosis sufficiency, scientific result or live run was approved by this scope correction. A smaller operational-policy proposal still needs explicit review.
+- Documentation only; accepted requirements and ADRs, implementation, dataset and experiments are unchanged. Left uncommitted.
+
+## 2026-11-22 — Checkpoint correction 3: stale implementation status (Codex)
+- Owner authorized correcting stale status documents after the dataset-dependency and thesis-focus clarifications.
+- Requirements: updated only the status cells of FR-03 through FR-13 and FR-19/FR-20. Requirement text, priority, verification criteria and traceability fields are preserved exactly; no requirement adoption or scope change. Relevant statuses remain Partial with named limitations.
+- Roadmap: added a current dated checkpoint, kept the original calendar and historical M0 evidence, and distinguished live research bridge/dB trials from the unperformed live integrated agent run. No new milestone dates or completion claims were invented.
+- P1 specification: corrected the no-implementation/uncommitted-review wording to the reviewed R1 commit `0242c99`; qualified S0, calibration and production diagnosis remain absent. The staged plan's old inventory is explicitly historical.
+- The missing provider/diagnosis components, disabled CLI start/continue, growing FL Studio dataset and optional/unapproved extended listening study are stated consistently. Accepted ADRs and source/evaluation data are unchanged.
+- Checks: status-cell-only comparison, cited test-file existence, document whitespace/local links and git diff check. Documentation only; no implementation tests or experiments rerun. Earlier independent 344-test focused review and implementer-reported full-suite checks are distinguished.
+- The separately documented offline acceptance-commit exception issue remains open; this documentation correction does not fix code. Left uncommitted.
+
+## 2026-11-22 — Checkpoint correction 5: offline acceptance-authority exceptions (Codex)
+- Owner authorized proceeding to the separate offline commit-exception correction after the status-document update. The four R1 findings (checkpoint item 4) were already fixed/reviewed/committed; no R1 code was reopened.
+- Wrote nine labelled coordinator regressions first: seven failed against the previous implementation, with two noncommit controls already passing. They cover exceptions before/after a real commit, failed promotion, failed recording of unknown/found/absent/refused answers, pre-dispatch failure and a found response with changed event contents.
+- Fix: mark acceptance authority unknown before dispatch; preserve `ACCEPTANCE_COMMIT_UNCERTAIN` through unexpected errors; establish validated committed/found authority before fallible work; clear the marker on confirmed noncommit; verify full found-event identity. Original exception objects propagate after best-effort finalization. No speculative retry/recovery is introduced.
+- Changed `core/loop/acceptance_flow.py`, `core/loop/recovery.py`, shared finalizer wording in `core/loop/coordinator.py`, and pending-effect documentation/validation wording in `core/records/coordinator_progress.py`. No record fields or enum values changed. DAW execution/recovery modules and adapters are untouched.
+- Four isolated in-memory mutation probes were caught by the permanent tests; source files were not mutated by those probes. Read-only independent review found no actionable findings.
+- Locked verification: 101 offline tests, 475 DAW/restart/reconciliation/architecture tests with warnings as errors; full suite 6,526 passed, 4 skipped in 113.20 s. Ruff check, format (267 files), CLI help, lock consistency and diff check passed.
+- Requirements FR-10 status and the coordinator plan now record this follow-up as fixed; requirement definitions and accepted ADRs remain unchanged. Previous checkpoint entries are historical and remain intact.
+- No audio/provider/FL Studio call, install, commit or push. All changes are uncommitted, alongside the preserved documentation corrections.
+- Additional correction-3 follow-through during source reading: README, CLAUDE.md and the architecture overview also carried obsolete no-control-loop/M0-only summaries. Updated those current summaries and linked the owning plan/roadmap; the legacy analyze-command behavior and accepted architecture rules are unchanged. Documentation only; no further test rerun needed after these edits.
+
+## 2026-11-22 — R3 decision packet, strict parser and exchange audit (Claude Code)
+- **Scope:** implements `docs/superpowers/plans/2026-11-22-r3-decision-packet-audit-claude-handoff.md` tests-first. No provider call, SDK, network, coordinator injection, CLI enablement, DAW action or experiment. The owner's uncommitted changes are preserved and nothing is committed.
+- **Records and port:** `core/records/decision_exchange.py` and `core/ports/decision_audit.py`.
+  - Call key `(run_id, usage.decision_calls)`.
+  - Outbound packet text and its hash are kept separate from the local binding and alias map.
+  - Three append-only exchange phases bound by call, exchange ID and request fingerprint.
+  - Completion categories: valid decision (with local `DecisionId`/`ActionId`), invalid response, provider failure, recording failure; no synthetic abstention.
+  - `permits_dispatch` is true only for a newly recorded pending request.
+- **Projection:** `adapters/decision_agent/request.py` is an explicit allowlist with schema `decision_packet@1`.
+  - **Opaque aliases:** run-scoped and SHA-256-derived, stable across calls, history growth and restart.
+  - **Projected:** complete criteria and guard semantics, roles with provenance (unknown kept null), protection, producer text as data, current observations and unavailable reasons, unchanged diagnosis statements, absolute application-gain coordinates (never fader values), budgets, and the complete history with historical evidence marked non-current.
+  - **Withheld:** paths, IDs, names, hashes, condition-bearing references and free technical text.
+  - **Size:** an oversize packet is refused, never truncated.
+- **Parser:** `adapters/decision_agent/response.py` (`decision_response@1`).
+  - Bounded strict UTF-8 holding exactly one JSON object; duplicate keys, extra keys, non-finite and boolean numbers are refused.
+  - Exactly one `set_track_gain`; typed alias resolution refuses unknown, duplicate, wrong-kind and historical references.
+  - Local bindings and identities, then `validate_decision_response`. Invalid responses are non-retryable `INVALID_RESPONSE`; a refusal is not an abstention.
+- **Store:** `adapters/journal/decision_exchange.py` is a separate SQLite store per run, schema 1, append-only and fingerprinted, with symmetric byte bounds.
+  - Identical replays are idempotent; conflicts are refused.
+  - Commit-unknown leads to a verified reopen; a pending exchange after a child-process crash is not resent.
+- **Evidence:**
+  - **Tests:** 119 new, including sentinel hidden paths and labels checked in the actual outbound JSON, and exact replay of recorded identities.
+  - **Architecture:** inventories and edges updated; 264 passed.
+  - **Full suite:** 6,648 passed, 4 skipped.
+  - **Remaining checks:** ruff check and format clean.
+  - **Mutation probes:** 13 of 13 caught.
+- **Limits:**
+  - Fixtures are labelled contract data, not model answers.
+  - Aliases are pseudonyms, not secrets.
+  - Producer text is passed verbatim, so secrets placed there are not detected.
+  - Subprocess-crash durability only.
+  - No claim about model performance, diagnosis quality or mixing quality.
+
+## 2026-11-22 — R3 review fixes (Claude Code)
+- **Findings (Codex, four P2) and fixes, with regressions written first:**
+  1. **Path leak:** observation unavailable reasons and diagnosis coverage explanations were copied verbatim.
+     - **Fix:** the packet now carries structured status only, and the text is retained in the local binding's new `withheld` field.
+  2. **Parser crash:** wrongly typed `type`, `reason` or `operation` values raised `TypeError`.
+     - **Fix:** types are checked first, and these cases are now non-retryable `INVALID_RESPONSE`.
+  3. **Binding by ID only:** the binding covered identifiers, not contents.
+     - **Fix:** the parser re-projects the situation and requires an exact payload and binding match, so changed thresholds or measurements behind unchanged IDs are refused.
+  4. **Foreign responses accepted:** a response from another exchange or request was accepted.
+     - **Fix:** the parser takes the recorded request and checks call, exchange ID and full request fingerprint before interpretation.
+- **Checks:**
+  - **Decision tests:** 133 passed (warnings as errors).
+  - **Architecture:** 264 passed.
+  - **Full suite:** 6,662 passed, 4 skipped.
+  - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 19 of 19 caught, including one per fix. An initially surviving binding probe led to a binding-only regression test. Every file was restored byte-identically.
+- No provider or FL Studio calls. Uncommitted for review.
+
+## 2026-11-22 — R3 second review fix (Claude Code)
+- **Finding (Codex, P2):** bounded responses could still crash JSON decoding:
+  - 1,200 nested arrays in 2,478 bytes raised `RecursionError`;
+  - a 5,000-digit gain in 5,523 bytes raised `ValueError`.
+- **Fix, with regressions written first:**
+  - Both are now non-retryable `INVALID_RESPONSE`. Only decoding errors around `json.loads` are converted.
+  - A regression confirms that programming errors still propagate and that no global limit is raised.
+- **Documentation:** the verbatim fields are listed as designated public content in `request.py` and the plan, with no claim of general secret or path sanitization.
+- **Checks:**
+  - **Decision tests:** 138 passed (warnings as errors).
+  - **Architecture:** 264 passed.
+  - **Full suite:** 6,667 passed, 4 skipped.
+  - **Remaining checks:** ruff check and format, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 21 of 21 caught, two of them new. Every file was restored byte-identically.
+- No provider or FL Studio calls. Uncommitted for review.
+
+## 2026-11-22 — R4 audited Claude provider adapter (Codex; uncommitted for review)
+
+- Implemented the approved R4 handoff tests-first. New adapter modules: `config.py`, `prompt.py`, `transport.py`, `claude.py`; new unit suites: `test_claude_config.py`, `test_claude_transport.py`, `test_claude_decision_maker.py`. Exact architecture inventories and SDK-optional import/CLI checks are extended. Existing decision/audit/core records and coordinator code are unchanged.
+- Explicit provider model/API profile, generation parameters, limits and prompt/schema versions. No default production model or credentials in configuration/audit serialization. The actual canonical JSON request body is sent unchanged through the locked SDK's public `post(content=...)` API and pinned by its request fingerprint.
+- Locked Anthropic 1.13.0 / HTTPX2 transport is tested with mock HTTP. SDK retries and transport retries are disabled, redirects are not followed, proxy environment settings are not used, and final headers are allowlisted so SDK environment headers cannot override the injected key/profile. Optional agent packages were installed into the local virtual environment from the existing lockfile for these tests; no dependency/lockfile edit, system/device installation or live call occurred.
+- Bodies, including HTTP error bodies, are bounded before SDK buffering. Compressed entities are refused without decoding. Exact bounded raw HTTP entity bytes/hash remain in response metadata; selected decision-text bytes remain the R3 parser body. Oversize evidence is a limit-plus-one prefix marked incomplete. These are HTTP entity bytes, not a TLS/packet capture.
+- Ruling: structural envelope extraction precedes response persistence to preserve the reviewed R3 text-body contract. No decision parser or decision/action identity assignment runs before response acknowledgement. A crash during extraction can leave only the pending request; it cannot authorize resending. No core audit-schema extension was added.
+- One new matching pending request is the only dispatch authorization. Response/completion acknowledgements must match the exact exchange. A completed exchange replays the stored decision/failure and identities with zero calls; changed content/configuration conflicts, and pending/response-only exchanges never resend automatically.
+- Transient network/rate/server failures preserve retryability only after audit completion; provider refusal, truncation, malformed output and recording failures never become synthetic model abstention. The coordinator retains retry/budget authority; no retries, repair or model fallback occur inside `decide`.
+- Red/green evidence: each new suite first failed at collection because its module did not exist. Further regressions exposed SDK environment credential override, premature decompression, a swallowed identity-source error, and incorrectly marking complete HTTP error bodies as partial; all failed before their corrections.
+- Fresh whole-change review found two P2s. Seven new cases failed first: a closed/pre-capture SDK programming error was being classified as a retryable outage, and envelopes with missing/non-assistant roles could release decisions. Non-network causes now propagate as the original exception; only explicit assistant-message envelopes qualify.
+- Deferred P3: an enormous integer used as a float configuration field can raise `OverflowError` instead of `ValueError`. It is refused before dispatch. No request/retry is enabled by this validation detail.
+- Engineering limits: timeout bounds blocking I/O operations, with a monotonic deadline checked between chunks; no total wall-clock interrupt guarantee. Provider-compatible schema transformation is explicit and fingerprinted, while R3 remains the strict local validator. Live server/model compatibility is not established by source/mock tests, and deterministic audit replay does not guarantee identical future model output.
+- Final locked checks (`uv run --locked --extra agent`): 87 new unit cases; decision + architecture suites with `-W error`: **498 passed**; full suite: **6,763 passed, 4 skipped**. All **11/11** mutation probes caught; each source restored byte-identically. Ruff check/format, CLI help, `uv lock --check` and `git diff --check` pass.
+- Production diagnosis/calibration and R5 coordinator/audit-reference composition remain unimplemented. CLI start/continue remain unavailable. Dataset creation continues independently; no model performance, mixing quality or perceptual masking result is claimed. No provider or FL Studio call, original-audio change, script installation or commit.
+
+## 2026-11-22 — R2A deterministic diagnosis readiness (Codex; uncommitted for review)
+
+- Implemented the approved R2A handoff tests-first. New immutable records in `core/records/masking_diagnosis.py`, pure rule in `core/diagnosis/masking.py`, and standalone `ConfiguredDiagnosisSource` in `drivers/diagnosis_runtime.py`. Existing diagnosis ports, requests, DSP kernels, measurement formats, qualification enum, provider adapter and coordinator remain unchanged.
+- Exact signatures: `MaskingDiagnosisJob(support, measurements)`; `MaskingDiagnosisPolicy(method, measurement_plan, jobs)`; `diagnose_masking(request, *, policy, identities) -> DiagnosisReport`; `ConfiguredDiagnosisSource(*, policy, identities).diagnose(request) -> PortResult[DiagnosisReport]`. No thresholds, qualification switch, default production policy or confidence value.
+- Jobs bind the full prepared support and exact qualified metric catalogue: `p1.support_cells@1` / cells, `p1.robust_exceedance_cells@1` / cells, `p1.longest_robust_run_seconds@1` / s. Pair, interval, region/support provenance, bound specification, analyzer, declared alignment, ordered source requirements and native profile geometry must agree. Changed provenance is rejected even when the cell digest is unchanged.
+- Evidence readiness is input-sensitive: source requirements resolve to exactly one current checkpoint member over all seven declared fields; neither first nor latest revision is inferred. Ordered observation artifact IDs must match the resolved subjects. Changed current IDs/hashes and retained older production revisions alone do not invalidate a compatible current member. Missing, ambiguous, mismatched, unavailable and present observations remain distinct. Unavailable has no unit; scalar units alone are checked.
+- Every valid R2A report has one P1 row INCOMPLETE, unsupported P2/P3 rows UNAVAILABLE, and zero candidates, even with finite qualified-named scalars. The explanation names the uncalibrated/S0 gap and each job's readiness. No raw summary is promoted to qualified evidence, and no placeholder candidate or all-clear is emitted.
+- The configured source validates the pure report against the actual request and refuses coverage IDs reused by its instance. Pure core has no I/O, arrays, producer preference, provider dependency or unrelated stage import. A small source predicate mirrors R1 because importing adapter/verification-stage logic is forbidden; parity tests pin every declared source field.
+- Preparation records do not authenticate manifest bytes or PCM subtype independently, and observations do not independently establish physical alignment. Verified preparation/input remains the R1 boundary. R2B still requires approved numerical/qualification policy and a reviewed R1 extension producing genuine S0 and qualified metrics. Candidate generation, R5 composition and autonomous CLI enablement remain pending.
+- Red/green evidence: each new suite first failed at collection because its production module/stage did not exist. A test-builder typo used `sha256` instead of the existing artifact `content_hash`; corrected in the test helper without changing production contracts. The configuration, pure rule and wrapper then passed their intended tests.
+- Tests include real R1 preparation, directional/level analyzers and router over temporary native mono 44.1 kHz PCM_16 WAVs, both silence and nonzero, in both directions. Signals and finite-scalar fixtures are unit-test inputs, not calibration/evaluation data or detector performance evidence.
+- Fresh read-only whole-change review found no actionable correctness or minor findings; it did not independently rerun tests. No additional scientific thresholds, listener requirements or dataset workload were adopted.
+- Verification (`uv run --locked --extra agent`): **68 new unit tests**; final focused unit + architecture suites with `-W error`: **344 passed**; final full suite: **6,834 passed, 4 skipped**. **14/14 mutation probes caught**, including raw substitution, digest-only support matching, direction/profile/geometry/settings omissions, current-source/ID omissions, first-match ambiguity, finite-scalar qualification, placeholder candidate, wrapper validation and reused IDs. Each file was restored byte-identically; the restored source passed the final suites. Ruff check/format, CLI help, `uv lock --check` and `git diff --check` pass.
+- Documentation marks R2A readiness only, not full R2 or a scientifically qualified detector. No provider/FL Studio call, original-audio edit, installation, coordinator/CLI wiring or commit. Existing feature workspace retained for owner review; scratch verification logs are locally ignored.
+
+## 2026-11-22 — HT01 development readiness inventory (Codex; uncommitted)
+
+- Read the owner-specified pre-extension HT01 README/manifest, latest pasted owner context and thesis source-of-truth DOCX without editing them. The latest instruction explicitly requests decoded levels/comparisons and confirms Minimal House, 124 BPM, development/calibration allocation, corrected bass-up history, ducking-off extension and informal listening. Producer statements remain separate from measured facts and unknown settings. No extra recovery render requested.
+- New report: `docs/research/ht01-development-readiness.md`. Private evidence is under `C:/uni/Bachelor-Thesis/test/ht01-development-readiness/`: inventory, provenance, independent numerical-check JSON, byte-identical context copies and a local reproduction script. No evidence is registered as runtime/controller input.
+- Inventoried **63 originals**: 51 WAVs and 12 FLPs, comprising 30 selected WAVs/5 selected projects, 18 historical WAVs/3 historical projects, 4 backup projects and 3 source samples. All selected WAVs are stereo PCM_16, 44,100 Hz, 1,365,677 frames. The reference-repeat FLP exists. Historical v001 groups have 1,707,097 frames and remain separate development history; the explicitly selected ducking-off v001 suffix does not make it an old v001 gain case.
+- Recomputed every identity: **31/31 hashes in the old manifest match current artifacts**. The current corrected bass-up is selected; the overwritten earlier processing-confounded export is not an unresolved current defect. All 63 original and four source-context hashes still match after the audit/report. Original files were never written.
+- Recomputed gain fits: Bass-up **+3.075623908 dB**, residual ratio **2.4967254e-8**; Kick-up **+2.954614907 dB**, **4.5307664e-9**. Other instrument stems are sample-identical to reference. Ducking-off Bass RMS **+1.260710391 dB**, gain fit **+0.699589861 dB**, residual **0.121204252**: a processing extension, not a simple gain injection or demonstrated gain-only recovery. No plugin/controller parameters were decoded from FLP.
+- Reference repeat reproduces all five instrument stems exactly; Master differs by at most one PCM16 count. Master versus summed instrument stems differs by at most two counts in each selected condition; this remains descriptive, not a runtime summation assumption. Chords are exactly silent in all selected conditions. No selected sample reaches magnitude 32767/32768 or higher; true peak was not measured.
+- New measured input fact: **Kick and Bass have identical L/R samples in every selected condition**; Hi Hat and Master do not. A separately reviewed exact-dual-mono-to-mono preparation task could retain int16 counts without averaging/resampling/requantization and preserve original stereo assets, with explicit provenance/current-state binding. No copy/conversion/profile extension was performed; R1 still rejects these stereo containers directly. No additional musical render is needed to finish dataset documentation.
+- Source evidence: Kick CC0 label visible via retrieved Freesound page (tool labels crawl six months old); Clap/Cymbal CC0 remain producer-confirmed with independent retrieval unavailable. Correct cymbal account is jsa.dj. Download dates/archived pages and complete render/fader/controller settings remain unknown, not invented. This is provenance reporting, not a rights warranty.
+- Two complete inventory runs gave identical JSON SHA-256 **783adb405ae2bbf97b05648bcfd410cf000e7166877699e7b97b462f256b1b3e**. Independent integer-square-sum RMS checks over all 30 selected WAVs agree within **3.55e-15 dB**. Report gain/RMS/peak fields were checked against the JSON. No new product behavior, so no product full-suite rerun is claimed for this audit; the uncommitted R2A work is preserved.
+- No provider/FL Studio call, raw-audio upload, new WAV, original edit, threshold fitting, calibration, qualified diagnosis, R2B/R5 activation or commit. References, injection facts and listening labels remain private development/evaluation material, not a runtime success oracle. Optional large-corpus/listener/grid registration stays unadopted.
+
+## 2026-11-22 — Exact dual-mono extension planned; existing boundary preferred (Codex)
+
+- Owner clarified the architectural requirement: extend the existing component for the same responsibility, prefer clean structure and avoid overbuilding. Recorded in engineering conventions. This supersedes the D1 suggestion of a separate adapter/derived analysis WAVs; the D1 measured inventory remains unchanged.
+- Plan: `docs/superpowers/plans/2026-11-22-exact-dual-mono-input-extension.md`. Modify existing WAV/preparation/analyzer/R2A checks; preserve original stereo metadata/hash and pass unchanged one-channel int16 counts to DSP only when the entire two-channel input is exactly equal. No copied audio or new adapter/port/record hierarchy.
+- Compatibility proposal uses the existing profile field: keep native-mono v1 strict; add one explicit v2 profile for mono/exact dual mono, with reader opt-in derived from that persisted value. Canonical DSP geometry/digests remain unchanged; the full prepared profile/manifest/specification identity distinguishes admission. Old manifest format/bytes and legacy evidence stay valid; extended evidence records source/analysis channel counts and mapping explicitly.
+- Fresh read-only builder check found no blocker. Added explicit frame-and-channel shape agreement, pre-read analyzer admission, and checks of every R2A definition's source channels. Current-file verification cannot be replaced by a baseline equality assertion.
+- Planning only: no implementation, input conversion, source/audio edit, HT01 analysis, provider/FL call or commit. No qualification, calibrated thresholds or scientific claim adopted. Existing R2A/D1 uncommitted work preserved.
+
+
+## 2026-11-22 — Exact dual-mono extension of the existing P1 input boundary (uncommitted)
+
+- Implemented the approved extension tests-first in the existing WAV boundary, preparation, directional analyzer and R2A metadata gate. The owner chose extending existing responsibilities; this supersedes the earlier separate-adapter/derived-mono-WAV suggestion. No new adapter, port, package, public record hierarchy or audio copy.
+- `pcm16_counts`, `read_dist10_pcm16` and `read_dist10_member` add keyword-only `allow_exact_dual_mono: bool = False`. Default mono behavior remains strict. Opt-in accepts mono or exactly equal two-channel 44,100 Hz PCM_16 only. Whole decoded shape, both channels' range/integrality and exact full-clip equality are checked before channel 0 selection, including samples outside a selected interval. Original verified artifact/hash/channel metadata and actual two-channel read limits are retained. Empty decoded arrays remain supported; empty WAVs retain the shared verifier's refusal.
+- The existing prepared-profile field admits `p1.dist10_mono_pcm16_44100@2`; preparation/analysis derive opt-in from it. Manifest schema/layout and old v1 bytes are unchanged. The canonical mono support-cell digest stays under v1; the full prepared digest and bound specification distinguish ingress. V1 analyzer and R2A definitions reject stereo before reading. A current unequal source is refused even after successful baseline preparation.
+- V2 raw evidence is schema 2, retaining original source count/hash, analysis count 1, fixed mapping (`mono_identity@1` or `exact_dual_mono_first_channel@1`), actual ingress profile and canonical analysis profile. Legacy evidence is byte-identical to its pre-change fixture. Two checked-in pre-change golden fixtures pin legacy manifest and evidence identities. The numerical kernels, metric IDs, call order/eligibility/history and exact-silence rules are unchanged.
+- Tests: 53 additional cases relative to the preserved R2A baseline. Final focused suites with warnings as errors: 610 passed. Full suite: 6,887 passed, 4 skipped. DSP fixture verifier, Ruff check/format, CLI help, lock consistency and diff checks pass. Twelve faithful mutations (tolerance, right-channel range/integrality, partial comparison, skipped current equality, false source metadata, undercharged stereo, loosened default, missing legacy gates, ignored preparation profile, changed legacy evidence) were all caught; every edited source restored byte-identically. Fresh read-only final review found no functional findings.
+- One feature integration test module reuses the existing World helper, with no second fixture framework. Existing R2A/D1/conventions work is preserved. Front-end contract, P1 method, architecture overview and still-Proposed ADR-029 are updated in place.
+- No project media was read or converted, no HT01 analysis, provider/FL call, installation or commit. Genuinely different stereo (including HT01 Hat/Master) stays unsupported by P1. R2A remains INCOMPLETE with zero candidates and qualified metrics unavailable; this extension does not establish calibration, perceptual masking or audible improvement.
+
+
+## 2026-11-22 — Owner-authorized HT01 descriptive Kick/Bass run
+
+- Ran existing profile-v2 preparer, analyzer/router and reviewed kernels on the five audited conditions in both directions. Whole exported file-relative interval, bands 1–20, 2,371 complete-history calls with 2,369 eligible calls / 47,380 support cells. No new product behavior, audio copies, activity gate, deadband, qualification values, candidate or agent run.
+- Two runs agree exactly in numerical/semantic content excluding fresh timestamps and UUID observation IDs; raw evidence is not byte-identical. Reference-repeat numerical grids match reference exactly in both directions. Independent scalar arithmetic differs by at most 2.842171e-14 dB and confirms stored raw summaries/geometry/flags. All 63 D1 original hashes agree before/after each run. Ten raw evidence files per run and five verified manifests are retained privately in `test/ht01-p1-descriptive`; actual source/script/settings/evidence hashes are recorded.
+- Main limitation: reference target-silent cells account for 72.1% of positive Bass→Kick cells and 87.7% in reverse. Quiet-floor cells are also frequent. Bass→Kick whole-support median is identical across conditions, so it is not a sufficient diagnosis or acceptance statistic. Descriptive responses do not establish audibility, calibrated risk or a correct action.
+- New report: `docs/research/ht01-p1-descriptive-measurements.md`; appended D1 status note supersedes its historical mono-copy proposal/current-profile gap. Original audit findings remain unchanged. No provider/FL call, installation, audio output, software-suite rerun or commit. R2A remains INCOMPLETE; R2B and R5 remain gated.
+
+
+## 2026-11-22 — Minimum P1 qualification proposal, documentation only
+
+- Owner agreed to the next qualification-policy step after the HT01 descriptive run. Wrote `docs/research/p1-minimum-qualification-proposal.md`, extending accepted P1 sections 3–8 and retaining the agent/tool/feedback thesis focus. No new code, thresholds, qualified support, measurements or experiments.
+- Proposed initial hard exclusions: outside fixed geometry/bands, exact-silent windows, no elevation above quiet; missing invalid prerequisites remain unavailable and overlapping reasons stay explicit. Nonzero alone is insufficient. Low-energy gates, quiet-elevation allowance, margin deadband and sufficiency values stay unset pending a small predeclared numerical-control recipe and results.
+- Fixed initial support comes from the actual runtime starting mix, never a clean reference. Candidate assessment keeps exact cell identity/denominator; target muting or an untested low-energy regime makes comparison unavailable. A quiet/silent masker reduction needs a separately verified control, not cell deletion.
+- Flagged existing evidence gap: qualification needs masker energy E_A, already returned by the front end but not stored in one-direction raw evidence. Later implementation must retain that value with provenance; no reverse-job dependency, new DSP or adapter is proposed.
+- The optional six-project/three-listener/grids remain unadopted. No numeric value from prior descriptive errors or noise groups is activated. Recommended next deliverable is a small reviewed control recipe; control generation, policy activation, R2B and R5 are not authorized by this note. Existing uncommitted work preserved; no FL/provider call, installation or commit.
+
+
+## 2026-11-22 — Structural qualification approved; small control plan proposed
+
+- Owner approved the minimum qualification structure and preparation of a small numerical-control plan. Updated the proposal status without approving numerical values or activation.
+- Wrote `docs/superpowers/plans/2026-11-22-p1-small-numerical-controls.md`: reuse existing independent captures; fixed sustained/decay PCM16 perturbations (120 direction-cases), zero/tail-zero controls (10), bounded near-zero search (at most 68), plus existing boundary checks. New control amplitudes/phases/rounding/search are proposed explicitly; no inputs/hashes/results generated.
+- Plan keeps independent reference reproduction separate from internal sensitivity, fixes source roles and stopping/resource guards, preserves startup/history and exact-zero metadata, and uses only existing DSP plus at most one bounded research script/tests. It does not adopt the optional music/listener/grid study or a production threshold. No new adapter, agent wiring, corpus requirement, provider/FL call, install or commit.
+- Current step is documentation only, with links/status/count/whitespace checks. Implementation, recipe execution and policy activation remain separate gates. Existing uncommitted code and media unchanged.
+
+
+## 2026-11-22 — Small P1 numerical checker implemented, registered run pending
+
+- Owner approved the finite numerical-control recipe for tests-first implementation. Added only `scripts/research/check_p1_numerical_controls.py` and `tests/unit/test_p1_numerical_controls.py`; existing production source hashes match the pre-task snapshot. All earlier uncommitted R2A/D1/dual-mono/report work is preserved.
+- `prepare` freezes exact little-endian count bytes, recipe/source/environment fingerprints and boundary configuration. `run` verifies all prepared files before DSP, stores shared full-call/full-band source grids, separate captured-reference E/T/dB-margin residuals and internal sensitivity cases, pending boundary input hashes before calculation, original-count silence and fixed nominal diagnostic C0. C0 is explicitly not qualified support. The noise evidence includes per-bin, all-513-bin partition and band references. No new adapter, port, domain record, qualification value or coordinator wiring.
+- Resource guards bound input/output bytes and time/cancellation; a pending completion file is published only after final checks. One registered run and one repeat are allowed; numerical file hashes are verified before claiming reproduction. Failures keep incomplete evidence and cannot publish success. Existing fixture comparison/verifier and tested noise-reference functions are reused; new controls never acquire an independent-reference label.
+- Tests first: missing checker RED, then 11 missing comparison cases RED; three reproduced guard gaps (prepare cancellation, metadata flag and completion publication) and two additional evidence cases (dB residual units and noise-array provenance) were fixed with regressions. Final focused suite: 34 passed with warnings as errors. Full locked suite after restored mutations: 6,921 passed, 4 skipped. Ruff check/format, fixture verifier, research/product CLI help, lock and diff checks pass.
+- Ten faithful mutations are caught; every file restored byte-identically. Three initially survived weak assertions around changed perturbation bytes, actual reversed values and persisted C0; strengthened permanent tests now catch them. One fresh read-only final review found no actionable defects. No equivalent survivor is claimed as caught.
+- Unit tests use temporary numerical data, existing numerical captures and explicitly labelled reduced end-to-end injections; there is no CLI subset/test mode. The private registered study directory does not exist. Task 3 remains unapproved/unexecuted; no study result, threshold, qualified S0, positive diagnosis, HT01 reanalysis, provider/FL call, installation or commit. The updated plan records implementation status and the separate execution gate.
+
+
+## 2026-11-22 — Authorized small P1 numerical controls completed twice
+
+- Owner authorized the registered run following implementation. Prepared the frozen exact-count manifest `ee4040658de096e0f5661c3ad58a543d34a9e5544c6c1179b6407b06041c0761`, then ran once and repeated once. All 198 new direction-cases were exercised; all 338 numerical-file hashes per run match exactly and were independently rehashed afterward. Process elapsed times 4.657 s / 16.109 s, recorded output 8,993,975 bytes per run; no memory or statistical performance claim.
+- Existing independent reference data: 92 calls / nine sources, 1,460 eligible supported E/T rows, 1,600 eligible supported directional rows. Largest relative E/T residuals 0.001279350428 / 0.001051880645; largest margin difference remains 0.005552104558 dB with no sign change. These are the old capture domain, not a new general tolerance.
+- New controls are internal sensitivity evidence: 96 perturbed direction-cases × 200 geometric cells = 19,200 dependent comparisons. Maximum absolute M change 18.997459625 dB in a weak masker band near the diagnostic noise reference; 167 signs changed. This is changed-input sensitivity, not a 19 dB backend error or audible effect. Exact-zero controls preserve 200 C0 cells despite target/masker muting; all margins remain finite, so original silence flags matter.
+- Both bounded boundary searches reached adjacent amplitudes 4127/4128 at call 6/band 6; nearest absolute M 0.000577645 / 0.000506329 dB. No independent captures for these new inputs, so neither their signs nor the old maximum defines a robust boundary or qualification value.
+- New `docs/research/p1-small-numerical-controls-results.md`; full raw grids, intent/transcripts, manifests, results and verification retained under `test/p1-small-numerical-controls/`. Marked Task 3 completed and appended the later execution status; earlier implementation-only records remain historical. Recommended next review is a bounded independent capture plan for existing frozen controls, with no new music or adapter.
+- No threshold, qualified S0, positive diagnosis, R2B/R5 activation, HT01 analysis, provider/FL call, install or commit. Source/capture hashes still match the frozen fingerprint; no music read or modified. No software-suite rerun claimed for this data-only task.
+
+
+## 2026-11-23 — Selected P1 independent C captures and comparison
+
+- Continued owner-authorized comparison: froze 10 pairs / 20 directions before C capture (four boundary endpoint pairs, nominal/perturbed pair behind the global sustained maximum, and each decay's nominal/maximum pair). Outcome-informed development selection, not blind/held-out or representative validation of all 198 cases. Selection SHA-256 `e2a140a564a58c32fb60f557ad25c11b70432152b9af98bb69805e1dfb926f83`; no new signal generation or selection after C results.
+- Found and verified original local Probe H binary (`cffe8ec22a74d886c19143c83ba1ef7550177d10347f9180c31bad30cc2ffb24`) and pinned GCC image. Started existing Docker Desktop (left running); no pull, download or install. Two offline capture sets, each sentinel then selected phase; read-only backend/input mounts, no network, one CPU / 512 MiB. Both exactly reproduce all old base fields on 92 sentinel calls. All phase outputs repeat byte-identically.
+- Preserved first sentinel output through two wrapper-check corrections: original documented stdout status-line filter was initially missing, and stored source-text table annotations were initially compared as though C emitted them. Exact actual table arrays/base fields then pass; no source, tolerance, control selection or C output changed and selected capture had not started. Errata and wrapper versions retained privately.
+- Frozen Python margin arrays are exactly recovered by the reviewed cancellation-safe kernel; the same kernel computes margins from C arrays. 11 selected source streams (two old anchors), 132 source calls, 2,772 source call-band rows per E/T, 5,040 directional rows / 4,000 supported cells. Mapping/metadata checks pass. New max absolute M disagreement 0.006586305084 dB, no supported sign disagreements; sampled near-zero points differ by at most 3.76e-7 dB. Finite maxima are not universal tolerances.
+- C reproduces the previously largest changed-input effect: +18.997980612 dB versus Python +18.997459625 dB. Across 1,200 selected nominal/perturbed supported comparisons both identify 11 input-driven sign changes, with no classification disagreement. This is model/input sensitivity, not a 19 dB backend error or audible defect.
+- Report: `docs/research/p1-independent-reference-results.md`; raw commands/captures, frozen sources/selection, per-cell residuals, scalar cross-check and primary reviewed-kernel evidence retained in `test/p1-independent-capture/`. All original numerical input/source/capture fingerprints are unchanged. No product code/tests changed or suite rerun claimed; no music read/mounted, provider/FL call, installation or commit.
+- Data support drafting a limited experimental qualification proposal, not activating its values. No energy-domain gate, numerical allowance, evidence-sufficiency value, qualified S0, R2B or R5 enabled. The prior result report gets an appended follow-up link; original findings remain.
+
+
+## 2026-11-23 — Experimental qualification pilot and feasible evaluation proposed
+
+- Owner requested the small policy proposal and asked whether more dataset creation would improve scientific foundation. Wrote `docs/research/p1-experimental-policy-pilot.md`, documentation only, with one explicit unapproved numerical candidate: both band energies ≥40 dB over diagnostic noise; quiet elevation ≥0.02 dB; robust M>0.02 dB; minimum 100 frozen cells; ≥25% robust fraction; four-call persistence. These are proposed engineering/operational choices, not calibrated/literature auditory thresholds or owner-approved values. No candidate was evaluated, selected or activated.
+- Proposed a single read-only test against all frozen numerical controls before any production qualification. Report empty/insufficient domain, per-band coverage and in-screen sensitivity; do not lower gates or enlarge the deadband until HT01 preference wins. Backend error, quantization sensitivity, sufficient evidence and correction acceptance remain separate. No proof of an energy domain is inferred from a written gate.
+- Scientific priorities: independent projects and frozen split/configuration; fair no-action/deterministic/one-pass/iterative comparisons; recorded actual calls/guards/recovery/feedback and cost; non-circular listening/goal assessment with transparent limitations. Preserve HT01 and inspected trap material as development; propose one new reserved independent project, optional another if feasible. No mandatory 6/9-project corpus or paid/expert listener panel. One held-out project remains a case study, not broad generalization.
+- Consulted AES Hafezi/Reiss primary publication for objective/perceived-masking limitations and ITU subjective-test guidance; none supplies the proposed cutoffs or validates a small preference test. Linked primary sources in the proposal. Added a clearly proposed feasible-pilot note to the existing dataset plan; no requirement or split status changed.
+- No code, measurements, controls, music, provider/FL calls, installed software or commits in this step. Existing uncommitted work preserved; R2A remains INCOMPLETE and R2B/R5 gated. Proposal/document link and whitespace checks only, no software-suite rerun claimed.
+
+
+## 2026-11-23 — Current-value engineering direction, pilot and writing handoff
+
+- Owner requested proceeding with the current thresholds to build the system despite uncertain mixing suitability, and asked whether completed work is ready for thesis reporting in another chat. Recorded this as provisional engineering direction, not scientific calibration or blanket live-run authority.
+- Evaluated the single unchanged candidate on all frozen numerical cases: 198 direction-case rows and 94 declared initial support rows. Initial sizes are 0/2/40; none reaches 100 cells, so no hypothetical candidate. Most empty cells and sparse band coverage preclude claiming the gate validated merely because no retained perturbation event exceeds the allowance. Short-control insufficiency does not prove the same result on long music. No parameter search, relaxation, new DSP or music analysis.
+- Private pilot preserves the initial configuration and a corrected-reader freeze. One field-name error (`nominal` versus actual `nominal_id`) stopped before the first policy score; original script/config and reader correction retained. No numeric setting/data selection changed. Report: `docs/research/p1-current-policy-pilot-results.md`.
+- Appended the minimal engineering continuation to the existing diagnosis/decision plan: explicit experimental fixed support/metric identity, real deterministic experimental candidates when sufficient evidence exists, and audited existing-coordinator composition. Legacy evidence/qualified meanings, no-fabricated-diagnosis rule, budgets/recovery/hidden references and separate live/model authorization stay intact. No core/adapter implementation changed in this step; exact new contracts remain the next reviewable code-design slice.
+- Created `docs/research/thesis-writing-handoff.md` for a separate writing chat: architecture/method/implementation and engineering results are draftable now; final agent comparisons, generalization and musical conclusions are pending. Summarize selected results in main text, retain exhaustive traces/hashes/test history in appendices. No final thesis manuscript or new chat was created.
+- No new dataset collection, policy activation, provider/FL call, installation or commit. Existing uncommitted source work preserved. Documentation links/counts and diff checks are the relevant checks; no product-suite rerun claimed for a read-only pilot/documentation step.
+
+
+## 2026-11-23 — Experimental fixed-support measurement implemented (uncommitted)
+
+Owner-authorized engineering continuation with current explicit experimental parameters unchanged. Added optional policy/frozen-support records in the existing measurement module, baseline full-clip screening and canonical schema2 persistence in preparation, and separate p1.experimental.*@1 current measurements over exactly the persisted cells in the existing analyzer. Kept qualification uncalibrated and geometric U unchanged. Insufficient support and unusable current evidence remain unavailable; the exactly silent masker at exact Q has its stated exception. No positive diagnosis, provider call, loop composition, installation or live FL action.
+
+Promoted the reviewed noise/quiet helpers to preparation and retained compatible research imports. A golden captured from the pre-change helper pins all numerical noise values including Nyquist. Native-mono legacy manifest/evidence bytes remain pinned. Experimental schema3 evidence records E_A, policy/noise/baseline/current identities and current flags. No historical study outputs or original audio were regenerated or edited.
+
+One fresh read-only final review found distinct current artifacts could alias under the same pair/time, and inclusive screen thresholds could misclassify boundary floats. Tests failed first; grouping now includes both artifact IDs and comparisons use power thresholds, including quiet-elevation neighbors. A further zero-allowance test pins initial exact-Q exclusion. Twelve faithful mutation probes were all caught and each file restored byte-identically. Only the three planned production source files differ from the task-start source hashes; prior uncommitted work is preserved.
+
+Checks: 43 experimental tests; full suite 6,964 passed, 4 skipped. Fixture verifier, repository lint, source/test/wrapper formatting, CLI help and dependency lock checks pass. These are implementation/numerical-contract results on disposable signals, not scientific calibration or musical quality evidence. Deterministic experimental diagnosis and existing-loop composition remain later increments.
+
+Final restored-source focused check: 511 passed with warnings treated as errors; git diff --check is clean.
+
+## 2026-11-23 — Experimental fixed-support diagnosis (Claude Code)
+- **Start:** HEAD `62133c3`. The tree was clean apart from the untracked handoff `2026-11-23-experimental-masking-diagnosis-handoff.md`, which is preserved.
+- **Scope:** extends the existing records (`masking_diagnosis`), pure rule (`core.diagnosis.masking`) and configured source (`drivers.diagnosis_runtime`). No new adapter, port or coordinator stage; no provider, FL Studio, CLI or dataset work.
+- **Thresholds:** unchanged owner-approved development values, read only from the plan's `ExperimentalMaskingPolicy`. Labelled boundary configurations are used only in tests.
+- **Rule:**
+  - exact source and selector binding;
+  - integral and consistent counts, with the run reconstructed exactly on the 576/44100 grid and bounded by the robust count and the frozen cells' longest same-band run;
+  - minimum frozen support, otherwise INCOMPLETE;
+  - one uncalibrated candidate iff robust/frozen >= 0.25 and run >= 4 calls, both inclusive.
+  - The ordinary positive fraction is never used.
+- **Method identity:** `p1.experimental.diagnosis@1+prepared.sha256.<manifest digest>`.
+- **Tests, written first:**
+  - The new rule and record tests and the runtime tests were red before implementation.
+  - The legacy readiness suites stayed green throughout.
+  - The engineering-integration test uses real preparation and the analyzer on disposable numerical WAVs with the current values. It finds a candidate, matching the independently recomputed predicate; a labelled small-support configuration gives INCOMPLETE. This is not validation data.
+  - The fixtures' run durations initially used `k * (576/44100)`, which is not bit-identical to the analyzer's `k * 576 / 44100`; the exact check correctly refused them. The fixtures now use the analyzer's expression.
+- **Checks:**
+  - **Full suite** (`uv run --locked --extra agent pytest -q`): 7,025 passed, 4 skipped.
+  - **Architecture:** 276 passed.
+  - **Remaining checks:** ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 11 of 11 caught. They cover positive count substituted for robust count, `>=` to `>` for fraction and persistence, minimum support removed, source identity skipped, specification/analyzer binding skipped, another support/policy accepted, method not bound, Unavailable treated as zero, a candidate leaked across directions, and support count not compared with the frozen cells. Every file was restored byte-identically.
+- **Limits:**
+  - Candidates are uncalibrated model-threshold exceedance hypotheses, not perceptual or mixing claims.
+  - No scientific calibration was performed.
+  - R5 composition, CLI enablement and live agent trials remain separate next work.
+- Uncommitted for Codex review.
+
+## 2026-11-23 — Experimental diagnosis review fixes (Claude Code)
+- **Findings (Codex, two P2) and fixes, with regressions written first:**
+  1. **Metric order changed the result:** values were read by definition position, although the records accept any order. Reversing valid definitions turned two candidates into zero, with incomplete coverage.
+     - **Fix:** observations are resolved by metric identity and returned in catalogue order.
+     - **Regression:** all six permutations give the same outcome.
+  2. **Large durations crashed:** a valid finite duration such as `1e308` overflowed when converted to calls.
+     - **Fix:** a duration beyond the frozen cells' longest same-band run is INCOMPLETE before that arithmetic, and the exact grid check still applies to every accepted value.
+     - **Regression:** `1e308`, the largest float, `1e20` and 11 calls are all INCOMPLETE with no candidate.
+- **Checks:**
+  - **Full suite** (`--extra agent`): 7,035 passed, 4 skipped.
+  - **Architecture:** 276 passed.
+  - **Remaining checks:** ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
+  - **Mutation probes:** 13 of 13 caught, two of them new. Every file was restored byte-identically.
+- Uncommitted for re-review. No provider, FL Studio or coordinator changes.
+
+
+## 2026-11-23 — R5 composition planned, no implementation
+
+Owner requested planning after the experimental diagnosis review. Inspected the existing decision round, R3/R4 audit/adapter, analyzer evidence associations, durable stores, runtime/CLI and calibrated FL profile. Proposed three separately reviewable increments in docs/superpowers/plans/2026-11-23-r5-agent-composition.md: A durable observation evidence and mandatory exact provider-exchange validation before use, B real-component programmatic composition under labelled external transports, C validated operator config/start/continue. No second loop, renderer or agent framework.
+
+The plan preserves uncalibrated current values, initial verification, native-channel guards, exact-dual-mono restrictions, acceptance/recovery authority and the hidden-reference boundary. It does not extend calibration beyond the tested FL build/title/Bass insert. New record shapes use explicit run-store schema v2 with old v1 stores refused read-only as unsupported, never migrated silently. The separate exchange store keeps its schema only if its actual record shapes remain compatible. No cross-store atomicity or live/model/musical result is claimed.
+
+One fresh read-only builder check found no material unanswered questions for this staged design. The R5C configuration syntax is deliberately a later review gate. Only documentation changed; no implementation tests, provider/FL operations, installs or study runs. R5A implementation awaits owner approval, and R5B/C remain separate gates.
+
+## 2026-11-23 — R5A provenance and decision-use gate implemented (Claude Code)
+- **Scope:** R5A of `2026-11-23-r5-agent-composition.md`, with ADR-041 (Proposed).
+  - **Implemented:**
+    - durable P1 evidence references in `AnalysisResponse`, preserved by the router;
+    - analyzer re-verification without DSP;
+    - immutable `ProviderRunBinding` and the narrow `DecisionEvidenceSource` port with the driver verifier;
+    - a coordinator gate recording matched audit evidence before use or retry;
+    - continuation provenance verification;
+    - run-store schema 2, with schema 1 refused and no migration.
+  - **Not done:** no R5B composition, CLI activation, provider call, FL operation, install, threshold change or music study.
+- **Earlier verification in this increment:**
+  - The first full suite gave 7,055 passed and 4 skipped, with 2 failures from intentionally changed public-shape pins, which were then updated.
+  - Extended contract checks: 177 passed.
+  - Four process-crash tests passed.
+- **Independent read-only review:** interrupted by a usage limit before completion. Its three reported findings were fixed, each with a regression that failed first:
+  1. core checks the proof's provider, prompt and schema against the frozen binding;
+  2. checkpoint observation caches must exactly equal the recorded analysis, values and alignment included;
+  3. status does not claim provider-run resumability and reports `provider_evidence_unavailable`.
+- **Author review:** a correctly hashed evidence file still needed semantic comparison with its manifest. Seven regressions failed first; geometry, policy, frozen cells, noise reference and baseline identities are now compared.
+- **Continuation in this session:**
+  - The last focused run of the five `test_r5a_*.py` files had completed (49 passed), and a rerun confirmed it.
+  - A completeness pass against plan 4.1–4.4 added regressions that passed on arrival, so they record covered behaviour rather than defects: changed intent, threshold, capability or history behind unchanged IDs; a local oversized request leaving no exchange; a recording failure staying pending and unverified; the exchange schema-1 shape pin with a round trip; and continuation verification of recorded P1 evidence.
+  - Fifteen faithful mutation probes were then run. Three first survived, exposing missing permanent tests:
+    - core accepting a proof for a foreign input or result;
+    - continuation ignoring a failed `verify_run`;
+    - verification ignoring current-state source hashes and missing evidence associations.
+  - Five regressions were added for those gaps; they pass on the current code, so they record behaviour rather than fix defects.
+- **Final checks:**
+  - **R5A tests:** 62 passed (warnings as errors).
+  - **Wider focused set:** 437 passed.
+  - **Architecture:** 276 passed.
+  - **Full suite** (`uv run --locked --extra agent pytest -q`): 7,097 passed, 4 skipped.
+  - **Mutation probes:** 15 of 15 caught, rerun after formatting; every file restored byte-identically.
+  - **Remaining checks:** the fixture verifier, ruff check and format, CLI help, `uv lock --check` and `git diff --check` are clean.
+- **Deviation:** unverifiable provider continuation raises `ValueError`, failing closed before admission, rather than returning a typed refusal.
+- **Limits:**
+  - Provenance is an adapter-checked local claim, not authentication of the remote provider.
+  - There is no cross-store atomicity.
+  - Only process-crash durability is tested.
+- Uncommitted for Codex review.
+
+
+## 2026-11-24 — Phase 1 offline gain feedback engineering verification
+
+The task explicitly authorizes synthetic integration fixtures for engineering checks only, superseding the earlier
+unit-only restriction for this narrowly scoped test. Audited revision: 32d49be5f362ca83fe5d6bdfa56720aceebf7b2f;
+existing dirty R5A work preserved. Verified the DOUBLE/PCM_16 mismatch, reused the existing coordinator and real
+file-backed level/render/integrity components, added an opt-in P1 ingress profile and recorded quantization
+provenance. Repeated-run equality also exposed libsndfile's PEAK wall-clock timestamp; the writer now canonicalizes
+that field to zero before sample-exact verification. No numerical DSP/model/provider changes or paid calls.
+
+Engineering tests use fixed synthetic sine stems, labelled diagnosis/proposals and explicit numerical level criteria.
+Real P1 descriptors are measured before and after; their numerical change is not claimed to improve masking.
+Guard/target rejection, safe retained-state recovery, iteration, abstention, admission refusal, budgets and injected
+render/analysis faults are exercised. Request packets and round-trippable reports retain evidence and source hashes.
+An initial relevant baseline suite passed 396 tests. Broad restricted-filesystem runs exposed hard-link permission
+failures, distinguished from product defects; final verification evidence accompanies the delivered run.
+See the [owning architecture section](../architecture/overview.md#offline-gain-only-closed-loop-engineering-verification-2026-11-24)
+for contracts, commands, fixture values and limitations. No scientific hypothesis is confirmed by this integration.
+
+Final isolated-snapshot verification (2026-11-24): full `python -m pytest -q -p no:cacheprovider` executed with native Windows filesystem access: **7124 passed, 4 skipped**; `ruff check .`: **all checks passed**. The two hard-link failures from the restricted run pass with that access. Source/record inventories and simulated Claude/request/parser tests are included in the full suite. This is engineering evidence only.
+
+
+## 2026-11-24 — System checkpoint review and next-work plan
+
+Owner requested a review of the current work and a next-step plan. Read the actual tree/commits, R5A completion ledger, latest offline engineering changes/tests and architecture/roadmap/research records. HEAD32d49be; R5A and the newer offline profile/feedback work remain uncommitted and overlap in files. No source was changed in this review.
+
+Fresh focused verification of all R5A tests plus float-ingress/offline-feedback cases: 89 passed with warnings as errors. The previous session's isolated native-filesystem full-suite result (7124 passed,4 skipped) is recorded above, not independently rerun here. The offline case uses real files/DSP/render/verification but labelled diagnosis/proposals. It is not the missing real diagnosis/provider composition or musical validation.
+
+Saved docs/research/2026-11-24-system-checkpoint-and-next-steps.md and appended a roadmap status correction without changing its historical timetable or research scope. Order: stabilize/review a coherent checkpoint; R5B real-component programmatic composition; R5C operator configuration/start/continue; separately authorized eligible live development; then frozen fair agent comparisons and bounded musical assessment. Existing calibration/profile limits and current experimental thresholds remain explicit. More music is useful in parallel but is not an implementation prerequisite; no paid listener panel or new correction framework is assumed. No provider/FL operation, installation, study execution, threshold or requirement change.
+
+
+## 2026-11-24 — Authorized checkpoint review before commit
+
+Owner selected step1: review, verify and commit a coherent current checkpoint. Starting HEAD32d49be, preserving the completed R5A and later offline/float-ingress work. Shared evidence/interface files make a combined checkpoint appropriate; no attempt was made to split them into partially valid snapshots. A fresh read-only reviewer completed the combined review and reported two P2 findings, with no further blocking findings identified.
+
+Five new regressions failed before correction: schema4 accepted missing/invalid analysis transform or count hash under a rehashed evidence file, and continuation could trust a configured analyzer's different plan despite frozen provider binding. Reopen now validates schema4 provenance metadata; continuation checks required associations against its exact frozen plan first. A prior positive test fixture was corrected from its placeholder plan to its actual measured plan. Both faithful fix-removal probes are caught; each source was restored byte-identically. The first probe script stopped before writing due to a CRLF anchor mismatch; the corrected probes use the actual line endings.
+
+Fresh pre-fix full suite:7124 passed,4 skipped. Focused post-fix source/evidence/offline tests:52 passed with warnings as errors. Four pre-existing formatting issues and two import-order issues in new regressions were corrected. Fixture verification, dependency lock and CLI loading pass. No provider/FL call, installation, music-study execution or threshold change. Final corrected-source full-suite result follows before commit.
+
+
+Final checkpoint verification after the two fixes and formatting (2026-11-24): native-filesystem `uv run --locked --extra agent python -m pytest -q -p no:cacheprovider` — **7,129 passed, 4 skipped**. `ruff check .`, `ruff format --check src tests` (307 files), fixture verifier, CLI help, dependency lock and diff checks pass. The combined R5A/offline checkpoint is authorized for commit; R5B/C remain unimplemented and live operations remain separately gated.
+
+
+## 2026-11-24 — R5B real-component programmatic composition
+
+Owner authorized continuing R5B after checkpoint5528b61. Implemented drivers.agent_runtime.DawAgentRuntime tests-first, with additive DawAgentBinding, real preparation/manifest/evidence, P1/level router, experimental diagnosis, audited Claude adapter, durable run/acceptance store, integrity inspector, FL controller/journal and existing export handoff/coordinator. Typed request factory keeps producer roles, criteria, permissions and budgets explicit; only external provider/device transports and clock/IDs are replaced in numerical integration. No new adapter, loop, dependency registry, JSON run language or musical acceptance default.
+
+The runtime owns per-run stores/resources, refuses overwrites, closes on failure, and retains diagnostic artifacts instead of deleting/repreparing. Reopen checks exact stored local/provider settings, frozen manifest and evidence, then existing suspension classification without resend. Current checkpoint inventory supports a second accepted-state export. Credentials stay separate and tests check local physical paths remain outside public packets. The base provider record fields/run schema2/exchange schema1 remain unchanged; the additional binding uses a distinct codec tag.
+
+Fresh read-only final review found one P2: incompatible native export timing/render metadata reached provider dispatch before later admission refusal. Four regressions failed before correction; creation now compares frame count, start, rate and render spec before external construction. No other confirmed P1/P2 was reported. Additional integration covers genuine incomplete/below-threshold abstention, initial inconclusive/satisfied gates, malformed/refused/timeout provider replies, denied action, rejected guard followed by exact recovery and revised feedback, missing evidence/manifest, local/provider configuration drift, partial-construction cleanup, intermediate acceptance/second suspension, lost apply reply and lost acceptance acknowledgement. Accepted authority is retained; unsupported nonidentical stereo candidate recovers without fold-down. These are software engineering results on synthetic files and labelled external doubles, not real-model/FL/music validation.
+
+Eight faithful mutations are caught, each restored byte-identically. Two initially survived because tests did not isolate local MIDI-settings comparison or manifest refusal before external construction; the permanent tests now do. Fixture mistakes (missing json import, wrong content_hash field and escaped Windows path assertion) were corrected without changing production behavior. Preparation/diagnosis tests observed missing-module/import RED before implementation; the review regression observed four RED failures before its fix.
+
+Final verification: `uv run --locked --extra agent pytest -q` — **7162 passed,4 skipped** (213.34s). Composition33 plus architecture276: **309 passed with warnings as errors**. Ruff check, format check (310 files), frozen dist10 fixture verification, CLI/daw help, dependency lock and diff checks pass. Proposed ADR-042, index, plan outcome, architecture and roadmap updated; requirement status and accepted ADRs untouched. Everything is uncommitted for review. No provider/FL call, installation, save/export operation or threshold change. CLI start/continue still refuse; R5C schema/operator activation remains next, live trials separately authorized.
+
+
+## 2026-11-24 — R5C operator configuration/CLI plan (planning only)
+
+Owner requested an R5C plan without implementation. Read the uncommitted R5B tree, the R5 plan, ADR-040/042, the CLI, the DAW runtime/commands, the codec, restart/continuation and the export handoff. Saved docs/superpowers/plans/2026-11-24-r5c-operator-cli.md (Proposed).
+
+The plan proposes a separate allowlisted run file (schema 1) of codec-encoded core records. Every preparation-derived field (analysis specification/digest, diagnosis jobs, DAW profile, binding, limits) is absent from the file, which removes the digest cycle; a provisional request validates structure before any write. Further proposals:
+- first-session confirmation repeats both fader coordinates against a fresh inspection;
+- `continue` rebuilds nothing from flags and requires an export ID and an operator;
+- exit codes stay 0/2/4;
+- status changes are additive only.
+
+The plan also records these findings:
+- no existing environment-variable credential mechanism;
+- conflicting ADR-040/H9 proposals;
+- R5B preflight after preparation writes;
+- untyped runtime refusals;
+- no production constant for the reviewed experimental policy.
+
+An example run file was generated in memory from unit-test fixture records with the real codec. Its values are illustrative, not thresholds or defaults.
+
+No source code, requirement status, threshold or ADR changed. No provider or FL operation, audio change or test run took place.
+
+Review corrections to the R5C plan (2026-11-24, planning only). These are applied in place in the plan's §5.0, §6.1, §7.1, §8, §10–§14:
+1. **Outcome wording.** Keywords name the termination only. A recorded-state block is printed: DAW writes, acceptances, authoritative and verified state, and uncertainty. Exit 4 separates refusal before effects from STOPPED with effects possible, so "ABSTAINED" no longer implies that nothing was written.
+2. **File safety before hashing.** The manifest builder reuses the importer's workspace, link/reparse, listing and identity checks through one new `FileExportHandoff` method, before any output file is opened.
+3. **Strict, bounded run-file parsing.** It adds a size bound with a bounded read, refusals for duplicate keys, non-finite numbers and over-long integers, and a nesting pre-scan. Every refusal exits 2 before any resource is created.
+
+D3 (level-only acceptance) is relabelled as a scope choice, not a scientific requirement or masking-improvement evidence. The reviewer recommends starting with C1 only. The example run file's measured nesting depth is 14. No source code, tests or ADRs changed.
+
+## 2026-11-24 — R5C increment C1: run configuration, factory and pre-write check (implementation)
+
+The owner approved C1 only. C1 was implemented tests-first (ADR-043 Proposed; plan outcome in `2026-11-24-r5c-operator-cli.md`).
+
+**What changed:**
+- `drivers.daw_runtime`:
+  - `read_strict_json`: a regular unlinked file; at most 4 MiB through a bounded read; strict UTF-8 without a byte-order mark; nesting depth at most 64 by a pre-scan; no duplicate keys or non-finite numbers; integers of at most 20 digits;
+  - the allowlisted schema 1 run envelope of codec records, in which derived fields cannot be declared;
+  - a provisional request validated before any write;
+  - the prepared request factory;
+  - a pinned reviewed experimental policy and level-only declared jobs (a scope choice).
+- `drivers.agent_runtime`: `RuntimeRefusal`, the pre-write `DawAgentRuntime.check`, and an explicit preflight ingress profile.
+- CLI `start`/`continue` still refuse; C2–C4 are not started.
+
+**Review fixes (two defects, regressions written first):**
+1. On reopen, a missing, altered or unreadable stored preparation manifest (or one decoding to another plan) raised `PreparationStoreError` or a raw `OSError`. It is now a `RuntimeRefusal` and is never regenerated.
+2. An `OSError` during `fstat` or `read` of a run file escaped unchanged. It is now `ConfigError`, with the descriptor still closed; programming errors propagate unchanged.
+
+Five regressions failed before the fixes, for the intended reasons. One survivor of the fix-removal probes (the unreachable-by-file-damage "differs from the run" comparison) received a loader-substitution regression.
+
+**Process note:** one full-suite run was started while mutation probes were temporarily rewriting sources. It stalled in a restart-subprocess test, was stopped and is **not** counted. Probes and the full suite were then run strictly in sequence.
+
+**Final evidence (sources restored byte-identically, SHA-256 checked):**
+- **Mutation probes:** 15 of 15 for C1 guards and 4 of 4 for the review fixes.
+- **Clean full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,258 passed, 4 skipped** (172.81 s). An earlier pre-fix C1 run gave 7,251 passed, 4 skipped.
+- **Focused C1/R5B/CLI/architecture with `-W error`:** 425 passed. The C1 file passed alone after its final formatting-only change (96 passed).
+- **Other checks:** `ruff check` and `ruff format --check` (312 files), fixture verifier, `uv lock --check`, `git diff --check` and `daw --help` pass.
+
+No provider/FL operation, installation, audio change, threshold or requirement-status change. Everything is uncommitted pending the R5B+C1 checkpoint review.
+
+
+## 2026-11-24 — Combined R5B + R5C C1 checkpoint review
+
+Owner requested review and a combined checkpoint commit. Reviewed the composition/configuration boundary and both prior C1 fixes; no further blocking implementation finding identified. C2 specification is recorded for later review only; CLI, daw_commands and core admission are unchanged by this checkpoint, so start/continue remain unavailable. ADR-042/043 implementation-review status updated while both remain Proposed.
+
+Independent fresh verification on the final source, run alone without mutations: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7258 passed,4 skipped**, 197.84s. Ruff check and format (312 files), frozen fixture verification, dependency lock, daw help and diff checks pass. The earlier implementation evidence (19 C1/fix probes, byte restoration and 425 focused tests) is recorded above and was not rerun as mutation work during this review. The checkpoint includes the reviewed R5B composition, C1 configuration/factory/preflight, tests and corresponding documentation/planning artifacts; it includes no C2 implementation, live provider/FL action, script installation, threshold change or scientific-quality claim. Approved for the requested combined commit.
+
+## 2026-11-24 — R5C increment C2: `daw start` activation (implementation)
+
+The owner approved C2 only, from checkpoint `1e681c5`, with five clarifications. All five are recorded in plan §C2.9:
+1. the run file is loaded once;
+2. native-export metadata is a configuration error (exit 2);
+3. numeric arguments are tested through the real parser;
+4. failure reporting is protected throughout the lifecycle;
+5. output is factual.
+
+**Implementation:**
+- `daw start` composes the existing `DawAgentRuntime`, in this order:
+  1. arguments, the plain-decimal fader grammar, and the run ID;
+  2. the tool file, then the run file, each loaded once;
+  3. `ANTHROPIC_API_KEY`;
+  4. no existing artifacts;
+  5. the provisional request and the pre-write check;
+  6. the existing `daw_start_check` on the FL journal, one fresh inspection and the exact first-session confirmation;
+  7. `create`, `start` and `close`.
+- `exact_fader` is extracted in `core.admission.daw`.
+- The output reports the termination keyword, recorded usage, acceptances, authoritative and verified state and uncertainty. Suspensions add manual export instructions from the saved checkpoint, with the continuation command labelled as requiring C3.
+- Exceptions from S6 onward are reported by type only. A cleanup failure after an outcome keeps the outcome and exits 4.
+- No new loop, adapter, port, production test switch or decision-file substitute. No threshold, calibration scope, requirement status or accepted ADR changed.
+
+**Tests:** `tests/unit/test_daw_cli_start.py` (55 tests) runs through `main`. Only the MIDI transport (the simulated FL host behind the reviewed v2 device script) and the provider transport (labelled replies) are replaced; real preparation, measurement, diagnosis, audit, admission, verification, stores and journal run underneath. Coverage:
+- exponent and negative-exponent literals are accepted through the real parser; non-finite and unsupported literals exit 2;
+- the credential is read after configuration validation;
+- invalid native-export metadata exits 2;
+- unresolved, blocked, anchor-mismatch, live-drift and identity refusals exit 4 and create no run;
+- first-session phases one and two;
+- an anchored journal with and without the flag;
+- suspension instructions checked against the stored checkpoint;
+- no-change-needed and abstention blocks;
+- type-only `STOPPED` reports after a fader write and after provider dispatch;
+- credential sentinels during provider construction, dispatch and cleanup, absent from output and every file under the test directory.
+
+**Observations:**
+- **RED:** 37 of 53 failed before implementation. Four test-fixture errors were corrected:
+  - `-1.1527416706085206` rounds to the real reading, so `nextafter` is used instead;
+  - a negative normalized value is invalid input (exit 2);
+  - the device message type is `set_gain_db`;
+  - a test with filler assertions was removed.
+- **Masked probe:** the first probe run caught 13 of 16. Two probes had anchor mismatches in the probe script. The `matches_binding` probe survived because the simulated device omits the reading on identity mismatch, so a later guard refused. The test was strengthened to require the identity refusal.
+- **Final probes:** 16 of 16 caught (M6–M10, M14, M21–M29, M31), run sequentially with no concurrent suite; sources restored byte-identically (SHA-256 checked).
+- Start-only accept-then-abstain is unreachable and moves to C3.
+
+**Remaining limits:**
+- The coordinator's existing terminal explanation embeds exception text when a DAW effect is pending. It is stored and never printed by `start`; it is unchanged by instruction.
+- The `status`/`recover` wording for suspended non-provider runs still names an unavailable decision maker, unchanged under the status boundary.
+- Windows MIDI only.
+- argparse's private negative-number attribute is pinned by tests.
+
+**Verification on the final source, run alone after all probes were restored:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,312 passed, 4 skipped** (224.87 s).
+- **Focused CLI/start/run-config/runtime/coordinator/recovery/architecture with `-W error`:** 545 passed. After the last test strengthening, CLI/start/architecture with `-W error` gave 350 passed.
+- **Other checks:** `ruff check`, `ruff format --check` (313 files), fixture verifier, `uv lock --check`, `git diff --check` and `daw start --help` pass.
+
+Nothing is committed (for Codex review). No live provider/FL operation, installation, saving, exporting, audio change or musical claim.
+
+## 2026-11-24 — R5C C2 review fix: unreleased pre-check MIDI transport
+
+**Finding.** The reviewer reproduced it: a simulated transport whose first close failed blocked only the pre-check controller. `daw start` then built a fresh runtime controller and continued, returning 0/SUSPENDED after one provider call, two inspections and one gain write.
+
+**Fix, tests first:**
+- a public read-only `FlStudioParameterController.blocked` property over the existing in-memory block;
+- `daw_precheck` checks it right after the inspection, keeps the blocked controller (and its retained transport) referenced for the process lifetime, and refuses with exit 4 before runtime creation.
+
+Two regressions failed first, for the intended reasons: exit 0, and a timeout-only refusal. They now assert:
+- no provider construction or call;
+- a single MIDI transport, closed exactly once;
+- one inspection and no gain write;
+- no run store;
+- retained ownership of the controller and its transport.
+
+**Verification:**
+- **Fix-removal probes:** 3 of 3 caught (check removed, ownership dropped, property forced false), run sequentially, with sources restored byte-identically.
+- **Clean full suite, run alone afterwards:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,314 passed, 4 skipped** (191.73 s).
+- **Focused start/CLI/FL controller/runtime/architecture with `-W error`:** 445 passed.
+- **Other checks:** ruff check and format (313 files), fixture verifier, lock, diff and `daw start --help` pass.
+
+**Limit:** the block is process-local and not journaled. A new process uses a fresh controller, and the operator is told to check the MIDI connection.
+
+Uncommitted for review. No live provider/FL operation.
+
+## 2026-11-24 — R5C C2 review fix 2: later starts in a blocked process
+
+**Finding.** The reviewer reproduced that a second `daw start` in the same process ignored the retained blocked pre-check controller and reached 0/SUSPENDED with one provider call and one gain write.
+
+**Fix, tests first.** `start` refuses (exit 4) as its first action while `_UNRELEASED_CONTROLLERS` is non-empty, before any store, MIDI transport, runtime or provider. This extends only the existing process-local ownership list: no persistence, retries, reset flag or new recovery framework.
+
+**Regression.** Same and different run ID, against the existing close-fails-once transport. Both invocations return 4, with:
+- one transport opened and its close attempted once;
+- only the original inspection;
+- no provider construction or call, gain write, run store or runtime directory;
+- the original controller and transport retained.
+
+A healthy-process control still suspends. The retry regression failed first (exit 0 for both IDs).
+
+**Verification:**
+- **Fix-removal probes:** 5 of 5 caught (guard removed; guard bypassed by a new run ID; retention cleared; blocked check removed; `blocked` forced false), run sequentially, with sources restored byte-identically.
+- **Clean full suite, run alone afterwards:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,317 passed, 4 skipped** (308.18 s).
+- **Focused start/CLI/FL controller/runtime/architecture with `-W error`:** 433 passed.
+- **Other checks:** ruff check and format (313 files), fixture verifier, lock, diff and `daw start --help` pass.
+
+Uncommitted. No live provider/FL operation, installation, audio change, or C3/C4 work.
+
+## 2026-11-24 — R5C C3 plan: `daw continue` (planning only)
+
+The owner requested a C3-only plan from checkpoint `0d61fc4`. I read `reopen`/`_assemble`, `continue_export`/`resume_daw`/`admit_continuation`, the restart classification, the importer's private checks, `provider_identity` and the C2 command code, and saved the specification as plan section "C3 specification" (Proposed). The design reuses `reopen` and `continue_export`, with:
+- an inverse of `provider_identity` that validates every field;
+- one `FileExportHandoff.attestation_digests` method that reuses the importer's workspace, request, listing, link and physical-file checks before any bounded, handle-checked hashing;
+- the C2 process-local MIDI block checked first;
+- factual reused output;
+- a 0/2/4 exit mapping independent of the run outcome.
+
+**Recorded code facts:**
+- `reopen` constructs (but does not use) the provider transport before verifying evidence and classifying.
+- Its not-resumable refusal embeds the full record repr.
+- Store-busy and legacy errors are unwrapped.
+- An importer rejection ends the run.
+- A runtime controller blocked during `start` is not retained (a shared C2 gap).
+- C2's next-command wording says C3 is unavailable.
+
+**Decisions D-C3-1 to D-C3-7 await review:**
+- construction before classification;
+- import rejection consuming the suspension;
+- exit 0 for a recorded import failure;
+- retaining blocked runtime controllers for `start` and `continue`;
+- the attestation identity string;
+- recover support for interrupted continuations;
+- the stale status wording.
+
+No source or test changed. No provider/FL operation, installation, audio change or threshold change.
+
+## 2026-11-24 — R5C increment C3: `daw continue` (implementation)
+
+The owner approved C3 with D-C3-1 to D-C3-5, from checkpoint `0d61fc4`.
+
+**Implementation (tests first):**
+- `config_from_identity`;
+- `reopen(provider_config=None)` with wrapped store errors and a code-only not-resumable message;
+- `FileExportHandoff.attestation_digests`, which reuses the importer's checks before bounded, handle-checked hashing;
+- `continue_run` (process block → artifacts → reopen → export ID → safe digests → manifest → `continue_export` → retain-if-blocked → close);
+- CLI `continue` with the 0/2/4 mapping;
+- the "next, after exporting" wording;
+- shared retention of blocked runtime controllers for `start` and `continue` (D-C3-4).
+
+**Tests.** `test_daw_cli_continue.py` has 51 tests through `main`. Only MIDI and provider transports are simulated; real preparation, measurement, diagnosis, audit, admission, verification, recovery, stores and journal run underneath. Coverage:
+- input errors; the process block; missing, busy and drifted runs; an unusable manifest; a wrong export ID with no output opened;
+- manifest safety: stray, hard-link, symlink, replaced workspace (copied files, and the same files renamed), altered request, oversized output with a bounded read, a swap before open, a change during read. The suspension stays resumable after each;
+- outcomes: accepted; guard-rejected then restored then suspended again; intermediate acceptance with a stale export ID refused; accept-then-abstain and accept-then-limit with earlier writes and acceptances shown; finished runs refused; import rejection after a valid manifest recorded as an outcome; lost acceptance acknowledgement keeping authority;
+- recorded non-default provider settings used exactly;
+- admission refusal (`CONTINUATION_IN_PROGRESS`, through labelled ownership fault injection);
+- credential sentinels at reopen construction, dispatch and cleanup;
+- blocked runtime controllers in `start` and `continue` blocking later commands;
+- a new process continuing with one fader write in total and no further provider call.
+
+**Observations:**
+- **RED:** 27 failed and 3 errored before implementation. The 17 that passed early were the identity unit tests plus input tests that then passed only because `continue` still exited 2.
+- **Fixture corrections:** a change-during-read hook first fired on the request file, before the output's `lstat`; it now targets the output's descriptor. The expected recovery count (2, not 1) is read from the record. The labelled provider double needed the run's provider configuration.
+- **Two coverage gaps found while writing probes:** nothing tested that the recorded identity overrides defaults, and nothing reached an admission refusal. Two tests were added before the probes.
+- **Probes:** the first pass caught 15 of 18. Three were masked by later guards with the same outcome: the request-file identity masked the workspace-directory check; the final re-check masked the opened-handle check; the value check masked the type check for `True`. Three tests were strengthened: a workspace replaced around the same physical files, the exact "changed before it was opened" message, and `sdk_retries=False`. The re-run of those three caught all of them, so 18 of 18 are caught, run sequentially with sources restored byte-identically.
+
+**Remaining limits:**
+- `CONTINUATION_INTERRUPTED` is not reproducible through the CLI; it is covered in core.
+- There is no CLI test for a legacy schema 1 store.
+- The process block is process-local.
+- D-C3-6 and D-C3-7 are open.
+- `CLAUDE.md`'s state section still says start/continue refuse (not edited).
+
+**Verification on the final source, run alone after all probes were restored:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,368 passed, 4 skipped** (391.58 s).
+- **Focused continue/start/CLI/run-config/runtime/export-handoff/Claude-config/architecture with `-W error`:** 584 passed.
+- **Other checks:** `ruff check`, `ruff format --check` (315 files), fixture verifier, `uv lock --check`, `git diff --check` and `daw continue --help` pass.
+
+Uncommitted for review. No live provider/FL operation, installation, saving, exporting, audio change, threshold change or musical claim.
+
+## 2026-11-24 — R5C C3 review fix: per-output fail-fast hashing; interrupted continuation; P11 correction
+
+**Corrections to the C3 entry above:**
+- It stated that `CONTINUATION_INTERRUPTED` is not reproducible through the CLI. **That is superseded:** an abrupt process end right after the continuation marker commits is reproducible, and is now a permanent regression.
+- It counted P11 as a type-check detection. **That is corrected:** the counted P11 removed both the type check and the round trip. With the round trip kept, removing only the type check is an equivalent mutant that still refuses `False`.
+
+**Fix 1 — per-output fail-fast (tests first).** The reviewer showed that a change to `01-stem.wav` during hashing still let `02-master.wav` be read before refusal. `attestation_digests` now re-checks each output's read handle and path immediately after reading it, before opening the next. The final whole-workspace check is retained. The regression failed first (the later output was opened). A second regression changes an earlier output while a later one is read, so the final check alone must refuse.
+
+**Fix 2 — interrupted continuation through the CLI.** A labelled `os._exit(77)` crash point in the child helper fires right after the committed continuation marker. Then:
+- the next `continue` returns 4 with `continuation_interrupted`;
+- the read-only recover view returns 0 with that classification;
+- no further provider call is made and no fader write is resent.
+
+The test passed on first run, pinning existing behaviour. Performing recovery operations on such a run was not exercised (D-C3-6 is partly answered).
+
+**Probes**, run sequentially with sources restored byte-identically (SHA-256 checked):
+- per-output check removed: caught;
+- final re-check removed: caught;
+- workspace check, object checks, pre-read handle identity and bounded read, each removed: caught;
+- SDK-retry type check removed alone: survived (equivalent).
+
+One probe-script anchor first matched both the hashing and import code paths. The script stopped before mutating anything, both sources verified unchanged, and the anchor was lengthened.
+
+**Verification on the final source, run alone afterwards:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,371 passed, 4 skipped** (364.65 s).
+- **Focused continue/start/CLI/export-handoff/architecture with `-W error`:** 447 passed.
+- **Other checks:** ruff check and format (315 files), fixture verifier, lock, diff and `daw continue --help` pass.
+
+Uncommitted. No live provider/FL operation.
+
+
+## 2026-11-24 — C3 checkpoint review and independent verification
+
+Owner requested a C3 checkpoint commit after review. The previously reproduced per-output hashing gap is fixed: handle/path metadata are rechecked before the next output opens, while the final workspace check catches earlier files changed during later reads. The child-process hard-exit regression now pins continuation_interrupted refusal and the read-only recovery view without another provider call or fader write. Performing recovery itself is not claimed. The SDK retry type-only mutation is correctly recorded as equivalent under exact identity round-tripping. No further blocking finding identified in this review; C4 remains outside this checkpoint.
+
+Independent final-source verification, without concurrent suites or mutations: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7371 passed,4 skipped**, 400.59s. Ruff check and formatting (315 files), frozen fixture verification, dependency lock, continue help and staged whitespace checks pass. Earlier independent CLI review passed130 tests before the final three regression additions; the full final run above includes them. All production transports used by tests remain simulated; no live provider/FL action, installation, export/save automation, threshold change or requirement-status change was performed. The reviewed C3 implementation and its documentation are approved for the requested checkpoint commit.
+
+## 2026-11-24 — R5C increment C4: read-only provider status and corrected guidance (implementation)
+
+The owner approved C4 only, from checkpoint `6d25978` (C3 committed).
+
+**Implementation.** Extended `_status_of` for provider-bound runs:
+- the classification stays `provider_evidence_unavailable` (exit 4), with an explanation that status does not verify provenance;
+- new `recorded_state {verified: false, …}` from the existing classifier over read-only FL facts;
+- a new `provider` block from the stored binding: identity, parameters, prompt/schema, diagnosis method and prepared digest, plus a runtime-settings SHA-256 only for `DawAgentBinding`;
+- authority, usage/limits, FL facts and the awaiting export.
+
+The plain status output lists the same information. The stale "unavailable decision maker" guidance in status and the recovery view is replaced by pointers to the manual-export/`daw continue` and `daw recover` flows. `CLAUDE.md`'s State section is updated only there: the CLI is active; all integrated evidence is simulated; no live mixing validation exists.
+
+**Tests:** 9 new, through real stores from synthetic fixtures. 7 failed first for the intended reasons; 2 pin existing behaviour (store problems, and recovery options independent of the binding under equal FL facts). Forbidden-open guards fail the test on any MIDI, provider, writable store or journal, audit-store, evidence or manifest open, and run without a credential. Store and journal files are byte-identical before and after. A base `ProviderRunBinding` was recorded into a real second store by re-appending the same events with the base binding.
+
+**Probes:** 11 of 11 caught, run sequentially with sources restored byte-identically (SHA-256 checked).
+
+**Verification on the final source, run alone afterwards:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,380 passed, 4 skipped** (302.12 s).
+- **Focused status/CLI/start/continue/R5A/architecture with `-W error`:** 425 passed.
+- **Other checks:** ruff check and format (316 files), fixture verifier, lock, diff and `daw status --help` pass.
+
+**Limits:**
+- Status does not verify provenance.
+- Recovery operations on interrupted continuations were not exercised.
+
+Uncommitted for review. No live provider/FL operation, installation, saving, exporting, automatic recovery, threshold, schema or requirement-status change.
+
+## 2026-11-24 — R5C C4 review fix: failed snapshot after a successful read-only open
+
+**Finding.** The reviewer reproduced that a store becoming busy after `daw status` opened it read-only made `snapshot()` return a `PortFailure`, which `_status_of` dereferenced (`AttributeError`).
+
+**Fix, tests first.** `_status_of` validates the snapshot result and otherwise raises the existing `RecoveryRefused`, shown as `unavailable` (exit 4), with:
+- the reader closed;
+- no FL journal, classifier, provider block, transport, audit or evidence access;
+- no retry and no write.
+
+There is no new type, and recovery behaviour is unchanged.
+
+**Regressions.** Two through `main` with real disposable SQLite stores: exclusive ownership taken by a second connection between open and snapshot (then released, after which status is normal again), and a returned unavailable snapshot without reliance on message text. Both failed first with `AttributeError`.
+
+**Probes:** 3 of 3 caught, run sequentially with the source restored byte-identically.
+
+**Verification on the final source, run alone afterwards:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,382 passed, 4 skipped** (349.09 s).
+- **Focused status/CLI/R5A/architecture with `-W error`:** 313 passed.
+- **Other checks:** ruff check and format (316 files), fixture verifier, lock and diff pass.
+
+Uncommitted. No live operation.

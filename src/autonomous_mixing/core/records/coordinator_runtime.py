@@ -41,6 +41,7 @@ from autonomous_mixing.core.records.observation import (
     validate_observation_sources,
 )
 from autonomous_mixing.core.records.project import ProjectState
+from autonomous_mixing.core.records.provider_run import ProviderRunBinding
 from autonomous_mixing.core.records.rendering import (
     ExecutionWorkspace,
     RenderedCandidate,
@@ -258,8 +259,11 @@ class RunRequest:
     retry_policy: DecisionRetryPolicy
     # ADR-035: the optional operator-attended DAW session; None keeps the offline run exactly as before.
     daw_session: DawSessionConfig | None = None
+    provider_binding: ProviderRunBinding | None = None
 
     def __post_init__(self) -> None:
+        if self.provider_binding is not None:
+            require_instance(self.provider_binding, ProviderRunBinding, "provider binding")
         require_instance(self.run_id, RunId, "RunRequest.run_id")
         require_instance(self.initial_state, ProjectState, "RunRequest.initial_state")
         require_instance(self.configuration, RunConfiguration, "RunRequest.configuration")
