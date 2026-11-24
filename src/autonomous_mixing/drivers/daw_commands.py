@@ -13,6 +13,7 @@ the operator's attestation through the existing ``continue_export``.
 """
 
 import hashlib
+import json
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,28 +114,57 @@ def _open_store(config, run_id, *, read_only):
         raise RecoveryRefused(f"run store cannot be read: {error}") from error
 
 
+SUSPENDED_GUIDANCE = (
+    "suspended at its checkpoint, awaiting the operator's manual export: export the listed files into the workspace, "
+    "then run 'daw continue' with the export ID"
+)
+PROVIDER_UNVERIFIED = (
+    "provider-run provenance is not verified by 'daw status' (it reads no decision-audit store or evidence file); "
+    "'daw continue' verifies it under ownership before any effect. The recorded state shown is unverified"
+)
+
+
+def _ref(reference) -> str:
+    return f"{reference.name}@{reference.version}"
+
+
+def _provider(binding) -> dict:
+    """The stored provider identity and policy references; local runtime settings only as a SHA-256, never content."""
+    identity, policy = binding.provider, binding.diagnosis_policy
+    shown = {
+        "binding": type(binding).__name__,
+        "provider": identity.provider,
+        "api_version": identity.api_version,
+        "model": identity.requested_model,
+        "parameters": json.loads(identity.parameters),
+        "prompt": _ref(binding.prompt),
+        "response_schema": _ref(binding.response_schema),
+        "diagnosis_method": _ref(policy.method),
+        "prepared_plan_sha256": policy.measurement_plan.prepared_digest,
+    }
+    settings = getattr(binding, "runtime_settings", None)  # only DawAgentBinding records local settings
+    if isinstance(settings, str):
+        shown["runtime_settings_sha256"] = hashlib.sha256(settings.encode("utf-8")).hexdigest()
+    return shown
+
+
 def _status_of(config: DawToolConfig, run_id: str) -> dict:
+    """Read-only facts of one stored run: the existing classifier over the run store and read-only FL facts.
+
+    A provider-bound run keeps the classification ``provider_evidence_unavailable``: its classification is shown
+    as unverified ``recorded_state``, beside the stored provider identity. Nothing verifies provenance here.
+    """
     store = _open_store(config, run_id, read_only=True)
     try:
-        snapshot = store.snapshot().value
+        read = store.snapshot()
     finally:
         store.close()
+    if not isinstance(read, Success):  # e.g. the store became busy after the read-only open: no retry, nothing further
+        raise RecoveryRefused(f"run store snapshot is unavailable: {read.message}")
+    snapshot = read.value
     request = (
         snapshot.events[0].payload if snapshot.events and isinstance(snapshot.events[0].payload, RunRequest) else None
     )
-    if request is not None and request.provider_binding is not None:
-        # R5A has no operational composition/configuration for opening all provenance stores. Do not infer
-        # resumability or verified termination from run/FL records alone; status stays read-only, without MIDI.
-        return {
-            "run_id": snapshot.run_id.value,
-            "durability": snapshot.durability.value,
-            "classification": "provider_evidence_unavailable",
-            "explanation": "provider-run provenance was not verified by this operator configuration; no continuation is authorized",
-            "authoritative": {
-                "revision": snapshot.accepted.state.revision.value,
-                "sequence": snapshot.accepted.sequence,
-            },
-        }
     journal, controller, facts, fl_problem = _fl_facts(snapshot, config, read_only=True)
     try:
         latest = controller.latest_anchor() if controller is not None else None
@@ -142,14 +172,19 @@ def _status_of(config: DawToolConfig, run_id: str) -> dict:
         if journal is not None:
             journal.close()
     result = classify_run(snapshot, facts)
-    request = snapshot.events[0].payload if snapshot.events and isinstance(snapshot.events[0].payload,
-                                                                           RunRequest) else None  # fmt: skip
+    suspended = isinstance(result, RunSuspended)
+    recorded = "suspended_resumable" if suspended else result.code.value
+    if suspended:
+        explanation = SUSPENDED_GUIDANCE
+    elif recorded in ("finished", "not_started"):
+        explanation = result.explanation
+    else:
+        explanation = f"{result.explanation}; review it with 'daw recover'"
     shown = {
         "run_id": str(snapshot.run_id.value),
         "durability": snapshot.durability.value,
-        "classification": "suspended_resumable" if isinstance(result, RunSuspended) else result.code.value,
-        "explanation": ("suspended at its checkpoint, awaiting the operator's export; continuing needs the "
-                        "unavailable decision maker" if isinstance(result, RunSuspended) else result.explanation),
+        "classification": recorded,
+        "explanation": explanation,
         "authoritative": {"revision": snapshot.accepted.state.revision.value, "sequence": snapshot.accepted.sequence},
         "usage": dict(vars(snapshot.events[-1].usage)) if snapshot.events else None,
         "limits": dict(vars(request.configuration.budget_limits)) if request is not None else None,
@@ -164,10 +199,15 @@ def _status_of(config: DawToolConfig, run_id: str) -> dict:
             else None,
         },
     }  # fmt: skip
-    if isinstance(result, RunSuspended):
+    if suspended:
         awaiting = result.checkpoint_event.payload.awaiting
         shown["awaiting_export"] = {"export_id": awaiting.request.export_id, "workspace": awaiting.workspace_directory,
                                     "files": [o.file_name for o in awaiting.request.outputs]}  # fmt: skip
+    if request is not None and request.provider_binding is not None:
+        shown["classification"] = "provider_evidence_unavailable"  # never resumable or healthy on status's word
+        shown["explanation"] = PROVIDER_UNVERIFIED
+        shown["recorded_state"] = {"verified": False, "classification": recorded, "explanation": explanation}
+        shown["provider"] = _provider(request.provider_binding)
     return shown
 
 
@@ -218,8 +258,8 @@ def recover_view(config: DawToolConfig, run_id: str | None) -> dict:
             item.close()
     if isinstance(view, RunSuspended):
         return {"run": run_id, "classification": "suspended_resumable", "options": [],
-                "explanation": "resumable: it continues through 'daw continue', which is unavailable without a "
-                               "decision maker; nothing to recover"}  # fmt: skip
+                "explanation": "resumable: export the awaited files (see 'daw status'), then continue it with "
+                               "'daw continue'; nothing to recover"}  # fmt: skip
     return {
         "run": run_id,
         "classification": view.run.code.value if view.run is not None else None,

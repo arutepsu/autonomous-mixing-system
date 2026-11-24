@@ -1195,3 +1195,66 @@ The owner approved D-C3-1 to D-C3-5. `daw continue` is implemented tests-first t
 3. **P11 classification.** Removing only the SDK-retry type check leaves the exact identity round trip, which still refuses `False`. The isolated mutation therefore survives as an **equivalent** mutant. It is defence in depth, not a counted detection. The probe counted as caught removes both checks. The test comment now says `False` is refused "by the type check and by the round trip".
 
 **Probes, run sequentially with sources restored byte-identically:** Q1 (post-read check removed), P7 (final re-check removed), P3, P5, P6 and P8 were all caught. The isolated P11 mutant survived, as expected for an equivalent mutant. The clean full suite then ran with nothing else running: 7,371 passed, 4 skipped.
+
+## C4 implementation outcome — read-only provider status and corrected guidance (2026-11-24, uncommitted)
+
+C4 extends `daw status`, the recovery view's wording and `CLAUDE.md`'s State section only. There is no new verification mode, store, framework or workflow. It is software tested on real stores from synthetic fixtures with simulated transports; **no live run or mixing validation is established.**
+
+**Behaviour:**
+- **Read-only, as before.** Status opens the run store read-only and the FL journal read-only, with the existing refusing transport factory. It needs no credential and constructs no provider transport. It opens no decision-audit store, analysis-evidence or preparation file, and runs no DSP.
+- **Provider-bound runs keep `provider_evidence_unavailable` and exit 4.** The explanation now says that status does not verify provenance and that `daw continue` verifies it under ownership. Two new fields:
+  - **`recorded_state`** `{verified: false, classification, explanation}`: the existing classifier over the run store and read-only FL facts;
+  - **`provider`**: binding kind, provider, API version, model, generation parameters, prompt and response-schema references, diagnosis method and prepared-plan SHA-256. `runtime_settings_sha256` is added only for a `DawAgentBinding`; a base `ProviderRunBinding` is handled without it. Paths and settings content are never echoed.
+- **Usage, limits, authority, FL facts and the awaiting export** (for a recorded suspension) are now shown for provider runs too.
+- **Unavailable FL facts** stay `available: false` with the problem. The recorded classification is then not a suspension, never an empty or healthy state.
+- **Store problems** (missing, busy, legacy, unreadable) keep their existing classifications and carry no recorded state or provider block.
+- **Plain output** prints the classification line, then indented lines for the recorded state, provider, prompt/schema/method/digests, authority, usage, awaiting export, the exact `daw continue` command and FL availability. JSON carries the same fields.
+- **Guidance:** a suspended run now says "export the listed files … then run 'daw continue'". Interrupted runs add "review it with 'daw recover'". The recovery view's resumable text points to export, then `daw continue`. No "unavailable decision maker" text remains. Recovery authorization, fingerprints, options and accepted-edit protection are unchanged.
+
+**Tests (`tests/unit/test_daw_cli_status.py`, 9 tests, RED first: 7 failed for the intended reasons).** Every forbidden open fails the test: MIDI, provider transport, writable or new run store, writable FL journal, decision-audit store, evidence analyzer, preparation manifest; the credential is removed. Every test compares file SHA-256s before and after. Coverage:
+- suspended, finished and interrupted provider runs, the last produced by a child crashing right after the continuation marker;
+- `DawAgentBinding` and base `ProviderRunBinding`, the latter re-recorded into a real second store;
+- busy, legacy (schema metadata set to 1), unreadable and missing stores;
+- an unreadable FL journal;
+- a non-provider suspension's guidance in status and the recovery view;
+- the recovery view of an interrupted provider run: its options and code equal `run_view` over the same snapshot with the binding removed, under the same read-only FL facts.
+
+The store-problem and recovery-parity tests passed before implementation; they pin existing behaviour.
+
+**Probes:** 11 of 11 caught (M1–M11), run sequentially with sources restored byte-identically:
+- recorded classification shown;
+- settings content echoed;
+- `runtime_settings` assumed on every binding;
+- `verified: true`;
+- FL always available;
+- writable FL journal;
+- stale guidance in status and in the recovery view;
+- plain output without the recorded state;
+- provider block dropped;
+- audit store opened.
+
+**Clean full suite:** 7,380 passed, 4 skipped.
+
+**Limits:**
+- Status does not verify provenance (Q2 remains a possible later opt-in).
+- Performing recovery operations on an interrupted continuation was not exercised (D-C3-6 is partly answered).
+- Plain-output layout is a text listing, not a UI.
+
+### C4 review fix — a snapshot that fails after the read-only open (2026-11-24, uncommitted)
+
+**Finding (reproduced by the reviewer).** `_status_of` assumed `store.snapshot().value`. A store that becomes busy after its read-only open succeeded returns a `PortFailure`, and status crashed with `AttributeError`.
+
+**Fix (tests first).** `_status_of` now checks that the snapshot is a `Success` before using it. Otherwise it closes the reader (unchanged `finally`) and raises the existing `RecoveryRefused`. `status` already maps that to the `unavailable` shape, with exit 4 and no provider or recorded-state block. Nothing downstream runs:
+- no FL journal is opened;
+- no classifier or provider block is computed;
+- no transport is constructed;
+- no audit or evidence file is read;
+- there is no retry and no write.
+
+No new type or framework is added. Recovery behaviour is untouched.
+
+**Regressions (real disposable SQLite stores, through `main`):**
+- **Exclusive ownership taken between the open and the snapshot:** a second, exclusive connection is opened right after the status reader's successful read-only open. Status gives exit 4 with `unavailable`, no provider or recorded-state block, and the reader closed. Downstream FL/classifier/provider access would fail the test, and the store bytes are unchanged. After ownership is released, the normal provider status returns.
+- **A returned `PortFailure(UNAVAILABLE)` snapshot,** independent of any busy-message text: the same result in JSON and plain output.
+
+Both failed first with the reported `AttributeError`. Three fix-removal probes were caught (check removed, reader not closed, refusal moved after FL access). The clean full suite gave 7,382 passed, 4 skipped.

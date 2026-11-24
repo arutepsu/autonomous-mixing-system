@@ -59,3 +59,7 @@ The real-component programmatic runtime is implemented, uncommitted for review (
 ### R5C C3 engineering update — 2026-11-24
 
 `daw continue` is implemented through the existing `DawAgentRuntime.reopen`/`continue_export` ([ADR-043](../decisions/0043-validated-daw-agent-run-configuration.md), Proposed; uncommitted for review). It covers the recorded provider identity, export-ID and safe hashing checks before import, factual outcomes (including accepted-then-abstained or limited runs) and the shared process-local MIDI block. Provider-run status additions (C4) and live integrated runs remain pending. Tests use simulated FL and provider transports on synthetic files; no live run, saving, exporting or musical result is claimed.
+
+### R5C C4 engineering update — 2026-11-24
+
+`daw status` now reports provider-bound runs read-only: stored provider identity and digests, plus unverified recorded state, authority, usage and awaiting export, without opening audit or evidence files, MIDI or a provider. Stale "unavailable decision maker" guidance is corrected (ADR-043 Proposed; uncommitted for review). With C1–C4, the R5C operator CLI is complete in software. It is tested with simulated transports and synthetic files only; live integrated development (R6) and musical validation remain unperformed.

@@ -2816,3 +2816,52 @@ Uncommitted. No live provider/FL operation.
 Owner requested a C3 checkpoint commit after review. The previously reproduced per-output hashing gap is fixed: handle/path metadata are rechecked before the next output opens, while the final workspace check catches earlier files changed during later reads. The child-process hard-exit regression now pins continuation_interrupted refusal and the read-only recovery view without another provider call or fader write. Performing recovery itself is not claimed. The SDK retry type-only mutation is correctly recorded as equivalent under exact identity round-tripping. No further blocking finding identified in this review; C4 remains outside this checkpoint.
 
 Independent final-source verification, without concurrent suites or mutations: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7371 passed,4 skipped**, 400.59s. Ruff check and formatting (315 files), frozen fixture verification, dependency lock, continue help and staged whitespace checks pass. Earlier independent CLI review passed130 tests before the final three regression additions; the full final run above includes them. All production transports used by tests remain simulated; no live provider/FL action, installation, export/save automation, threshold change or requirement-status change was performed. The reviewed C3 implementation and its documentation are approved for the requested checkpoint commit.
+
+## 2026-11-24 — R5C increment C4: read-only provider status and corrected guidance (implementation)
+
+The owner approved C4 only, from checkpoint `6d25978` (C3 committed).
+
+**Implementation.** Extended `_status_of` for provider-bound runs:
+- the classification stays `provider_evidence_unavailable` (exit 4), with an explanation that status does not verify provenance;
+- new `recorded_state {verified: false, …}` from the existing classifier over read-only FL facts;
+- a new `provider` block from the stored binding: identity, parameters, prompt/schema, diagnosis method and prepared digest, plus a runtime-settings SHA-256 only for `DawAgentBinding`;
+- authority, usage/limits, FL facts and the awaiting export.
+
+The plain status output lists the same information. The stale "unavailable decision maker" guidance in status and the recovery view is replaced by pointers to the manual-export/`daw continue` and `daw recover` flows. `CLAUDE.md`'s State section is updated only there: the CLI is active; all integrated evidence is simulated; no live mixing validation exists.
+
+**Tests:** 9 new, through real stores from synthetic fixtures. 7 failed first for the intended reasons; 2 pin existing behaviour (store problems, and recovery options independent of the binding under equal FL facts). Forbidden-open guards fail the test on any MIDI, provider, writable store or journal, audit-store, evidence or manifest open, and run without a credential. Store and journal files are byte-identical before and after. A base `ProviderRunBinding` was recorded into a real second store by re-appending the same events with the base binding.
+
+**Probes:** 11 of 11 caught, run sequentially with sources restored byte-identically (SHA-256 checked).
+
+**Verification on the final source, run alone afterwards:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,380 passed, 4 skipped** (302.12 s).
+- **Focused status/CLI/start/continue/R5A/architecture with `-W error`:** 425 passed.
+- **Other checks:** ruff check and format (316 files), fixture verifier, lock, diff and `daw status --help` pass.
+
+**Limits:**
+- Status does not verify provenance.
+- Recovery operations on interrupted continuations were not exercised.
+
+Uncommitted for review. No live provider/FL operation, installation, saving, exporting, automatic recovery, threshold, schema or requirement-status change.
+
+## 2026-11-24 — R5C C4 review fix: failed snapshot after a successful read-only open
+
+**Finding.** The reviewer reproduced that a store becoming busy after `daw status` opened it read-only made `snapshot()` return a `PortFailure`, which `_status_of` dereferenced (`AttributeError`).
+
+**Fix, tests first.** `_status_of` validates the snapshot result and otherwise raises the existing `RecoveryRefused`, shown as `unavailable` (exit 4), with:
+- the reader closed;
+- no FL journal, classifier, provider block, transport, audit or evidence access;
+- no retry and no write.
+
+There is no new type, and recovery behaviour is unchanged.
+
+**Regressions.** Two through `main` with real disposable SQLite stores: exclusive ownership taken by a second connection between open and snapshot (then released, after which status is normal again), and a returned unavailable snapshot without reliance on message text. Both failed first with `AttributeError`.
+
+**Probes:** 3 of 3 caught, run sequentially with the source restored byte-identically.
+
+**Verification on the final source, run alone afterwards:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,382 passed, 4 skipped** (349.09 s).
+- **Focused status/CLI/R5A/architecture with `-W error`:** 313 passed.
+- **Other checks:** ruff check and format (316 files), fixture verifier, lock and diff pass.
+
+Uncommitted. No live operation.

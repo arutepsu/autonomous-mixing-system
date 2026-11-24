@@ -145,7 +145,7 @@ def _daw(args) -> int:
             if args.json:
                 print(json.dumps(shown if args.run_id is None else shown[0], indent=2))
             else:
-                print("\n".join(f"{s['run_id']}: {s['classification']} - {s['explanation']}" for s in shown))
+                print("\n".join(line for s in shown for line in _status_lines(s, args.config)))
             return (
                 4
                 if any(
@@ -273,6 +273,43 @@ def _report(args, command) -> int:
               "'daw status' before any further step", file=sys.stderr)  # fmt: skip
         return 4
     return 0
+
+
+def _status_lines(shown: dict, tool_path: str) -> list[str]:
+    """Plain status: the classification line, then the read-only details the JSON form carries."""
+    lines = [f"{shown['run_id']}: {shown['classification']} - {shown['explanation']}"]
+    recorded = shown.get("recorded_state")
+    if recorded is not None:
+        lines.append(f"  recorded state (unverified): {recorded['classification']} - {recorded['explanation']}")
+    provider = shown.get("provider")
+    if provider is not None:
+        lines.append(f"  provider: {provider['provider']} {provider['api_version']} model {provider['model']}; "
+                     f"parameters {json.dumps(provider['parameters'], sort_keys=True)}")  # fmt: skip
+        digests = f"; runtime settings sha256 {provider['runtime_settings_sha256']}" if (
+            "runtime_settings_sha256" in provider) else ""  # fmt: skip
+        lines.append(f"  prompt {provider['prompt']}; response schema {provider['response_schema']}; diagnosis method "
+                     f"{provider['diagnosis_method']}; prepared plan sha256 {provider['prepared_plan_sha256']}"
+                     f"{digests}")  # fmt: skip
+    if shown.get("authoritative") is not None:
+        authority = shown["authoritative"]
+        lines.append(f"  authoritative: {authority['revision']} (sequence {authority['sequence']})")
+    usage, limits = shown.get("usage"), shown.get("limits")
+    if usage is not None and limits is not None:
+        lines.append(f"  usage: decision calls {usage['decision_calls']}/{limits['max_decision_calls']}, attempts "
+                     f"{usage['attempts']}/{limits['max_attempts']}, recovery operations "
+                     f"{usage['recovery_operations']}/{limits['max_recovery_operations']}, DAW writes "
+                     f"{usage['daw_writes']}/{limits['max_daw_writes']}")  # fmt: skip
+    export = shown.get("awaiting_export")
+    if export is not None:
+        lines.append(f"  awaiting export {export['export_id']}: files {', '.join(export['files'])}; workspace "
+                     f"{export['workspace']}")  # fmt: skip
+        lines.append(f'  next, after exporting: autonomous-mixing daw continue --config "{tool_path}" --run-id '
+                     f'{shown["run_id"]} --export-id {export["export_id"]} --operator <NAME> --attestation '
+                     '"<what you exported>"')  # fmt: skip
+    fl = shown.get("fl")
+    if fl is not None:
+        lines.append("  FL facts: available" if fl["available"] else f"  FL facts: unavailable ({fl['problem']})")
+    return lines
 
 
 def _describe(shown: dict) -> str:
