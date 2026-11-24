@@ -915,3 +915,283 @@ RED first: exit 0/SUSPENDED reproduced the finding, and the second test showed o
 A healthy process with no retained controller still reaches SUSPENDED. RED first: the second invocation returned 0 for both run IDs.
 
 **Limit (unchanged):** the block is process-local by design; a new process starts fresh.
+
+## C3 specification — activate `daw continue` only (2026-11-24, Proposed; not started)
+
+**Status and scope.** Planning only, from checkpoint `0d61fc4`. This specification refines §7 and §7.1 and supersedes them where they differ. Everything else stays as it is:
+- `daw start` behaviour (C2 and its two review fixes);
+- `status` and `recover`;
+- thresholds and calibration scope;
+- the hidden-reference boundary;
+- the coordinator, admission, verification and recovery logic.
+
+Out of scope: C4 status additions, live provider or FL Studio calls, installation, and automation of saving or exporting.
+
+### C3.0 Facts verified in the current code
+
+| # | Fact | Where |
+| --- | --- | --- |
+| F1 | `DawAgentRuntime.reopen` requires a `ClaudeConfig`. It opens the run store (`SqliteRunJournal.open`, exclusive lock) and compares the frozen local settings and provider/prompt/schema identities. **It then assembles everything, including constructing the provider transport and the FL controller, before** it verifies stored evidence and classifies the run (`reopen_daw_run(record_interruption=False)`). Construction sends nothing; transport factories construct only (ADR-042). | `drivers/agent_runtime.py` `reopen` |
+| F2 | A non-resumable classification raises `RuntimeRefusal(f"run is not resumable: {suspended}")`, which embeds the whole `RunInterrupted` repr. | same |
+| F3 | `SqliteRunJournal.open` raises `RunStoreBusy` or `RunStoreError` (including legacy schema 1). `reopen` does not wrap them. | `adapters/journal/sqlite_run.py` |
+| F4 | `restart_facts` and `reopen_daw_run` read only the FL journal (`control_state`, `recovery_lineage`). They open no MIDI transport. | `core/loop/restart.py` |
+| F5 | `continue_export` → `resume_daw` takes in-process exclusive ownership (refusing `CONTINUATION_IN_PROGRESS`), re-verifies provider evidence, then runs `admit_continuation`. That refuses `ALREADY_CONTINUED`, `MANIFEST_CONFLICT`, `CONTINUATION_INTERRUPTED`, `NOT_SUSPENDED` and `REQUEST_MISMATCH` with no effect. It returns `RunReport`, `RunSuspended` or `DawContinuationRefused`. | `core/loop/coordinator.py` |
+| F6 | **An importer rejection ends the run** with `EXPORT_IMPORT_REJECTED` or `DAW_CONTINUITY_FAILED`. It is recorded and consumes the suspension. Hashing first is not import; a safe pre-check refusal avoids ending the run on a bad workspace. | `core/loop/daw_continuation.py` |
+| F7 | `FileExportHandoff` already has the private checks `_context`, `_check_workspace`, `_check_request_file`, `_check_listing`, `_check_objects`, `_observed` and `_identity`. The importer compares each manifest `content_hash` with `check_resolved_wav_integrity(...).verified_sha256`, the SHA-256 of the whole file. | `adapters/rendering/export_handoff.py` |
+| F8 | `provider_identity` encodes every `ClaudeConfig` field: `provider="anthropic"`, `api_version`, `requested_model`, and canonical parameters `max_tokens`, `temperature`, `timeout_seconds`, `max_request_bytes`, `max_response_bytes`, plus the constants `transport_profile="messages-exact-body-v1"` and `sdk_retries=0`. | `adapters/decision_agent/prompt.py` |
+| F9 | C2's `_UNRELEASED_CONTROLLERS` retains only **pre-check** controllers. A runtime controller that becomes blocked during `start` (an apply or inspect whose transport close fails) is closed with the runtime and is not retained. That is a shared C2/C3 gap (C3.6). | `drivers/daw_commands.py` |
+| F10 | C2's `describe_outcome` prints the next command as "requires 'daw continue' from R5C C3, which is not available in this version". C3 must change that wording. | same |
+| F11 | Continuing a fixture suspension reaches `CANDIDATE_CRITERIA_MET` with no further provider call. Intermediate acceptance needs criteria that an improving candidate does not yet meet. | `tests/unit/test_agent_runtime.py` |
+
+### C3.1 Command line
+
+```
+autonomous-mixing daw continue --config TOOL.json --run-id ID --export-id EXPORT_ID
+                               --operator NAME --attestation TEXT
+```
+
+- All five options are required. There is no `--run-config` and no provider option, so supplying one is an argparse error (exit 2).
+- `--operator` and `--attestation` must be nonblank. `--operator` must satisfy `VersionRef.name`, and `--attestation` must satisfy `require_text`. The CLI checks these before opening anything (exit 2).
+- `attested_by = VersionRef(operator, "daw-cli-attestation-1")` (D8).
+- The credential comes only from `ANTHROPIC_API_KEY`, read after the tool configuration validates (exit 2 if absent or blank). It is never stored or printed.
+
+### C3.2 Interfaces (all extensions of existing modules)
+
+| Where | Interface |
+| --- | --- |
+| `adapters/decision_agent/prompt.py` | `config_from_identity(identity: ProviderRequestIdentity) -> ClaudeConfig`, the exact inverse of `provider_identity`. It refuses `ValueError` unless all of these hold: `provider == "anthropic"`; the parameter key set is exactly the seven keys of F8; `transport_profile == "messages-exact-body-v1"`; `sdk_retries == 0` (as an `int`, not a `bool`); the `ClaudeConfig` constructor accepts the values; and `provider_identity(result) == identity`, a round-trip equality check. |
+| `drivers/agent_runtime.py` | `reopen(..., provider_config: ClaudeConfig \| None = None, ...)`. `None` means reconstruct with `config_from_identity(binding.provider)`; a failure there is `RuntimeRefusal("recorded provider identity is not supported: …")`. An explicit `provider_config` keeps the existing drift comparison for existing callers. `RunStoreBusy` becomes `RuntimeRefusal("run … is in use by another process")`, and other `RunStoreError` becomes `RuntimeRefusal("run store cannot be read: …")`. F2's message becomes `f"run is not resumable: {code.value}: {explanation}"`. |
+| `adapters/rendering/export_handoff.py` | `FileExportHandoff.attestation_digests(awaiting: DawExportAwaiting) -> tuple[DawExportedFile, ...] \| DawImportRejected` (C3.4). The `DawExportHandoff` port is unchanged; the driver calls this method on the runtime's concrete `export_handoff`. |
+| `drivers/daw_commands.py` | `continue_run(config, run_id, export_id, operator, attestation, api_key, *, provider_transport_factory=None, fl_transport_factory=None, clock=None, identities=None) -> StartResult`, reusing C2's result type with a neutral docstring. It raises `RuntimeRefusal`, `StartRefused` (type only, before effects) or `RunStopped` (type only, effects possible). `ContinueRefused(RuntimeRefusal)` carries a `DawContinuationRefused` or `DawImportRejected` code. `_retain_if_blocked(controller)` is a shared helper (C3.6). |
+| `drivers/cli.py` | Parser options, the credential read, `_continue(args)` with the same exit mapping as `_start`, and removal of `CONTINUE_UNAVAILABLE`. |
+
+### C3.3 Ordered steps, side effects and failure mapping
+
+| Step | Action | Side effects | Failure → exit |
+| --- | --- | --- | --- |
+| K0 | Parse arguments; nonblank operator and attestation; `VersionRef(operator, …)` constructible | none | 2 |
+| K1 | `load_config(TOOL)`; `config.store_path(run_id)`; credential present | read | 2 |
+| K2 | **Process block:** `_UNRELEASED_CONTROLLERS` must be empty (C2 fix 2 applies to `continue` too) | none | 4 `REFUSED` |
+| K3 | Both `<id>.sqlite` and `<id>.runtime` exist | stat | 4 |
+| K4 | `DawAgentRuntime.reopen(config, run_id, api_key, provider_config=None, …)`: | | 4 `REFUSED` (`RuntimeRefusal`). Any other exception: `StartRefused("reopening the run", type)` (4, type only). |
+| | – exclusive store open (busy or legacy → refusal); | opens the run store exclusively | |
+| | – settings and identity drift; | | |
+| | – identity reconstruction; | | |
+| | – frozen manifest load (`RuntimeRefusal` from C1 fix); | | |
+| | – assemble (constructs transports, sends nothing); | constructs | |
+| | – verify stored evidence; | | |
+| | – classify (not resumable → refusal with code). | | |
+| K5 | `--export-id` equals `suspended.checkpoint_event.payload.awaiting.request.export_id` | none | 4, showing the awaiting ID. **Nothing is hashed.** |
+| K6 | `runtime.export_handoff.attestation_digests(awaiting)` (C3.4) | reads declared files only | `DawImportRejected` → 4 `REFUSED: <code>`. Nothing is recorded and the suspension remains. Any other exception: `StartRefused("hashing the export", type)` (4). |
+| K7 | Build `DawExportManifest(export_id, awaiting.request_fingerprint, files, VersionRef(operator, "daw-cli-attestation-1"), clock.read().utc, attestation)` | none | `ValueError` → 2 (the attestation text is invalid) |
+| K8 | `with interrupt_cancels(clock): runtime.continue_export(suspended, manifest)` | ownership, import, analysis, provider calls, fader restorations, acceptance, possibly a new write and suspension | `DawContinuationRefused` → 4 `REFUSED: <code>` (admission refuses with no effect, F5). `RunReport` or `RunSuspended` → 0. Any exception → `RunStopped` (4, type only, "may have …"). |
+| K9 | `_retain_if_blocked(runtime.controller)`, then `runtime.close()` in `finally` | close | A close failure after a recorded outcome keeps the outcome, adds `cleanup failed (<Type>)`, and exits 4 (C2 rule). |
+
+**Refused-clause rule.** The "no provider call or fader write was made by this command" clause is printed **only** for K2–K7 refusals and for `DawContinuationRefused`.
+
+**Why K4's ordering is acceptable (F1).** No step in K2–K7 dispatches a provider request, opens a MIDI transport (F4) or writes the fader. K6 reads files. The provider transport is *constructed* during K4 before classification. This is accepted under D-C3-1, because transport factories must construct only, and tests assert **no send**. They do not assert no construction, unlike C2's pre-reopen refusals.
+
+### C3.4 `FileExportHandoff.attestation_digests` (the one narrow method)
+
+The order reuses the importer's private checks unchanged; the importer keeps its own full verification:
+
+1. `context = self._context(awaiting.request)`. `None` → `DawImportRejected(REQUEST_MISMATCH, "no configured state has the request's before checkpoint")`.
+2. `directory = self._check_workspace(awaiting, context)`: allocation under the configured root, a plain directory (not a link or reparse point), identity equal to `awaiting.directory_identity`.
+3. `self._check_request_file(awaiting, directory / DAW_EXPORT_REQUEST_FILE)`: unlinked, single hard link, prepared identity, exact bytes and fingerprint.
+4. `self._check_listing(awaiting.request, directory)`: exactly the request file plus the declared output names; no stray, colliding or missing entries.
+5. `statuses = self._check_objects(awaiting, directory)`: regular files, no link or reparse point, `st_nlink == 1`, distinct physical files, each resolving directly inside the workspace.
+6. For each declared output in order:
+   - `os.open(directory / file_name, O_RDONLY | O_BINARY | O_NOFOLLOW-if-available)`;
+   - `fstat` identity must equal that output's `statuses[i]` identity (otherwise `WORKSPACE_CHANGED`);
+   - read in chunks of `_READ_CHUNK` up to `self._limits.max_file_bytes + 1` bytes; a larger file is the existing `RESOURCE_LIMIT` code;
+   - compute the SHA-256 and close the descriptor in `finally`.
+7. Re-`lstat` every output and the request file. `_observed` must be unchanged, and the directory identity must be unchanged (otherwise `WORKSPACE_CHANGED`).
+8. Return `DawExportedFile(artifact_id, file_name, sha256)` per output. `_Rejected` maps to `DawImportRejected` exactly as `import_files` does, and an `OSError` maps to `UNAVAILABLE`.
+
+The method never globs, never opens a name outside the declared set, and never writes. Hashing is **not** import: K8's importer re-verifies everything. A file changed between K6 and K8 is still rejected there, which ends the run with a recorded outcome (F6), exit 0 with `FAILED: export_import_rejected`. The method is not race-free against a hostile local process (§7.1 residual risk).
+
+### C3.5 Continuation identity, duplicates and authority
+
+| Situation | Behaviour (no recorded write is resent) |
+| --- | --- |
+| The same command repeated after the run **finished** | K4 classifies `FINISHED` → 4 `REFUSED: run is not resumable: finished: …`. |
+| Repeated after an **intermediate acceptance and a new suspension** | K5: the old `--export-id` ≠ the new awaiting ID → 4. Nothing is hashed and no provider is called. |
+| **Concurrent** continue, another process holding the store | K4 `RunStoreBusy` → 4 "in use". |
+| Concurrent continue in the same process | `resume_daw` refuses with `CONTINUATION_IN_PROGRESS` → 4. |
+| **Earlier continuation interrupted** (`DawContinuationStarted` without a finish) | K4 classifies `CONTINUATION_INTERRUPTED` → 4, pointing to `daw status`/`daw recover`. Never retried automatically. |
+| **Conflicting manifest** for an already-started export | `admit_continuation` → `MANIFEST_CONFLICT` → 4 (F5). |
+| **Acceptance commit acknowledgement lost** | The existing coordinator keeps accepted authority and never restores the accepted edit. The output shows `authoritative` from the report, `acceptances: n` from the trace, and the `uncertain:` line when the terminal append failed or the reason is `ACCEPTANCE_COMMIT_UNCERTAIN`. |
+| **Recording failure after effects** | Coordinator records are unchanged. A raised exception becomes `RunStopped` (type only), with best-effort "last recorded" usage and authority lines. |
+
+### C3.6 Resources and cleanup (process-local MIDI block across commands)
+
+- **K2** makes `continue` honour a block retained by an earlier `start` or `continue` in the same process.
+- **`_retain_if_blocked(controller)`** appends a runtime controller that is `blocked` after K8 (or after C2's S8) to `_UNRELEASED_CONTROLLERS` before `runtime.close()`. Later `start`/`continue` calls in the process then refuse. It holds the controller and its retained transports for the process lifetime: no retry, reset or persistence.
+  - **This closes gap F9 for `start` as well.** Changing `start` is a C2 behaviour change, so it needs approval (D-C3-4).
+- **Ownership on each failure:**
+  - **K4:** `reopen` closes everything it opened, which is existing behaviour.
+  - **K5–K9:** the command owns `runtime` and closes it in `finally`, after `_retain_if_blocked`.
+  - **Hashing:** descriptors are closed in `finally` inside the adapter.
+  - **Import, dispatch and output:** these happen inside `continue_export`, whose resources belong to the runtime.
+  - **Output formatting** is pure and runs after `close`. A printing failure cannot change a recorded outcome or turn it into a refusal.
+- **Exception reporting:** messages are printed only for this driver's own `ConfigError` and `RuntimeRefusal` (internal texts) and for `DawImportRejected`/`DawContinuationRefused` explanations, which are internal records. Everything else is reported by type only. Credential sentinel tests cover construction (K4), dispatch (K8) and cleanup (K9).
+
+### C3.7 Factual output (reuses C2 `describe_outcome`)
+
+- **First lines:**
+  - `ACCEPTED`;
+  - `NO CHANGE NEEDED`, which is not expected after a continuation but is handled;
+  - `ABSTAINED` / `LIMIT REACHED` / `CANCELLED` / `FAILED`;
+  - `SUSPENDED` with new export instructions;
+  - `REFUSED: <code>`.
+- **The recorded-state block** comes from the records. After an accepted intermediate candidate followed by abstention or a limit, it shows `DAW writes ≥ 1/…`, `acceptances: 1` and the accepted authoritative revision. The keyword names only the termination.
+- **The "next" line in suspension instructions** becomes:
+  `next, after exporting: autonomous-mixing daw continue --config "…" --run-id … --export-id … --operator <NAME> --attestation "<what you exported>"`.
+  The "R5C C3 … not available" wording is removed (F10), and the C2 test that pins it is updated.
+- **Exit codes:**
+  - **0:** any recorded report or suspension, including `FAILED: export_import_rejected`;
+  - **2:** input;
+  - **4:** refusals, cleanup failure and `STOPPED`.
+
+### C3.8 Tests (`tests/unit/test_daw_cli_continue.py`, RED first, through `main`)
+
+Only the MIDI transport (the simulated host behind the v2 device script) and the provider transport (labelled replies) are replaced. Preparation, measurement, diagnosis, audit, admission, verification, recovery, stores and journal are real. A helper writes test export files from the stored checkpoint, in the manner of `Setup.export`, as synthetic numerical files.
+
+1. **Input (exit 2):** a missing option, a blank operator or attestation, a bad run ID, an absent credential, and `--run-config` given. Nothing is opened.
+2. **State refusals (exit 4, no send, no fader write, store bytes unchanged):**
+   - the process block retained by a failed `start` pre-check;
+   - a missing store or runtime directory;
+   - a busy store, held by a child process using the existing `hold` helper;
+   - a legacy schema 1 store;
+   - drift in each tool-configuration field;
+   - a tampered recorded provider identity, via an altered stored binding using the established store-fixture technique, if feasible; otherwise a `config_from_identity` unit test;
+   - missing evidence or manifest;
+   - each interrupted classification, including `CONTINUATION_INTERRUPTED` and `FINISHED`;
+   - a wrong `--export-id`, where a spy on `os.open` proves no output was opened.
+3. **Manifest safety (exit 4, nothing recorded, suspension still resumable afterwards).** A spy on `os.open` proves no output and no outside target was opened:
+   - the workspace replaced, or a junction or symlink to an outside directory;
+   - an output that is a symlink, a hard link, or the same physical file as another;
+   - a stray file;
+   - a case collision;
+   - an altered request file;
+   - an oversized output (reads stop at the bound plus one byte);
+   - a file changing during the read, through a read-loop hook.
+
+   Cases the OS refuses to create are skipped with a stated reason. After each refusal, a corrected export continues successfully.
+4. **Outcomes (exit 0):**
+   - suspend, export, then `ACCEPTED`, with `acceptances: 1`, `DAW writes 1/…` and a verified revision;
+   - guard-rejected candidate, then verified restoration, then the next decision, with the printed block showing the restoration usage;
+   - intermediate acceptance, then a second `SUSPENDED` with new instructions; the second continue gives `ACCEPTED`;
+   - **deferred C2 case:** intermediate acceptance followed by `ABSTAINED` and by `LIMIT REACHED`, using run-file criteria that an improving candidate does not yet meet, and `max_decision_calls` for the limit. Both show writes ≥ 1 and acceptances ≥ 1, with no forbidden wording;
+   - an import rejection after a valid manifest (a file swapped after hashing, through a hook between K6 and K8) gives `FAILED: export_import_rejected` with exit 0. That proves hashing is not import.
+5. **Duplicates and authority:**
+   - a repeated finished continue gives 4 with no provider call or gain write;
+   - a stale export ID after a second suspension gives 4;
+   - acceptance-acknowledgement loss (the labelled fault injection on the real store already used in R5B) gives exit 0 with authority retained, the `uncertain` line and no `restore_gain`.
+6. **New process:** a child helper (`tests/unit/daw_cli_child.py`, not collected) runs `main` with the same simulated transports.
+   - Process A runs `daw start` and suspends.
+   - The parent writes the exports.
+   - Process B runs `daw continue` and accepts.
+   - Asserted through persisted counters (`host.json` writes; a provider call-count file): exactly one gain write in total, no provider call in B before acceptance, and no repeat of A's write.
+7. **Failure reporting:**
+   - credential sentinels in exceptions at provider construction (K4), dispatch (K8) and close (K9) are absent from output and every file;
+   - `STOPPED` after an exception during import and after a fader restoration;
+   - a cleanup failure after `ACCEPTED` keeps the outcome and exits 4;
+   - a runtime controller blocked during K8 is retained, and the next `start` and `continue` in the process both refuse (D-C3-4).
+8. **Unchanged behaviour:** all existing start, status, recover, run-config and agent-runtime tests, except the C2 wording test for the next-command line (F10). `daw continue --help` lists the options and the credential variable.
+
+### C3.9 Faithful mutation probes (sequential; restore byte-identically; never concurrent with a suite)
+
+| Probe | Mutation | Expected catch |
+| --- | --- | --- |
+| P1 | Remove the K2 process-block check. | Retained-block test. |
+| P2 | Hash before the K5 export-ID comparison. | Wrong-export `os.open` spy. |
+| P3 | `attestation_digests` skips `_check_workspace`. | Outside-junction spy. |
+| P4 | `attestation_digests` skips `_check_listing`. | Stray-file test. |
+| P5 | `attestation_digests` skips `_check_objects`. | Hard-link / outside-symlink test. |
+| P6 | Drop the `fstat` identity comparison. | Swap-between-`lstat`-and-open hook test. |
+| P7 | Drop the final `_observed` re-check. | Change-during-read test. |
+| P8 | Unbounded read. | Oversize read-spy test. |
+| P9 | `config_from_identity` accepts an extra parameter key. | Unit test. |
+| P10 | `config_from_identity` accepts another `transport_profile`. | Unit test. |
+| P11 | `config_from_identity` accepts `sdk_retries=True`. | Unit test. |
+| P12 | `reopen` uses an explicit default `ClaudeConfig` instead of the recorded identity. | Recorded-identity test. |
+| P13 | `RunStoreBusy` mapped to 2, or not wrapped. | Busy test. |
+| P14 | `DawContinuationRefused` mapped to 0. | Duplicate-manifest test. |
+| P15 | The refused clause is printed on `RunStopped`. | `STOPPED` tests. |
+| P16 | `_retain_if_blocked` is not called. | Runtime-blocked test. |
+| P17 | The next-command line still says "not available". | Output test. |
+| P18 | Exception text is printed for `StartRefused` or `RunStopped`. | Sentinel tests. |
+
+### C3.10 Contradictions and decisions requiring review
+
+| ID | Issue | Recommendation |
+| --- | --- | --- |
+| D-C3-1 | `reopen` constructs the provider transport before evidence verification and classification (F1). §7 said refusals come "before … provider". | Accept construction without send, and assert no send. Alternative: split `_assemble` so verification and classification precede transport construction; that is an R5B restructuring. |
+| D-C3-2 | An import rejection ends the run (F6). A safe pre-hash refusal preserves the suspension only for checks the method repeats. Encoding and timeline faults found only by the importer still end the run. | Accept; this is documented operator guidance. Alternative: a full non-recording dry-run import in K6, which duplicates import and needs a port change. |
+| D-C3-3 | The `continue` exit code for a recorded `FAILED: export_import_rejected` outcome. | 0, per D9 (a recorded outcome). Alternative: 4, which would mix run outcome into process status. |
+| D-C3-4 | Retaining a blocked **runtime** controller (F9). | Apply to both `start` and `continue` in C3, with one helper. It changes C2 behaviour only in the already-failing case. |
+| D-C3-5 | The attestation identity version string `daw-cli-attestation-1`. | Confirm (D8). |
+| D-C3-6 | Whether `daw recover` can operate on a `CONTINUATION_INTERRUPTED` run. | Not verified here. C3 only refuses and points to `status`/`recover`; any gap is reported, not fixed in C3. |
+| D-C3-7 | The `status`/`recover` wording "continuing needs the unavailable decision maker" for suspended non-provider runs. | It stays C4 or a separate wording change. C3 does not touch status or recover. |
+
+**Needs approval before coding:** D-C3-1 to D-C3-5, plus confirmation that C3 may make these touches:
+- `reopen`: optional `provider_config`, store-error wrapping, and the refusal message;
+- the one `FileExportHandoff` method;
+- `config_from_identity`;
+- C2's next-command wording.
+
+## C3 implementation outcome — 2026-11-24 (uncommitted, for review)
+
+The owner approved D-C3-1 to D-C3-5. `daw continue` is implemented tests-first through the existing `DawAgentRuntime.reopen` and `continue_export`. It is software tested with simulated external services (the simulated FL host behind the v2 device script, labelled provider replies) on synthetic numerical files. **It is not a live provider, FL Studio or mixing result.** C4 is not started.
+
+**Changed files:**
+- `adapters/decision_agent/prompt.py`: `config_from_identity`, the exact validated inverse of `provider_identity`. It refuses another provider, missing or extra keys, another transport profile, SDK retries other than the integer 0, constructor-invalid values, and anything that does not round-trip.
+- `drivers/agent_runtime.py`:
+  - `reopen(provider_config=None)` rebuilds the configuration from the recorded identity;
+  - `RunStoreBusy` becomes a "run … is in use" refusal, and other `RunStoreError` an unreadable-store refusal;
+  - the not-resumable refusal prints only the code and explanation;
+  - `_validate` takes `recorded_provider`.
+- `adapters/rendering/export_handoff.py`: `attestation_digests` plus a private `_digests`. They reuse `_context`, `_check_workspace`, `_check_request_file`, `_check_listing` and `_check_objects` before opening any output. Each output is opened with `O_NOFOLLOW` where available, its opened handle is identity-checked, at most `max_file_bytes + 1` bytes are read, and the observed metadata and directory identity are re-checked. The port is unchanged.
+- `drivers/daw_commands.py`:
+  - `continue_run` (K2–K9);
+  - shared `_refuse_if_blocked`, `_retain_if_blocked`, `_close` and `_run_owned`, used by both `start` and `continue`;
+  - `ATTESTATION_VERSION = "daw-cli-attestation-1"`;
+  - the "next, after exporting" wording.
+- `drivers/cli.py`: the `continue` options (`--config`, `--run-id`, `--export-id`, `--operator`, `--attestation`); `_continue`; shared `_credential` and `_report` with the 0/2/4 mapping.
+- Tests:
+  - new `tests/unit/test_daw_cli_continue.py` (51 tests) and `tests/unit/daw_cli_child.py` (new-process helper, not collected);
+  - in `test_daw_cli.py` and `test_daw_cli_start.py`, the tests pinning "continue unavailable" and the old next-command wording are replaced.
+
+**Deviations and observations:**
+- **D-C3-4 applied:** a runtime controller blocked during `start` is now retained too, so later `start`/`continue` calls in the process refuse. Both directions are tested.
+- **`DawContinuationRefused`** is unreachable through normal CLI sequencing, because the classification refuses first. It is exercised with a labelled fault injection on the real store's in-process ownership check (`CONTINUATION_IN_PROGRESS`).
+- **`CONTINUATION_INTERRUPTED`** *(superseded by the review fix below)*: an in-process exception ends as `FINISHED`, because the coordinator finalizes it. A process that ends abruptly right after the continuation marker commits **is** classified `continuation_interrupted` through the CLI. This is now a permanent regression.
+- **Legacy schema 1 store:** the refusal path through `RunStoreError` exists in code but has no CLI test here. Only the busy path is tested (probe P13).
+- **Tampered recorded identity:** covered by `config_from_identity` unit tests, not by altering a stored binding.
+- **Guard-rejected candidate:** the recorded usage shows 2 recovery operations (restoration plus resolution). The test reads the count from the record instead of assuming 1.
+- **Accept-then-abstain and accept-then-limit,** deferred from C2, are covered. Both show writes ≥ 1, acceptances ≥ 1 and the accepted authoritative revision.
+- **D-C3-6** (whether `recover` handles interrupted continuations) and **D-C3-7** (the out-of-date status/recover wording) remain open.
+
+**Evidence** (see the research log):
+- 18 of 18 probes caught after three test strengthenings. A first pass caught 15; the three survivors were masked by later checks with the same refusal. *(Corrected by the review fix below: P11 removes both the type check and the round trip; the type check alone is an equivalent mutant.)*
+- Clean full suite: 7,368 passed, 4 skipped.
+
+### C3 review fix — per-output fail-fast hashing; interrupted continuation; P11 classification (2026-11-24)
+
+1. **Per-output fail-fast.** The reviewer changed `01-stem.wav` during hashing, and the command still read `02-master.wav` before refusing. `attestation_digests` now checks each output right after reading it and before opening the next one: the read handle (`fstat`: device, inode, size, mtime) and the path (`lstat`, the full observed metadata) must still be the inspected file. The final whole-workspace re-check is kept.
+
+   Regressions:
+   - **A change to the first output during its read** is refused (`workspace_changed` naming it), and no later declared output is opened. This failed first: `02-master.wav` was opened.
+   - **An earlier output changed while a later one is read** is caught only by the final re-check. This keeps probe P7 meaningful.
+
+2. **Interrupted continuation through the CLI.** This replaces the earlier "not reproducible" statement. A child process ends with `os._exit(77)` right after the continuation marker is committed, through a labelled crash point in `daw_cli_child.py`. Then:
+   - the next `daw continue` returns 4, naming `continuation_interrupted`;
+   - the read-only `daw recover` view returns 0 with classification `continuation_interrupted`;
+   - no provider call follows and no fader write is resent.
+
+   This is a permanent regression. It passed on first run: it pins existing behaviour that had not been reproduced through the CLI before. **D-C3-6 is partly answered:** the recovery view identifies the state. Performing a recovery operation on it was not exercised.
+
+3. **P11 classification.** Removing only the SDK-retry type check leaves the exact identity round trip, which still refuses `False`. The isolated mutation therefore survives as an **equivalent** mutant. It is defence in depth, not a counted detection. The probe counted as caught removes both checks. The test comment now says `False` is refused "by the type check and by the round trip".
+
+**Probes, run sequentially with sources restored byte-identically:** Q1 (post-read check removed), P7 (final re-check removed), P3, P5, P6 and P8 were all caught. The isolated P11 mutant survived, as expected for an equivalent mutant. The clean full suite then ran with nothing else running: 7,371 passed, 4 skipped.

@@ -158,17 +158,17 @@ def test_a_valid_configuration_loads_and_invalid_ones_name_the_key(tmp_path):
             load_config(write_config(tmp_path, **overrides))
 
 
-# --- continue: not yet available (R5C C3), refused before anything is opened; start: test_daw_cli_start -----------
+# --- continue with missing options: a usage error before anything is opened (start/continue: test_daw_cli_* files) --
 
 
-def test_continue_refuses_naming_the_missing_increment_before_opening_anything(tmp_path, capsys, monkeypatch, no_midi):
+def test_continue_without_its_required_options_opens_nothing(tmp_path, capsys, monkeypatch, no_midi):
     config = write_config(tmp_path)
     before = sorted(p.name for p in tmp_path.rglob("*"))
     monkeypatch.setattr(SqliteRunJournal, "create", lambda *a, **k: pytest.fail("a run store was created"))
     monkeypatch.setattr(SqliteRunJournal, "open", lambda *a, **k: pytest.fail("a run store was opened"))
-    assert main(["daw", "continue", "--run-id", RUN, "--attestation", "x", "--config", str(config)]) == 2
-    err = capsys.readouterr().err
-    assert "R5C C3" in err and "not yet available" in err and "Nothing was opened or changed" in err
+    with pytest.raises(SystemExit) as raised:
+        main(["daw", "continue", "--run-id", RUN, "--attestation", "x", "--config", str(config)])
+    assert raised.value.code == 2
     assert sorted(p.name for p in tmp_path.rglob("*")) == before
 
 

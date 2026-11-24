@@ -45,6 +45,38 @@ def provider_identity(config: ClaudeConfig):
     )
 
 
+_TRANSPORT_PROFILE = "messages-exact-body-v1"
+_IDENTITY_PARAMETERS = frozenset(
+    {"max_tokens", "temperature", "timeout_seconds", "max_request_bytes", "max_response_bytes", "transport_profile",
+     "sdk_retries"}
+)  # fmt: skip
+
+
+def config_from_identity(identity: ProviderRequestIdentity) -> ClaudeConfig:
+    """The exact inverse of ``provider_identity`` for a recorded run (R5C C3): every field validated.
+
+    Refuses (``ValueError``) another provider, any missing or extra parameter, another transport profile, SDK retries
+    other than the integer 0, values ``ClaudeConfig`` rejects, and any identity that does not round-trip exactly.
+    """
+    if not isinstance(identity, ProviderRequestIdentity):
+        raise ValueError("a recorded ProviderRequestIdentity is required")
+    if identity.provider != "anthropic":
+        raise ValueError(f"unsupported recorded provider {identity.provider!r}")
+    parameters = json.loads(identity.parameters)
+    if not isinstance(parameters, dict) or set(parameters) != _IDENTITY_PARAMETERS:
+        raise ValueError("recorded provider parameters differ from the supported set")
+    if parameters["transport_profile"] != _TRANSPORT_PROFILE:
+        raise ValueError("unsupported recorded transport profile")
+    if type(parameters["sdk_retries"]) is not int or parameters["sdk_retries"] != 0:
+        raise ValueError("unsupported recorded SDK retry setting")
+    config = ClaudeConfig(identity.requested_model, identity.api_version, parameters["max_tokens"],
+                          parameters["temperature"], parameters["timeout_seconds"], parameters["max_request_bytes"],
+                          parameters["max_response_bytes"])  # fmt: skip
+    if provider_identity(config) != identity:
+        raise ValueError("the recorded provider identity does not round-trip exactly")
+    return config
+
+
 def provider_schema():
     """Provider subset: disjoint anyOf variants; unsupported length constraints stay enforced locally."""
 

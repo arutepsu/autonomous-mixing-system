@@ -14,7 +14,7 @@ from autonomous_mixing.adapters.audio_io.limits import AudioReadLimits
 from autonomous_mixing.adapters.audio_io.locations import resolve_artifact_location
 from autonomous_mixing.adapters.decision_agent.claude import ClaudeDecisionMaker
 from autonomous_mixing.adapters.decision_agent.config import ClaudeConfig
-from autonomous_mixing.adapters.decision_agent.prompt import PROMPT, provider_identity
+from autonomous_mixing.adapters.decision_agent.prompt import PROMPT, config_from_identity, provider_identity
 from autonomous_mixing.adapters.decision_agent.response import RESPONSE_SCHEMA
 from autonomous_mixing.adapters.decision_agent.transport import ClaudeMessagesTransport
 from autonomous_mixing.adapters.dsp_analysis.analysis_router import AnalysisRouter
@@ -32,7 +32,7 @@ from autonomous_mixing.adapters.fl_studio.journal import SqliteCommandJournal
 from autonomous_mixing.adapters.fl_studio.profile import calibrated_profile
 from autonomous_mixing.adapters.fl_studio.transport import WinMMTransport
 from autonomous_mixing.adapters.journal.decision_exchange import SqliteDecisionExchangeStore
-from autonomous_mixing.adapters.journal.sqlite_run import SqliteRunJournal
+from autonomous_mixing.adapters.journal.sqlite_run import RunStoreBusy, RunStoreError, SqliteRunJournal
 from autonomous_mixing.adapters.rendering.export_handoff import FileExportHandoff
 from autonomous_mixing.adapters.rendering.state_integrity import FileStateIntegrityInspector
 from autonomous_mixing.adapters.rendering.workspaces import WorkspaceRoot
@@ -88,10 +88,11 @@ def _positive(value, name):
     return value
 
 
-def _validate(config, run_id, provider_config, api_key):
+def _validate(config, run_id, provider_config, api_key, *, recorded_provider=False):
     require_instance(config, DawToolConfig, "tool configuration")
     require_instance(run_id, RunId, "run ID")
-    require_instance(provider_config, ClaudeConfig, "provider configuration")
+    if not (recorded_provider and provider_config is None):  # reopen may take the recorded identity instead (C3)
+        require_instance(provider_config, ClaudeConfig, "provider configuration")
     if not isinstance(api_key, str) or not api_key.strip():
         raise ValueError("explicit provider credentials required")
     if load_config(config.path) != config:
@@ -290,16 +291,23 @@ class DawAgentRuntime:
         *,
         config: DawToolConfig,
         run_id: RunId,
-        provider_config: ClaudeConfig,
+        provider_config: ClaudeConfig | None = None,
         api_key: str,
         clock: RunClock | None = None,
         identities: IdentitySource | None = None,
         provider_transport_factory: Callable | None = None,
         fl_transport_factory: Callable | None = None,
     ) -> "DawAgentRuntime":
-        _validate(config, run_id, provider_config, api_key)
+        """Reopen a recorded suspension. ``provider_config=None`` (R5C C3) rebuilds it from the recorded identity, so
+        the stored run, not the caller, decides the provider settings; an explicit one must match it exactly."""
+        _validate(config, run_id, provider_config, api_key, recorded_provider=True)
         clock, identities = clock or SystemClock(), identities or UuidIdentitySource()
-        journal = SqliteRunJournal.open(config.store_path(run_id.value), run_id=run_id)
+        try:
+            journal = SqliteRunJournal.open(config.store_path(run_id.value), run_id=run_id)
+        except RunStoreBusy as error:
+            raise RuntimeRefusal(f"run {run_id.value} is in use by another process") from error
+        except RunStoreError as error:
+            raise RuntimeRefusal(f"run store cannot be read: {error}") from error
         try:
             snapshot = journal.snapshot()
             if not isinstance(snapshot, Success) or not snapshot.value.events:
@@ -308,6 +316,11 @@ class DawAgentRuntime:
             if not isinstance(request, RunRequest) or not isinstance(request.provider_binding, DawAgentBinding):
                 raise RuntimeRefusal("run has no owned runtime configuration")
             binding = request.provider_binding
+            if provider_config is None:
+                try:
+                    provider_config = config_from_identity(binding.provider)
+                except ValueError as error:
+                    raise RuntimeRefusal(f"recorded provider identity is not supported: {error}") from error
             local = json.loads(binding.runtime_settings)
             expected = _settings(
                 config,
@@ -347,7 +360,7 @@ class DawAgentRuntime:
                 instance.journal, instance.controller, identities=identities, clock=clock, record_interruption=False
             )
             if not isinstance(suspended, RunSuspended):
-                raise RuntimeRefusal(f"run is not resumable: {suspended}")
+                raise RuntimeRefusal(f"run is not resumable: {suspended.code.value}: {suspended.explanation}")
             instance.suspended = suspended
             return instance
         except BaseException:

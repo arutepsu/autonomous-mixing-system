@@ -2708,3 +2708,111 @@ A healthy-process control still suspends. The retry regression failed first (exi
 - **Other checks:** ruff check and format (313 files), fixture verifier, lock, diff and `daw start --help` pass.
 
 Uncommitted. No live provider/FL operation, installation, audio change, or C3/C4 work.
+
+## 2026-11-24 — R5C C3 plan: `daw continue` (planning only)
+
+The owner requested a C3-only plan from checkpoint `0d61fc4`. I read `reopen`/`_assemble`, `continue_export`/`resume_daw`/`admit_continuation`, the restart classification, the importer's private checks, `provider_identity` and the C2 command code, and saved the specification as plan section "C3 specification" (Proposed). The design reuses `reopen` and `continue_export`, with:
+- an inverse of `provider_identity` that validates every field;
+- one `FileExportHandoff.attestation_digests` method that reuses the importer's workspace, request, listing, link and physical-file checks before any bounded, handle-checked hashing;
+- the C2 process-local MIDI block checked first;
+- factual reused output;
+- a 0/2/4 exit mapping independent of the run outcome.
+
+**Recorded code facts:**
+- `reopen` constructs (but does not use) the provider transport before verifying evidence and classifying.
+- Its not-resumable refusal embeds the full record repr.
+- Store-busy and legacy errors are unwrapped.
+- An importer rejection ends the run.
+- A runtime controller blocked during `start` is not retained (a shared C2 gap).
+- C2's next-command wording says C3 is unavailable.
+
+**Decisions D-C3-1 to D-C3-7 await review:**
+- construction before classification;
+- import rejection consuming the suspension;
+- exit 0 for a recorded import failure;
+- retaining blocked runtime controllers for `start` and `continue`;
+- the attestation identity string;
+- recover support for interrupted continuations;
+- the stale status wording.
+
+No source or test changed. No provider/FL operation, installation, audio change or threshold change.
+
+## 2026-11-24 — R5C increment C3: `daw continue` (implementation)
+
+The owner approved C3 with D-C3-1 to D-C3-5, from checkpoint `0d61fc4`.
+
+**Implementation (tests first):**
+- `config_from_identity`;
+- `reopen(provider_config=None)` with wrapped store errors and a code-only not-resumable message;
+- `FileExportHandoff.attestation_digests`, which reuses the importer's checks before bounded, handle-checked hashing;
+- `continue_run` (process block → artifacts → reopen → export ID → safe digests → manifest → `continue_export` → retain-if-blocked → close);
+- CLI `continue` with the 0/2/4 mapping;
+- the "next, after exporting" wording;
+- shared retention of blocked runtime controllers for `start` and `continue` (D-C3-4).
+
+**Tests.** `test_daw_cli_continue.py` has 51 tests through `main`. Only MIDI and provider transports are simulated; real preparation, measurement, diagnosis, audit, admission, verification, recovery, stores and journal run underneath. Coverage:
+- input errors; the process block; missing, busy and drifted runs; an unusable manifest; a wrong export ID with no output opened;
+- manifest safety: stray, hard-link, symlink, replaced workspace (copied files, and the same files renamed), altered request, oversized output with a bounded read, a swap before open, a change during read. The suspension stays resumable after each;
+- outcomes: accepted; guard-rejected then restored then suspended again; intermediate acceptance with a stale export ID refused; accept-then-abstain and accept-then-limit with earlier writes and acceptances shown; finished runs refused; import rejection after a valid manifest recorded as an outcome; lost acceptance acknowledgement keeping authority;
+- recorded non-default provider settings used exactly;
+- admission refusal (`CONTINUATION_IN_PROGRESS`, through labelled ownership fault injection);
+- credential sentinels at reopen construction, dispatch and cleanup;
+- blocked runtime controllers in `start` and `continue` blocking later commands;
+- a new process continuing with one fader write in total and no further provider call.
+
+**Observations:**
+- **RED:** 27 failed and 3 errored before implementation. The 17 that passed early were the identity unit tests plus input tests that then passed only because `continue` still exited 2.
+- **Fixture corrections:** a change-during-read hook first fired on the request file, before the output's `lstat`; it now targets the output's descriptor. The expected recovery count (2, not 1) is read from the record. The labelled provider double needed the run's provider configuration.
+- **Two coverage gaps found while writing probes:** nothing tested that the recorded identity overrides defaults, and nothing reached an admission refusal. Two tests were added before the probes.
+- **Probes:** the first pass caught 15 of 18. Three were masked by later guards with the same outcome: the request-file identity masked the workspace-directory check; the final re-check masked the opened-handle check; the value check masked the type check for `True`. Three tests were strengthened: a workspace replaced around the same physical files, the exact "changed before it was opened" message, and `sdk_retries=False`. The re-run of those three caught all of them, so 18 of 18 are caught, run sequentially with sources restored byte-identically.
+
+**Remaining limits:**
+- `CONTINUATION_INTERRUPTED` is not reproducible through the CLI; it is covered in core.
+- There is no CLI test for a legacy schema 1 store.
+- The process block is process-local.
+- D-C3-6 and D-C3-7 are open.
+- `CLAUDE.md`'s state section still says start/continue refuse (not edited).
+
+**Verification on the final source, run alone after all probes were restored:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,368 passed, 4 skipped** (391.58 s).
+- **Focused continue/start/CLI/run-config/runtime/export-handoff/Claude-config/architecture with `-W error`:** 584 passed.
+- **Other checks:** `ruff check`, `ruff format --check` (315 files), fixture verifier, `uv lock --check`, `git diff --check` and `daw continue --help` pass.
+
+Uncommitted for review. No live provider/FL operation, installation, saving, exporting, audio change, threshold change or musical claim.
+
+## 2026-11-24 — R5C C3 review fix: per-output fail-fast hashing; interrupted continuation; P11 correction
+
+**Corrections to the C3 entry above:**
+- It stated that `CONTINUATION_INTERRUPTED` is not reproducible through the CLI. **That is superseded:** an abrupt process end right after the continuation marker commits is reproducible, and is now a permanent regression.
+- It counted P11 as a type-check detection. **That is corrected:** the counted P11 removed both the type check and the round trip. With the round trip kept, removing only the type check is an equivalent mutant that still refuses `False`.
+
+**Fix 1 — per-output fail-fast (tests first).** The reviewer showed that a change to `01-stem.wav` during hashing still let `02-master.wav` be read before refusal. `attestation_digests` now re-checks each output's read handle and path immediately after reading it, before opening the next. The final whole-workspace check is retained. The regression failed first (the later output was opened). A second regression changes an earlier output while a later one is read, so the final check alone must refuse.
+
+**Fix 2 — interrupted continuation through the CLI.** A labelled `os._exit(77)` crash point in the child helper fires right after the committed continuation marker. Then:
+- the next `continue` returns 4 with `continuation_interrupted`;
+- the read-only recover view returns 0 with that classification;
+- no further provider call is made and no fader write is resent.
+
+The test passed on first run, pinning existing behaviour. Performing recovery operations on such a run was not exercised (D-C3-6 is partly answered).
+
+**Probes**, run sequentially with sources restored byte-identically (SHA-256 checked):
+- per-output check removed: caught;
+- final re-check removed: caught;
+- workspace check, object checks, pre-read handle identity and bounded read, each removed: caught;
+- SDK-retry type check removed alone: survived (equivalent).
+
+One probe-script anchor first matched both the hashing and import code paths. The script stopped before mutating anything, both sources verified unchanged, and the anchor was lengthened.
+
+**Verification on the final source, run alone afterwards:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,371 passed, 4 skipped** (364.65 s).
+- **Focused continue/start/CLI/export-handoff/architecture with `-W error`:** 447 passed.
+- **Other checks:** ruff check and format (315 files), fixture verifier, lock, diff and `daw continue --help` pass.
+
+Uncommitted. No live provider/FL operation.
+
+
+## 2026-11-24 — C3 checkpoint review and independent verification
+
+Owner requested a C3 checkpoint commit after review. The previously reproduced per-output hashing gap is fixed: handle/path metadata are rechecked before the next output opens, while the final workspace check catches earlier files changed during later reads. The child-process hard-exit regression now pins continuation_interrupted refusal and the read-only recovery view without another provider call or fader write. Performing recovery itself is not claimed. The SDK retry type-only mutation is correctly recorded as equivalent under exact identity round-tripping. No further blocking finding identified in this review; C4 remains outside this checkpoint.
+
+Independent final-source verification, without concurrent suites or mutations: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7371 passed,4 skipped**, 400.59s. Ruff check and formatting (315 files), frozen fixture verification, dependency lock, continue help and staged whitespace checks pass. Earlier independent CLI review passed130 tests before the final three regression additions; the full final run above includes them. All production transports used by tests remain simulated; no live provider/FL action, installation, export/save automation, threshold change or requirement-status change was performed. The reviewed C3 implementation and its documentation are approved for the requested checkpoint commit.

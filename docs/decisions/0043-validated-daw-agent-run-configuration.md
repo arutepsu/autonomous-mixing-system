@@ -1,6 +1,6 @@
 # ADR-043 — Validated run configuration for the DAW agent runtime (2026-11-24)
 
-- **Status:** Proposed. R5C increment C1 implementation reviewed for the 2026-11-24 checkpoint; C2 (`daw start`) implemented 2026-11-24, uncommitted for review; C3–C4 remain unimplemented.
+- **Status:** Proposed. R5C increment C1 implementation reviewed for the 2026-11-24 checkpoint; C2 (`daw start`) implemented and committed; C3 (`daw continue`) implementation reviewed for the 2026-11-24 checkpoint; C4 remains unimplemented.
 - **Source:** the owner approved C1 of the [R5C plan](../superpowers/plans/2026-11-24-r5c-operator-cli.md), including its three review corrections.
 
 ## Decision
@@ -73,3 +73,19 @@ None. Extends ADR-042 (Proposed) and refines the run-command part of ADR-040 (Pr
 
   A cleanup failure after a recorded outcome keeps that outcome and exits 4.
 - **Output.** It is read from the records: a termination keyword, usage against limits, acceptances, authoritative and verified state, and uncertainty. A suspension adds manual export instructions from the saved checkpoint. The printed continuation command is labelled as requiring R5C C3.
+
+## C3 addendum (2026-11-24, `daw continue`)
+
+- **Recorded settings only.** `daw continue --config --run-id --export-id --operator --attestation` takes no run file and no provider option. `reopen` rebuilds `ClaudeConfig` with `config_from_identity`, which validates every recorded field and transport constant. The credential still comes only from `ANTHROPIC_API_KEY`.
+- **Order before any effect:**
+  1. the process-local MIDI block;
+  2. both run artifacts exist;
+  3. reopen (busy or legacy stores, drift, the manifest, evidence and classification refuse with exit 4);
+  4. the export ID, before any file is read;
+  5. `FileExportHandoff.attestation_digests`, which reuses the importer's workspace, request, listing, link and physical-file checks before bounded, handle-checked hashing;
+  6. the operator's manifest (`attested_by = VersionRef(operator, "daw-cli-attestation-1")`);
+  7. `continue_export`.
+- **Hashing is not import.** The importer stays authoritative, and its rejection is a recorded run outcome (exit 0, D-C3-3).
+- **Retained blocked controllers.** Both `start` and `continue` retain a runtime controller that is blocked after use (D-C3-4).
+- **Outcomes and exit codes.** Admission refusals are exit 4. An exception after continuation begins is `STOPPED` (type only). A cleanup failure after an outcome keeps the outcome and exits 4.
+- **Accepted constraint.** `reopen` constructs, but does not use, the provider transport before evidence verification and classification (D-C3-1). Tests assert no send.

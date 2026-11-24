@@ -7,7 +7,9 @@ is adopted or restored automatically.
 
 ``start`` (R5C C2, ADR-043 Proposed) composes the existing ``DawAgentRuntime``: it checks the journal with the existing
 run-start rule, inspects the DAW once, requires the exact first-session confirmation, runs to a recorded outcome or
-suspension and describes it from the records. ``continue`` is not yet available (R5C C3).
+suspension and describes it from the records. ``continue`` (R5C C3) reopens the recorded suspension with its recorded
+provider identity, hashes only the declared export files after the importer's own file checks, and continues it with
+the operator's attestation through the existing ``continue_export``.
 """
 
 import hashlib
@@ -27,8 +29,9 @@ from autonomous_mixing.core.ports.daw_recovery import validate_daw_control_state
 from autonomous_mixing.core.records.coordinator_runtime import RunRequest
 from autonomous_mixing.core.records.daw_binding import DawFaderReading
 from autonomous_mixing.core.records.daw_control import DawApplyRequest, DawInspection, DawInspectRequest
-from autonomous_mixing.core.records.daw_export import DAW_EXPORT_REQUEST_FILE
-from autonomous_mixing.core.records.identifiers import RunId
+from autonomous_mixing.core.records.daw_correction import DawContinuationRefused
+from autonomous_mixing.core.records.daw_export import DAW_EXPORT_REQUEST_FILE, DawExportManifest, DawImportRejected
+from autonomous_mixing.core.records.identifiers import RunId, VersionRef
 from autonomous_mixing.core.records.invariants import require_instance
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, Success
 from autonomous_mixing.core.records.run import FinalProjectState, RunOutcome
@@ -270,6 +273,56 @@ REFUSED_CLAUSE = "no provider call or fader write was made by this command"
 # Pre-check controllers that could not release a MIDI transport. They hold the unreleased transport and their in-memory
 # block for the rest of the process: neither is dropped, closed again or replaced by a fresh controller (review fix).
 _UNRELEASED_CONTROLLERS: list = []
+ATTESTATION_VERSION = "daw-cli-attestation-1"  # the version of the operator identity in a CLI-built manifest (D8)
+
+
+def _refuse_if_blocked() -> None:
+    """The process-local MIDI block shared by ``start`` and ``continue``: refuse before anything is opened."""
+    from autonomous_mixing.drivers.agent_runtime import RuntimeRefusal
+
+    if _UNRELEASED_CONTROLLERS:
+        raise RuntimeRefusal(
+            f"this process still holds {len(_UNRELEASED_CONTROLLERS)} unreleased MIDI transport(s) from an earlier "
+            "command whose cleanup failed; no further run can start or continue in this process. Check the MIDI "
+            "connection, then run the command again in a new process"
+        )
+
+
+def _retain_if_blocked(runtime) -> None:
+    """Keep a runtime controller that could not release a transport for the rest of the process (C3, D-C3-4)."""
+    controller = getattr(runtime, "controller", None)
+    if controller is not None and controller.blocked and controller not in _UNRELEASED_CONTROLLERS:
+        _UNRELEASED_CONTROLLERS.append(controller)
+
+
+def _close(runtime) -> str | None:
+    """Retain a blocked controller, then close the runtime; the type of a close failure, if any."""
+    _retain_if_blocked(runtime)
+    try:
+        runtime.close()
+    except Exception as error:
+        return type(error).__name__
+    return None
+
+
+def _run_owned(runtime, run_id: str, clock, action):
+    """Run ``action()`` (which may dispatch and write) and always close; exceptions become ``RunStopped``."""
+    result = error_type = None
+    last: tuple[str, ...] = ()
+    try:
+        try:
+            with interrupt_cancels(clock) if isinstance(clock, SystemClock) else nullcontext():
+                result = action()
+        except Exception as error:
+            error_type = type(error).__name__
+            last = _last_recorded(runtime)
+    finally:
+        cleanup_type = _close(runtime)
+    if error_type is not None:
+        raise RunStopped(run_id, error_type, cleanup_type, last) from None
+    return result, cleanup_type
+
+
 _UNCERTAIN_REASONS = frozenset({TerminationReason.ACCEPTANCE_COMMIT_UNCERTAIN, TerminationReason.RESTORATION_UNCERTAIN,
                                 TerminationReason.ACCEPTED_STATE_INTEGRITY_UNCERTAIN})  # fmt: skip
 
@@ -433,12 +486,7 @@ def start(config: DawToolConfig, run: DawRunConfig, run_id: str, accept: DawFade
     from autonomous_mixing.drivers.agent_runtime import DawAgentRuntime, RuntimeRefusal
 
     require_instance(run, DawRunConfig, "run configuration")
-    if _UNRELEASED_CONTROLLERS:  # process-local block: refuse before any store, MIDI transport, runtime or provider
-        raise RuntimeRefusal(
-            f"this process still holds {len(_UNRELEASED_CONTROLLERS)} unreleased MIDI transport(s) from an earlier "
-            "pre-check whose cleanup failed; no further run can start in this process. Check the MIDI connection, "
-            "then start again in a new process"
-        )
+    _refuse_if_blocked()  # process-local block: refuse before any store, MIDI transport, runtime or provider
     retained = config.run_store_dir / f"{run_id}.runtime"
     if config.store_path(run_id).exists() or retained.exists():
         raise RuntimeRefusal("run store or runtime artifacts already exist for this run ID; they are never overwritten "
@@ -470,23 +518,63 @@ def start(config: DawToolConfig, run: DawRunConfig, run_id: str, accept: DawFade
     except Exception as error:
         raise StartRefused(run_id, "assembling the run", type(error).__name__,
                            retained if retained.exists() else None) from None  # fmt: skip
-    result = error_type = None
-    last: tuple[str, ...] = ()
+    result, cleanup_type = _run_owned(runtime, run_id, clock, runtime.start)
+    return StartResult(result, cleanup_type)
+
+
+def continue_run(config: DawToolConfig, run_id: str, export_id: str, operator: str, attestation: str, api_key: str,
+                 *, provider_transport_factory=None, fl_transport_factory=None, clock=None,
+                 identities=None) -> StartResult:  # fmt: skip
+    """``daw continue`` after the CLI has validated its arguments, the tool configuration and the credential (K0-K1).
+
+    K2 the process-local MIDI block; K3 both run artifacts exist; K4 ``reopen`` with the recorded provider identity
+    (drift, evidence, manifest and classification refusals); K5 the export ID before any file is read; K6 safe
+    digests of the declared outputs; K7 the operator's manifest; K8 ``continue_export``; K9 retain-if-blocked and close.
+    Refusals before K8, and continuation refusals by admission, raise ``RuntimeRefusal`` (or ``StartRefused`` by type);
+    an exception during K8 becomes ``RunStopped``. A cleanup failure after a recorded outcome keeps that outcome.
+    """
+    from autonomous_mixing.drivers.agent_runtime import DawAgentRuntime, RuntimeRefusal
+
+    _refuse_if_blocked()
+    if not config.store_path(run_id).is_file() or not (config.run_store_dir / f"{run_id}.runtime").is_dir():
+        raise RuntimeRefusal(f"run {run_id} has no run store and runtime directory here; there is nothing to continue")
+    clock = clock or SystemClock()
+    identities = identities or UuidIdentitySource()
     try:
+        runtime = DawAgentRuntime.reopen(config=config, run_id=RunId(run_id), api_key=api_key, clock=clock,
+                                         identities=identities, provider_transport_factory=provider_transport_factory,
+                                         fl_transport_factory=fl_transport_factory)  # fmt: skip
+    except (ConfigError, RuntimeRefusal):
+        raise
+    except Exception as error:
+        raise StartRefused(run_id, "reopening the run", type(error).__name__) from None
+    try:
+        suspended = runtime.suspended
+        awaiting = suspended.checkpoint_event.payload.awaiting
+        if export_id != awaiting.request.export_id:
+            raise RuntimeRefusal(f"--export-id {export_id!r} is not the export this run awaits "
+                                 f"({awaiting.request.export_id}); no file was read")  # fmt: skip
+        digests = runtime.export_handoff.attestation_digests(awaiting)
+        if isinstance(digests, DawImportRejected):
+            raise RuntimeRefusal(f"{digests.code.value}: {digests.explanation}; nothing was recorded and the run "
+                                 "still awaits this export")  # fmt: skip
         try:
-            with interrupt_cancels(clock) if isinstance(clock, SystemClock) else nullcontext():
-                result = runtime.start()
-        except Exception as error:
-            error_type = type(error).__name__
-            last = _last_recorded(runtime)
-    finally:
-        cleanup_type = None
-        try:
-            runtime.close()
-        except Exception as error:
-            cleanup_type = type(error).__name__
-    if error_type is not None:
-        raise RunStopped(run_id, error_type, cleanup_type, last) from None
+            manifest = DawExportManifest(export_id, awaiting.request_fingerprint, digests,
+                                         VersionRef(operator, ATTESTATION_VERSION), clock.read().utc, attestation)  # fmt: skip
+        except ValueError as error:
+            raise ConfigError(f"the operator attestation is invalid: {error}") from error
+    except (ConfigError, RuntimeRefusal) as refusal:
+        cleanup_type = _close(runtime)
+        if cleanup_type is not None:
+            raise RuntimeRefusal(f"{refusal} (cleanup failed: {cleanup_type})") from None
+        raise
+    except Exception as error:
+        _close(runtime)
+        raise StartRefused(run_id, "preparing the export manifest", type(error).__name__) from None
+    result, cleanup_type = _run_owned(runtime, run_id, clock, lambda: runtime.continue_export(suspended, manifest))
+    if isinstance(result, DawContinuationRefused):  # admission refused it without any effect
+        message = f"{result.code.value}: {result.explanation}"
+        raise RuntimeRefusal(message if cleanup_type is None else f"{message} (cleanup failed: {cleanup_type})")
     return StartResult(result, cleanup_type)
 
 
@@ -539,7 +627,7 @@ def _instructions(suspended: RunSuspended, *, run_id: str, tool_path: str) -> li
                      f"channels; replaces {output.replaces.value}")  # fmt: skip
     lines += [
         "  5. Saving and exporting are manual. Save the project yourself if you want to keep this fader position.",
-        "  6. next (requires 'daw continue' from R5C C3, which is not available in this version):",
+        "  6. next, after exporting:",
         f'     autonomous-mixing daw continue --config "{tool_path}" --run-id {run_id} --export-id '
         f'{export.export_id} --operator <NAME> --attestation "<what you exported>"',
     ]

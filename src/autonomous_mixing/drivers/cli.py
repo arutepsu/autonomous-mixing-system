@@ -77,14 +77,10 @@ def main(argv: list[str] | None = None) -> int:
 # no leading dot, no leading zeros, no underscores, no hexadecimal, no ``nan``/``inf``.
 _DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?")
 CREDENTIAL_VARIABLE = "ANTHROPIC_API_KEY"
-CONTINUE_UNAVAILABLE = (
-    "daw continue is not yet available (R5C C3): continuing a suspended run needs the operator manifest and "
-    "attestation handling of the next increment. Nothing was opened or changed; 'daw status' shows stored runs."
-)
 
 
 def _add_daw(sub) -> None:
-    """The operator DAW commands (ADR-040, ADR-043): start (R5C C2), status and recover; continue follows in C3."""
+    """The operator DAW commands (ADR-040, ADR-043): start (R5C C2), continue (R5C C3), status and recover."""
     daw = sub.add_parser("daw", help="Operator tooling for the FL Studio DAW path (ADR-040)")
     commands = daw.add_subparsers(dest="daw_command", required=True)
     start = commands.add_parser(
@@ -102,10 +98,18 @@ def _add_daw(sub) -> None:
     start.add_argument("--run-id", required=True, help="a new run ID: 1-64 letters, digits, '-' or '_'")
     start.add_argument("--accept-current-fader", nargs=2, metavar=("NORMALIZED", "DB"),
                        help="first session only: repeat the fresh reading shown by a previous attempt exactly")  # fmt: skip
-    proceed = commands.add_parser("continue", help="Continue a suspended run (not yet available: R5C C3)")
-    proceed.add_argument("--config", required=True)
-    proceed.add_argument("--run-id", required=True)
-    proceed.add_argument("--attestation", required=True)
+    proceed = commands.add_parser(
+        "continue",
+        help="Continue a suspended run after the operator's manual export",
+        description="Continue the recorded suspension of a run with the files the operator exported. The stored run "
+        "decides every setting (no run configuration or provider option is accepted). The provider credential is "
+        f"read from the {CREDENTIAL_VARIABLE} environment variable; it is never stored or printed.",
+    )
+    proceed.add_argument("--config", required=True, help="the tool configuration the run was started with")
+    proceed.add_argument("--run-id", required=True, help="the suspended run")
+    proceed.add_argument("--export-id", required=True, help="the export ID printed with the suspension")
+    proceed.add_argument("--operator", required=True, help="who exported the files")
+    proceed.add_argument("--attestation", required=True, help="what was exported, in the operator's words")
     status = commands.add_parser("status", help="Show stored runs and FL journal facts (read-only)")
     status.add_argument("--config", required=True)
     status.add_argument("--run-id")
@@ -126,11 +130,10 @@ def _daw(args) -> int:
     from autonomous_mixing.drivers import daw_commands
     from autonomous_mixing.drivers.daw_runtime import ConfigError, load_config
 
-    if args.daw_command == "continue":
-        print(f"error: {CONTINUE_UNAVAILABLE}", file=sys.stderr)  # before opening anything
-        return 2
     if args.daw_command == "start":
         return _start(args)
+    if args.daw_command == "continue":
+        return _continue(args)
     try:
         config = load_config(Path(args.config))
     except ConfigError as error:
@@ -183,12 +186,7 @@ def _start(args) -> int:
     """S0-S3 here (arguments, both files loaded once, credential), then ``daw_commands.start``; exit 0/2/4."""
     from autonomous_mixing.core.records.daw_binding import DawFaderReading
     from autonomous_mixing.drivers import daw_commands
-    from autonomous_mixing.drivers.agent_runtime import RuntimeRefusal
-    from autonomous_mixing.drivers.daw_runtime import ConfigError, load_config, load_run_config
-
-    def refused(message: str) -> int:
-        print(f"REFUSED: {message} ({daw_commands.REFUSED_CLAUSE})", file=sys.stderr)
-        return 4
+    from autonomous_mixing.drivers.daw_runtime import load_config, load_run_config
 
     try:
         accept = None
@@ -201,13 +199,56 @@ def _start(args) -> int:
     except ValueError as error:  # ConfigError and literal/record validation: the operator's input is invalid
         print(f"error: {error}", file=sys.stderr)
         return 2
+    api_key = _credential()
+    if api_key is None:
+        return 2
+    return _report(args, lambda: daw_commands.start(config, run, args.run_id, accept, api_key))
+
+
+def _credential() -> str | None:
     api_key = os.environ.get(CREDENTIAL_VARIABLE)
     if api_key is None or not api_key.strip():
         print(f"error: no provider credential: set {CREDENTIAL_VARIABLE} (it is never stored or printed)",
               file=sys.stderr)  # fmt: skip
-        return 2
+        return None
+    return api_key
+
+
+def _continue(args) -> int:
+    """K0-K1 here (arguments, tool configuration, credential), then ``daw_commands.continue_run``; exit 0/2/4."""
+    from autonomous_mixing.core.records.identifiers import VersionRef
+    from autonomous_mixing.drivers import daw_commands
+    from autonomous_mixing.drivers.daw_runtime import load_config
+
     try:
-        outcome = daw_commands.start(config, run, args.run_id, accept, api_key)
+        for name in ("export_id", "operator", "attestation"):
+            if not getattr(args, name).strip():
+                raise ValueError(f"--{name.replace('_', '-')} must be nonblank")
+        VersionRef(args.operator, daw_commands.ATTESTATION_VERSION)
+        config = load_config(Path(args.config))
+        config.store_path(args.run_id)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    api_key = _credential()
+    if api_key is None:
+        return 2
+    return _report(args, lambda: daw_commands.continue_run(config, args.run_id, args.export_id, args.operator,
+                                                           args.attestation, api_key))  # fmt: skip
+
+
+def _report(args, command) -> int:
+    """Run a start/continue command and print its outcome or refusal; exit 0/2/4, separate from the run outcome."""
+    from autonomous_mixing.drivers import daw_commands
+    from autonomous_mixing.drivers.agent_runtime import RuntimeRefusal
+    from autonomous_mixing.drivers.daw_runtime import ConfigError
+
+    def refused(message: str) -> int:
+        print(f"REFUSED: {message} ({daw_commands.REFUSED_CLAUSE})", file=sys.stderr)
+        return 4
+
+    try:
+        outcome = command()
     except ConfigError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

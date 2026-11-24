@@ -55,3 +55,7 @@ The real-component programmatic runtime is implemented, uncommitted for review (
 `daw start` is activated through the existing `DawAgentRuntime` ([ADR-043](../decisions/0043-validated-daw-agent-run-configuration.md), Proposed; uncommitted for review). It covers the strict run file, the credential from the environment, journal checks, one fresh inspection with exact first-session confirmation, and factual outcome and manual-export output.
 
 `daw continue` (C3) and the provider-run status additions (C4) remain pending. This supersedes "CLI start/continue still refuse" for `start` only. It was tested with simulated FL and provider transports on synthetic files. No live integrated run, saving, exporting or musical result is claimed.
+
+### R5C C3 engineering update — 2026-11-24
+
+`daw continue` is implemented through the existing `DawAgentRuntime.reopen`/`continue_export` ([ADR-043](../decisions/0043-validated-daw-agent-run-configuration.md), Proposed; uncommitted for review). It covers the recorded provider identity, export-ID and safe hashing checks before import, factual outcomes (including accepted-then-abstained or limited runs) and the shared process-local MIDI block. Provider-run status additions (C4) and live integrated runs remain pending. Tests use simulated FL and provider transports on synthetic files; no live run, saving, exporting or musical result is claimed.

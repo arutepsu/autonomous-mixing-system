@@ -274,7 +274,8 @@ def test_exact_first_session_confirmation_runs_to_a_suspension_with_manual_expor
     assert f"DAW writes {usage.daw_writes}/{limits.max_daw_writes}" in out and usage.daw_writes == 1
     assert f"decision calls {usage.decision_calls}/{limits.max_decision_calls}" in out
     assert "acceptances: 0" in out
-    assert "daw continue" in out and "R5C C3" in out and "not available" in out
+    assert f'daw continue --config "{env.tool}" --run-id {RUN} --export-id {export.export_id}' in out
+    assert "next, after exporting" in out and "not available" not in out
     assert "saving and exporting are manual" in out.lower()
     assert len(env.provider.calls) == 1 and env.constructed == [SENTINEL]
     assert [t for t in device_messages(env) if t != "inspect"] == ["set_gain_db"]
@@ -462,10 +463,10 @@ def test_a_cleanup_failure_after_a_stopped_run_names_both_types_only(env, monkey
 # --- unchanged commands ----------------------------------------------------------------------------------------------
 
 
-def test_continue_still_refuses_and_names_c3(env, capsys):
-    code = main(["daw", "continue", "--config", str(env.tool), "--run-id", RUN, "--attestation", "x"])
-    err = capsys.readouterr().err
-    assert code == 2 and "R5C C3" in err and "not yet available" in err
+def test_continue_without_its_required_options_is_a_usage_error(env, capsys):
+    with pytest.raises(SystemExit) as raised:
+        main(["daw", "continue", "--config", str(env.tool), "--run-id", RUN, "--attestation", "x"])
+    assert raised.value.code == 2 and "--export-id" in capsys.readouterr().err
     assert stores(env) == []
 
 
