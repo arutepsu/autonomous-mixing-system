@@ -168,6 +168,14 @@ class FlStudioParameterController:
         self._retained_transports = []
         self.diagnostics = ()
 
+    @property
+    def blocked(self) -> bool:
+        """Whether this controller refuses further device operations: a transport it could not release (kept in
+        ``_retained_transports``) or an unrecorded journal state. The block is held in memory by this instance only;
+        a caller that observes it must not continue with another controller in the same process (R5C C2 review)."""
+        with self._lock:
+            return self._poisoned
+
     def _open_transport(self):
         try:
             return self.transport_factory()

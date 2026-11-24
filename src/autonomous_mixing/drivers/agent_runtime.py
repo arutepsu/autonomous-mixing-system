@@ -1,4 +1,4 @@
-"""R5B: owned programmatic DAW agent composition. No CLI activation, save/export or installation.
+"""R5B: owned programmatic DAW agent composition, used by ``daw start`` (R5C C2). No save/export or installation.
 
 The caller supplies producer configuration via a typed RunRequest factory. Only external transports, clock and
 identities are injectable; measurement, diagnosis, audit, admission, verification and recovery remain real.
@@ -63,7 +63,13 @@ from autonomous_mixing.core.records.results import Success
 from autonomous_mixing.core.records.run_report import RunSuspended
 from autonomous_mixing.core.records.verification import MetricSelector
 from autonomous_mixing.core.records.verification_evidence import MeasurementDefinition
-from autonomous_mixing.drivers.daw_runtime import DawToolConfig, SystemClock, UuidIdentitySource, load_config
+from autonomous_mixing.drivers.daw_runtime import (
+    ConfigError,
+    DawToolConfig,
+    SystemClock,
+    UuidIdentitySource,
+    load_config,
+)
 from autonomous_mixing.drivers.decision_evidence import ConfiguredDecisionEvidenceSource
 from autonomous_mixing.drivers.diagnosis_runtime import ConfiguredDiagnosisSource
 
@@ -162,7 +168,7 @@ class DawAgentRuntime:
             dict(config.roots), store=directory / "plans", clock=clock, known_alignments=known_alignments
         ).prepare(preparation)
         if not isinstance(prepared, Success):
-            raise ValueError(f"preparation failed: {prepared}")
+            raise ConfigError(f"preparation failed: {prepared}")  # the declared inputs cannot be prepared (R5C C2)
         plan = MaskingMeasurementPlan(
             bound_specification("autonomous_mixing.daw_agent_analysis", "1", prepared.value.digest),
             P1_ANALYZER,

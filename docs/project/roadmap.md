@@ -49,3 +49,9 @@ This status supersedes the older engineering-status rows above, not the historic
 ### R5B engineering update — 2026-11-24
 
 The real-component programmatic runtime is implemented, uncommitted for review ([ADR-042](../decisions/0042-programmatic-daw-agent-composition.md), Proposed). Numerical files pass through real measurement, experimental diagnosis, audited decision parsing and the DAW coordinator with external transports simulated. Recovery, acceptance, restart and second-export paths are tested. This supersedes the earlier R5B-missing status only. R5C validated operator configuration/CLI activation is next; start/continue still refuse. No live integrated run or validated musical improvement is claimed, and no larger dataset is required before this engineering review.
+
+### R5C C2 engineering update — 2026-11-24
+
+`daw start` is activated through the existing `DawAgentRuntime` ([ADR-043](../decisions/0043-validated-daw-agent-run-configuration.md), Proposed; uncommitted for review). It covers the strict run file, the credential from the environment, journal checks, one fresh inspection with exact first-session confirmation, and factual outcome and manual-export output.
+
+`daw continue` (C3) and the provider-run status additions (C4) remain pending. This supersedes "CLI start/continue still refuse" for `start` only. It was tested with simulated FL and provider transports on synthetic files. No live integrated run, saving, exporting or musical result is claimed.

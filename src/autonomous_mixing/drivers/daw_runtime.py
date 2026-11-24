@@ -11,7 +11,7 @@ R5C increment C1 (ADR-043, Proposed) adds the separate run-configuration file re
 strict, bounded, allowlisted JSON envelope (schema 1) of codec-encoded core records. Every value derived from
 preparation or the tool configuration (the analysis specification and its prepared digest, the diagnosis jobs, the DAW
 profile, the provider binding, the read limits and the output root) is absent from it, so the run file cannot declare
-them. ``daw start`` / ``daw continue`` still refuse before opening anything: CLI activation is a later increment.
+them. ``daw start`` (R5C C2) loads it once; ``daw continue`` is not yet available (R5C C3).
 """
 
 import codecs
@@ -64,11 +64,6 @@ from autonomous_mixing.core.records.verification_evidence import MeasurementDefi
 
 SCHEMA = 1
 _RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
-UNAVAILABLE = (
-    "unavailable: autonomous DAW runs need a DecisionMaker and a DiagnosisSource, and no implementation of either "
-    "exists yet (adapters.decision_agent and core.diagnosis are planned). Operator tooling is ready: use "
-    "'daw status' and 'daw recover'. Nothing was opened or changed."
-)
 
 
 class SystemClock:

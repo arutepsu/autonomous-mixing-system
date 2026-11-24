@@ -1,6 +1,8 @@
 import argparse
 import json
+import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -71,14 +73,36 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+# The declared fader-literal grammar (R5C C2): plain decimals with an optional exponent; no sign on positive values,
+# no leading dot, no leading zeros, no underscores, no hexadecimal, no ``nan``/``inf``.
+_DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?")
+CREDENTIAL_VARIABLE = "ANTHROPIC_API_KEY"
+CONTINUE_UNAVAILABLE = (
+    "daw continue is not yet available (R5C C3): continuing a suspended run needs the operator manifest and "
+    "attestation handling of the next increment. Nothing was opened or changed; 'daw status' shows stored runs."
+)
+
+
 def _add_daw(sub) -> None:
-    """The operator DAW commands (ADR-040): operator tooling is ready; autonomous runs are unavailable."""
+    """The operator DAW commands (ADR-040, ADR-043): start (R5C C2), status and recover; continue follows in C3."""
     daw = sub.add_parser("daw", help="Operator tooling for the FL Studio DAW path (ADR-040)")
     commands = daw.add_subparsers(dest="daw_command", required=True)
-    start = commands.add_parser("start", help="Start an autonomous DAW run (unavailable: no decision maker yet)")
-    start.add_argument("--config", required=True)
-    start.add_argument("--run-id")
-    proceed = commands.add_parser("continue", help="Continue a suspended run (unavailable: no decision maker yet)")
+    start = commands.add_parser(
+        "start",
+        help="Start an operator-assisted DAW agent run up to its first manual-export suspension",
+        description="Start one run from a tool configuration and a run configuration. The provider credential is "
+        f"read from the {CREDENTIAL_VARIABLE} environment variable after both files validate; it is never stored or "
+        "printed. Saving and exporting in FL Studio stay manual.",
+    )
+    # argparse reads '-1e-05' as an option unless its private negative-number pattern covers the declared grammar
+    # (Python 3.11 default: '^-\d+$|^-\d*\.\d+$'); this parser has no option that looks like a negative number.
+    start._negative_number_matcher = re.compile(r"^-(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?$")
+    start.add_argument("--config", required=True, help="the tool configuration (stores, FL journal, MIDI, roots)")
+    start.add_argument("--run-config", required=True, help="the run configuration (schema 1, ADR-043)")
+    start.add_argument("--run-id", required=True, help="a new run ID: 1-64 letters, digits, '-' or '_'")
+    start.add_argument("--accept-current-fader", nargs=2, metavar=("NORMALIZED", "DB"),
+                       help="first session only: repeat the fresh reading shown by a previous attempt exactly")  # fmt: skip
+    proceed = commands.add_parser("continue", help="Continue a suspended run (not yet available: R5C C3)")
     proceed.add_argument("--config", required=True)
     proceed.add_argument("--run-id", required=True)
     proceed.add_argument("--attestation", required=True)
@@ -100,11 +124,13 @@ def _add_daw(sub) -> None:
 def _daw(args) -> int:
     # Imported here so that 'analyze' never loads the DAW adapters.
     from autonomous_mixing.drivers import daw_commands
-    from autonomous_mixing.drivers.daw_runtime import UNAVAILABLE, ConfigError, load_config
+    from autonomous_mixing.drivers.daw_runtime import ConfigError, load_config
 
-    if args.daw_command in ("start", "continue"):
-        print(f"error: daw {args.daw_command} is {UNAVAILABLE}", file=sys.stderr)  # before opening anything (H1)
+    if args.daw_command == "continue":
+        print(f"error: {CONTINUE_UNAVAILABLE}", file=sys.stderr)  # before opening anything
         return 2
+    if args.daw_command == "start":
+        return _start(args)
     try:
         config = load_config(Path(args.config))
     except ConfigError as error:
@@ -142,6 +168,70 @@ def _daw(args) -> int:
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+
+
+def _fader_literal(text: str, name: str) -> float:
+    if not _DECIMAL.fullmatch(text):
+        raise ValueError(f"--accept-current-fader {name}: {text!r} is not a plain decimal literal")
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"--accept-current-fader {name}: {text!r} is not finite")
+    return value
+
+
+def _start(args) -> int:
+    """S0-S3 here (arguments, both files loaded once, credential), then ``daw_commands.start``; exit 0/2/4."""
+    from autonomous_mixing.core.records.daw_binding import DawFaderReading
+    from autonomous_mixing.drivers import daw_commands
+    from autonomous_mixing.drivers.agent_runtime import RuntimeRefusal
+    from autonomous_mixing.drivers.daw_runtime import ConfigError, load_config, load_run_config
+
+    def refused(message: str) -> int:
+        print(f"REFUSED: {message} ({daw_commands.REFUSED_CLAUSE})", file=sys.stderr)
+        return 4
+
+    try:
+        accept = None
+        if args.accept_current_fader is not None:
+            normalized, db = args.accept_current_fader
+            accept = DawFaderReading(_fader_literal(normalized, "NORMALIZED"), _fader_literal(db, "DB"))
+        config = load_config(Path(args.config))
+        config.store_path(args.run_id)
+        run = load_run_config(Path(args.run_config), config)
+    except ValueError as error:  # ConfigError and literal/record validation: the operator's input is invalid
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    api_key = os.environ.get(CREDENTIAL_VARIABLE)
+    if api_key is None or not api_key.strip():
+        print(f"error: no provider credential: set {CREDENTIAL_VARIABLE} (it is never stored or printed)",
+              file=sys.stderr)  # fmt: skip
+        return 2
+    try:
+        outcome = daw_commands.start(config, run, args.run_id, accept, api_key)
+    except ConfigError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    except (RuntimeRefusal, daw_commands.StoreInUse, daw_commands.RecoveryRefused) as error:
+        return refused(str(error))
+    except daw_commands.StartRefused as error:
+        retained = (
+            f"; runtime artifacts retained at {error.retained}; a new run ID is required" if error.retained else ""
+        )
+        return refused(f"{error.stage} failed ({error.error_type}){retained}")
+    except daw_commands.RunStopped as error:
+        lines = [f"STOPPED: run {error.run_id} raised {error.error_type} after it started. It may have dispatched a "
+                 "decision, written the fader or recorded an acceptance; its recorded state is uncertain. Inspect "
+                 "with 'daw status'; use 'daw recover' if it reports an interruption.", *error.last]  # fmt: skip
+        if error.cleanup_type is not None:
+            lines.append(f"cleanup failed ({error.cleanup_type})")
+        print("\n".join(lines), file=sys.stderr)
+        return 4
+    print(daw_commands.describe_outcome(outcome.result, run_id=args.run_id, tool_path=args.config))
+    if outcome.cleanup_type is not None:
+        print(f"cleanup failed ({outcome.cleanup_type}): the recorded outcome above stands; inspect with "
+              "'daw status' before any further step", file=sys.stderr)  # fmt: skip
+        return 4
+    return 0
 
 
 def _describe(shown: dict) -> str:

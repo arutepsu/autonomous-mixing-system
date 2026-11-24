@@ -824,3 +824,94 @@ After each, the tests assert no run store, no runtime directory and no provider 
 - **C2-c:** `RunStopped` reports the exception type only.
 
 **Not in C2:** `continue` (C3), status additions (C4), `--json` (Q6), and any live FL/provider operation.
+
+### C2.9 Owner clarifications applied before coding (2026-11-24)
+
+These clarifications take precedence over C2.1–C2.8 where they differ.
+
+1. **Load once.** The CLI loads and validates the run file once, then passes the `DawRunConfig` object to `start(config, run, run_id, accept, api_key, *, ...)`. The file is never read a second time.
+2. **S5 and S7 classification.**
+   - **Exit 2** (configuration errors):
+     - invalid native-export metadata, a baseline integrity or location failure, and any other `ValueError` from the pre-write check (S5), as `ConfigError`;
+     - a preparation failure inside `create`, which now raises `ConfigError` (still a `ValueError`) because the declared inputs cannot be prepared.
+   - **Exit 4** (operational refusals):
+     - journal, DAW or store state refusals (`RuntimeRefusal`);
+     - any other exception during S6–S7. It is reported by type only, with the "no provider call or fader write was made by this command" clause, because S6 only inspects and `create` never dispatches. Retained runtime artifacts are named.
+3. **Numeric arguments through the real parser.** argparse's negative-number pattern (`^-\d+$|^-\d*\.\d+$` on Python 3.11) does not cover exponents. A value such as `-1e-05` would otherwise be read as an option.
+   - The `start` subparser's negative-number pattern is widened to the declared decimal grammar. This is a documented private argparse attribute, pinned by tests through `main`.
+   - Valid negative dB values and negative-exponent literals are accepted.
+   - Non-finite literals (`1e400`, `nan`, `inf`) and unsupported literals (hexadecimal, `1_0`, `+1`, `.5`) exit 2.
+4. **Failure reporting across the lifecycle.**
+   - Messages are printed only for this driver's own `ConfigError` and `RuntimeRefusal`. These arise in S2–S6, where no credential is in scope, or are fixed texts raised inside `create`.
+   - Every other exception is reported by type only.
+   - **A cleanup (`close`) failure after a recorded outcome** keeps the printed outcome and adds a `cleanup failed (<Type>)` line, with exit 4. It never becomes a "nothing happened" refusal.
+   - **An exception in S8** is `STOPPED`, and a cleanup failure is appended by type.
+   - Coordinator authority, uncertainty and terminal records are unchanged.
+   - Tests place a credential sentinel in exceptions raised during provider construction, after dispatch and during cleanup, and assert it is absent from the output and from every file.
+5. **Factual output.** Usage, acceptances and state are read from the records. The keyword names only the termination. The printed continuation command is labelled as requiring `daw continue` from R5C C3, which this version does not provide.
+
+## C2 implementation outcome — 2026-11-24 (uncommitted, for Codex review)
+
+`daw start` is implemented tests-first under C2.1–C2.9. `daw continue` still refuses (exit 2) with an "R5C C3" message. `status` and `recover` behave as before. This is software tested with simulated external services (the simulated FL host behind the reviewed device script, and labelled provider replies) on synthetic numerical files. It is **not** a live provider, FL Studio or mixing result.
+
+**Changed files:**
+- `core/admission/daw.py`: `exact_fader`, extracted from `daw_start_check`. Behaviour is unchanged, including the sign of zero.
+- `drivers/daw_commands.py`: `start`, `daw_precheck`, `describe_outcome`, `StartRefused`, `RunStopped`, `StartResult`.
+- `drivers/cli.py`:
+  - required `--run-config`/`--run-id` and `--accept-current-fader NORMALIZED DB`, with the plain-decimal grammar;
+  - a widened negative-number pattern on the `start` subparser, so exponent literals such as `-1e-05` are values, not options;
+  - `ANTHROPIC_API_KEY` read after both files validate;
+  - the exit mapping;
+  - the C3 message for `continue`.
+- `drivers/agent_runtime.py`: a preparation failure inside `create` is now `ConfigError` (exit 2).
+- `drivers/daw_runtime.py`: the unused `UNAVAILABLE` text is removed.
+- Tests: new `tests/unit/test_daw_cli_start.py`. In `tests/unit/test_daw_cli.py`, the old start/continue refusal test is replaced by a continue-only one; the start refusal no longer exists by design.
+
+**Deviations and observations:**
+- **Accept-then-abstain** is not reachable through `start` alone, because a start-only run ends at its first suspension. It moves to C3, as anticipated in C2.6.
+- **Negative normalized confirmation** (`-0.76`) is invalid input for `DawFaderReading`, so it exits 2, not 4. A separate test pins this.
+- **Identity mismatch.** On a project or insert mismatch, the simulated device returns no fader reading. A first probe of the `matches_binding` check therefore survived, masked by the later "no reading" refusal. The test now requires the identity refusal text, and the probe is caught.
+- **Two printed texts may still contain exception text from other layers:**
+  - `RuntimeRefusal` text from `create` (fixed texts) and from `_assemble` manifest failures (`PreparationStoreError` text);
+  - the coordinator's terminal explanation, which embeds exception text **only** when a DAW effect is pending. In that path the coordinator re-raises, so `start` prints `STOPPED` with the type only and never prints that explanation. It does remain in the run store, as before. This is an existing coordinator record, unchanged as instructed. No credential reaches FL code.
+- **Status and recover wording.** For non-provider suspended runs they still say continuing "needs the unavailable decision maker". This was left unchanged under the status/recovery boundary; C3/C4 should correct it.
+
+**Evidence** (see the research log for commands):
+- **RED:** 37 of 53 failed before implementation. The 16 that passed early did so only because the parser lacked the new options; they pass now for the intended reasons.
+- **Mutation probes:** 16 of 16 caught (M6–M10, M14, M21–M29, M31), with sources restored byte-identically.
+- **Clean full suite:** 7,312 passed, 4 skipped.
+
+### C2 review fix — unreleased pre-check transport (2026-11-24, uncommitted)
+
+**Finding (reproduced by the reviewer).** The FL controller records a failed transport close only in memory: it blocks its own further operations and retains the transport. `daw_precheck` could still return a successful inspection. `start` then created a fresh runtime controller without that block. With a simulated transport whose first close fails, the command returned 0/SUSPENDED after one provider call, two inspections and one gain write.
+
+**Fix (tests first):**
+- **Adapter:** `FlStudioParameterController.blocked`, a public read-only property over the existing in-memory block. No behaviour change.
+- **Pre-check:** `daw_precheck` checks it immediately after the inspection, before evaluating the result, because a failed inspection can also leave a transport held. If it is set:
+  - the pre-check controller is kept in `daw_commands._UNRELEASED_CONTROLLERS` for the process lifetime, so the unreleased transport and the block stay owned and are never closed again or replaced;
+  - it raises `RuntimeRefusal` (exit 4, "could not release"). Runtime creation never begins.
+
+**Regressions:**
+- **Close fails after a successful inspection:** no provider construction or call, one MIDI transport opened and closed once, exactly one inspection, no gain write, no run store, and the controller retained with the transport.
+- **Close fails after a timed-out inspection:** the refusal names the release failure, not only the timeout.
+
+RED first: exit 0/SUSPENDED reproduced the finding, and the second test showed only the timeout refusal.
+
+**Limit:** the block is process-local, because the controller does not persist it in the FL journal. A new process starts with a fresh controller, and the operator is told to check the MIDI connection first. Persisting the block would be an adapter/journal design change outside C2.
+
+### C2 review fix 2 — retained blocked controller guards later starts (2026-11-24, uncommitted)
+
+**Finding (reproduced by the reviewer).** After a pre-check cleanup failure, `_UNRELEASED_CONTROLLERS` kept the blocked controller, but a second `daw start` in the same process ignored it. It returned 0/SUSPENDED after one provider call and one gain write.
+
+**Fix (tests first).** `start` now refuses with `RuntimeRefusal` (exit 4) as its first action whenever `_UNRELEASED_CONTROLLERS` is non-empty, whatever the run ID. That is before the existing-artifact check, the pre-write check, any FL journal or MIDI transport, runtime creation or provider construction. The existing process-local list is the only mechanism. There is no journal persistence, cleanup retry, reset flag or recovery framework, and the retained controller and transport stay referenced.
+
+**Regression,** run for the same and for a different run ID, against the existing close-fails-once transport:
+- both invocations return 4;
+- one MIDI transport was opened, and its close attempted once;
+- only the original inspection was sent;
+- no provider construction or call, gain write, run store or runtime directory;
+- the original blocked controller and its transport remain retained.
+
+A healthy process with no retained controller still reaches SUSPENDED. RED first: the second invocation returned 0 for both run IDs.
+
+**Limit (unchanged):** the block is process-local by design; a new process starts fresh.

@@ -2603,3 +2603,108 @@ No provider/FL operation, installation, audio change, threshold or requirement-s
 Owner requested review and a combined checkpoint commit. Reviewed the composition/configuration boundary and both prior C1 fixes; no further blocking implementation finding identified. C2 specification is recorded for later review only; CLI, daw_commands and core admission are unchanged by this checkpoint, so start/continue remain unavailable. ADR-042/043 implementation-review status updated while both remain Proposed.
 
 Independent fresh verification on the final source, run alone without mutations: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7258 passed,4 skipped**, 197.84s. Ruff check and format (312 files), frozen fixture verification, dependency lock, daw help and diff checks pass. The earlier implementation evidence (19 C1/fix probes, byte restoration and 425 focused tests) is recorded above and was not rerun as mutation work during this review. The checkpoint includes the reviewed R5B composition, C1 configuration/factory/preflight, tests and corresponding documentation/planning artifacts; it includes no C2 implementation, live provider/FL action, script installation, threshold change or scientific-quality claim. Approved for the requested combined commit.
+
+## 2026-11-24 — R5C increment C2: `daw start` activation (implementation)
+
+The owner approved C2 only, from checkpoint `1e681c5`, with five clarifications. All five are recorded in plan §C2.9:
+1. the run file is loaded once;
+2. native-export metadata is a configuration error (exit 2);
+3. numeric arguments are tested through the real parser;
+4. failure reporting is protected throughout the lifecycle;
+5. output is factual.
+
+**Implementation:**
+- `daw start` composes the existing `DawAgentRuntime`, in this order:
+  1. arguments, the plain-decimal fader grammar, and the run ID;
+  2. the tool file, then the run file, each loaded once;
+  3. `ANTHROPIC_API_KEY`;
+  4. no existing artifacts;
+  5. the provisional request and the pre-write check;
+  6. the existing `daw_start_check` on the FL journal, one fresh inspection and the exact first-session confirmation;
+  7. `create`, `start` and `close`.
+- `exact_fader` is extracted in `core.admission.daw`.
+- The output reports the termination keyword, recorded usage, acceptances, authoritative and verified state and uncertainty. Suspensions add manual export instructions from the saved checkpoint, with the continuation command labelled as requiring C3.
+- Exceptions from S6 onward are reported by type only. A cleanup failure after an outcome keeps the outcome and exits 4.
+- No new loop, adapter, port, production test switch or decision-file substitute. No threshold, calibration scope, requirement status or accepted ADR changed.
+
+**Tests:** `tests/unit/test_daw_cli_start.py` (55 tests) runs through `main`. Only the MIDI transport (the simulated FL host behind the reviewed v2 device script) and the provider transport (labelled replies) are replaced; real preparation, measurement, diagnosis, audit, admission, verification, stores and journal run underneath. Coverage:
+- exponent and negative-exponent literals are accepted through the real parser; non-finite and unsupported literals exit 2;
+- the credential is read after configuration validation;
+- invalid native-export metadata exits 2;
+- unresolved, blocked, anchor-mismatch, live-drift and identity refusals exit 4 and create no run;
+- first-session phases one and two;
+- an anchored journal with and without the flag;
+- suspension instructions checked against the stored checkpoint;
+- no-change-needed and abstention blocks;
+- type-only `STOPPED` reports after a fader write and after provider dispatch;
+- credential sentinels during provider construction, dispatch and cleanup, absent from output and every file under the test directory.
+
+**Observations:**
+- **RED:** 37 of 53 failed before implementation. Four test-fixture errors were corrected:
+  - `-1.1527416706085206` rounds to the real reading, so `nextafter` is used instead;
+  - a negative normalized value is invalid input (exit 2);
+  - the device message type is `set_gain_db`;
+  - a test with filler assertions was removed.
+- **Masked probe:** the first probe run caught 13 of 16. Two probes had anchor mismatches in the probe script. The `matches_binding` probe survived because the simulated device omits the reading on identity mismatch, so a later guard refused. The test was strengthened to require the identity refusal.
+- **Final probes:** 16 of 16 caught (M6–M10, M14, M21–M29, M31), run sequentially with no concurrent suite; sources restored byte-identically (SHA-256 checked).
+- Start-only accept-then-abstain is unreachable and moves to C3.
+
+**Remaining limits:**
+- The coordinator's existing terminal explanation embeds exception text when a DAW effect is pending. It is stored and never printed by `start`; it is unchanged by instruction.
+- The `status`/`recover` wording for suspended non-provider runs still names an unavailable decision maker, unchanged under the status boundary.
+- Windows MIDI only.
+- argparse's private negative-number attribute is pinned by tests.
+
+**Verification on the final source, run alone after all probes were restored:**
+- **Full suite:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,312 passed, 4 skipped** (224.87 s).
+- **Focused CLI/start/run-config/runtime/coordinator/recovery/architecture with `-W error`:** 545 passed. After the last test strengthening, CLI/start/architecture with `-W error` gave 350 passed.
+- **Other checks:** `ruff check`, `ruff format --check` (313 files), fixture verifier, `uv lock --check`, `git diff --check` and `daw start --help` pass.
+
+Nothing is committed (for Codex review). No live provider/FL operation, installation, saving, exporting, audio change or musical claim.
+
+## 2026-11-24 — R5C C2 review fix: unreleased pre-check MIDI transport
+
+**Finding.** The reviewer reproduced it: a simulated transport whose first close failed blocked only the pre-check controller. `daw start` then built a fresh runtime controller and continued, returning 0/SUSPENDED after one provider call, two inspections and one gain write.
+
+**Fix, tests first:**
+- a public read-only `FlStudioParameterController.blocked` property over the existing in-memory block;
+- `daw_precheck` checks it right after the inspection, keeps the blocked controller (and its retained transport) referenced for the process lifetime, and refuses with exit 4 before runtime creation.
+
+Two regressions failed first, for the intended reasons: exit 0, and a timeout-only refusal. They now assert:
+- no provider construction or call;
+- a single MIDI transport, closed exactly once;
+- one inspection and no gain write;
+- no run store;
+- retained ownership of the controller and its transport.
+
+**Verification:**
+- **Fix-removal probes:** 3 of 3 caught (check removed, ownership dropped, property forced false), run sequentially, with sources restored byte-identically.
+- **Clean full suite, run alone afterwards:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,314 passed, 4 skipped** (191.73 s).
+- **Focused start/CLI/FL controller/runtime/architecture with `-W error`:** 445 passed.
+- **Other checks:** ruff check and format (313 files), fixture verifier, lock, diff and `daw start --help` pass.
+
+**Limit:** the block is process-local and not journaled. A new process uses a fresh controller, and the operator is told to check the MIDI connection.
+
+Uncommitted for review. No live provider/FL operation.
+
+## 2026-11-24 — R5C C2 review fix 2: later starts in a blocked process
+
+**Finding.** The reviewer reproduced that a second `daw start` in the same process ignored the retained blocked pre-check controller and reached 0/SUSPENDED with one provider call and one gain write.
+
+**Fix, tests first.** `start` refuses (exit 4) as its first action while `_UNRELEASED_CONTROLLERS` is non-empty, before any store, MIDI transport, runtime or provider. This extends only the existing process-local ownership list: no persistence, retries, reset flag or new recovery framework.
+
+**Regression.** Same and different run ID, against the existing close-fails-once transport. Both invocations return 4, with:
+- one transport opened and its close attempted once;
+- only the original inspection;
+- no provider construction or call, gain write, run store or runtime directory;
+- the original controller and transport retained.
+
+A healthy-process control still suspends. The retry regression failed first (exit 0 for both IDs).
+
+**Verification:**
+- **Fix-removal probes:** 5 of 5 caught (guard removed; guard bypassed by a new run ID; retention cleared; blocked check removed; `blocked` forced false), run sequentially, with sources restored byte-identically.
+- **Clean full suite, run alone afterwards:** `uv run --locked --extra agent pytest -q -p no:cacheprovider` — **7,317 passed, 4 skipped** (308.18 s).
+- **Focused start/CLI/FL controller/runtime/architecture with `-W error`:** 433 passed.
+- **Other checks:** ruff check and format (313 files), fixture verifier, lock, diff and `daw start --help` pass.
+
+Uncommitted. No live provider/FL operation, installation, audio change, or C3/C4 work.

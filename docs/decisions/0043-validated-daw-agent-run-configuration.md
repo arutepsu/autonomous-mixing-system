@@ -1,6 +1,6 @@
 # ADR-043 — Validated run configuration for the DAW agent runtime (2026-11-24)
 
-- **Status:** Proposed. R5C increment C1 implementation reviewed for the 2026-11-24 checkpoint; C2–C4 remain unimplemented.
+- **Status:** Proposed. R5C increment C1 implementation reviewed for the 2026-11-24 checkpoint; C2 (`daw start`) implemented 2026-11-24, uncommitted for review; C3–C4 remain unimplemented.
 - **Source:** the owner approved C1 of the [R5C plan](../superpowers/plans/2026-11-24-r5c-operator-cli.md), including its three review corrections.
 
 ## Decision
@@ -59,3 +59,17 @@ None. Extends ADR-042 (Proposed) and refines the run-command part of ADR-040 (Pr
 
 - **Manifest failures.** On reopen, expected stored-preparation-manifest failures (missing, altered, unreadable, or decoding to another plan) are `RuntimeRefusal`. They were previously `PreparationStoreError` or a raw `OSError`. The manifest is never regenerated.
 - **Read errors.** `OSError` raised while reading a run file becomes `ConfigError`, and the descriptor is still closed. Other exceptions propagate unchanged.
+
+## C2 addendum (2026-11-24, `daw start`)
+
+- **Inputs.** `daw start` requires `--config`, `--run-config` and `--run-id`. The run file is loaded once, and the validated object is passed on. The credential comes only from `ANTHROPIC_API_KEY`, after both files validate, and is never stored or printed.
+- **Before any write,** the existing run-start rule (`daw_start_check`) runs on the FL journal, then one fresh inspection.
+  - **First session (no recorded fader state):** the operator must repeat the fresh reading exactly with `--accept-current-fader NORMALIZED DB`, and the declared initial state must equal it. `exact_fader` compares both coordinates and the sign of zero.
+  - **Anchored journal:** the flag is refused (exit 2), and the live reading must equal the journaled state exactly.
+- **Exit codes:**
+  - **2:** invalid input, including native-export metadata and baseline integrity;
+  - **4:** state refusals before effects, and every failure after the run started (`STOPPED`, exception type only);
+  - **0:** a recorded report or suspension.
+
+  A cleanup failure after a recorded outcome keeps that outcome and exits 4.
+- **Output.** It is read from the records: a termination keyword, usage against limits, acceptances, authoritative and verified state, and uncertainty. A suspension adds manual export instructions from the saved checkpoint. The printed continuation command is labelled as requiring R5C C3.
