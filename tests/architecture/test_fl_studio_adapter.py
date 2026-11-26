@@ -11,6 +11,7 @@ BASE = "autonomous_mixing.adapters.fl_studio"
 CORE = "autonomous_mixing.core"
 EDGES = {
     "protocol": set(),
+    "calibration": {f"{BASE}.protocol", f"{BASE}.exchange"},
     "transport": {f"{BASE}.protocol"},
     "exchange": {f"{BASE}.protocol", f"{BASE}.transport"},
     "profile": {

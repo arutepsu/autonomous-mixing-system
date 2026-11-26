@@ -2865,3 +2865,133 @@ There is no new type, and recovery behaviour is unchanged.
 - **Other checks:** ruff check and format (316 files), fixture verifier, lock and diff pass.
 
 Uncommitted. No live operation.
+
+## 2026-11-24 — R6 readiness assessment and trial plan (planning only)
+
+The owner requested an R6 readiness assessment and a plan for one operator-assisted `daw start` → manual export → `daw continue` run. The C4 checkpoint `7c0b781` was confirmed committed, with a clean tree. Saved:
+- `docs/superpowers/plans/2026-11-24-r6-readiness-and-trial-plan.md` (Proposed);
+- the non-loadable review draft `2026-11-24-r6-draft-run-config.json` (`kind …DRAFT`, `MISSING` markers; strict reader parses it, the run envelope refuses it).
+
+**Read-only measurements** (no file written, no MIDI, FL, provider, calibration or installation action):
+- **HT01 v002** bass-up/kick-up/reference Kick and Bass are exact dual-mono PCM_16 44.1 kHz, 1,365,677 frames. Hi Hat and Master are L≠R. The hashes agree with the frozen private inventory (`783adb40…`).
+- **Calibrated project.** `bass-bridge-test.flp` (`71a6c6a9…`) is the only calibrated scope: title "Thesis Bass Bridge Test", insert 2 "Bass", build 5654 / API 45, normalized 0.62–0.86. It is a copy of `trap-baseline.flp`, whose Kick, Bass and Master exports are L≠R stereo (302,400 frames), so they are outside every P1 input profile.
+- **Device script.** The installed "Thesis Bridge" device files hash to the reviewed v1 calibration script (`54fb39aa…`/`0220b3e9…`), not the runtime v2 (`859d8376…`/`68fb70dd…`).
+
+**Finding:** R6 is blocked. No available project meets both the calibrated FL scope and the P1 input profile. Further gaps:
+- the native baseline must be freshly exported from a calibrated session;
+- device script v2 is not installed;
+- the runtime tool configuration, MIDI ports, provider model, criteria values and diagnosis window are missing;
+- trap sample licensing is undocumented;
+- HT01 Clap and Hi Hat licences are producer-confirmed only.
+
+**Two owner routes** are documented without choosing:
+- **A:** a separately authorized HT01-copy calibration plus a reviewed profile code change, without relabelling the existing profile;
+- **B:** the trap copy with a declared mono export representation and licensing.
+
+The plan also records the open question that level-only criteria cannot measure "kick space" (R6-D3), and lists decisions R6-D1 to R6-D10.
+
+No source, test, threshold, calibration, requirement or ADR change. No trial was executed.
+
+
+## 2026-11-25 — HT01 read-only preparation and calibration readiness
+
+Owner supplied the fuller HT01 context, chose preparation of the corrected bass-up v002 House development case, and confirmed the Bass insert as index5, exact name Bass; each instrument has its own insert. This is producer confirmation, not a live device reading, and it does not establish routing/controller dependencies.
+
+Read the prior private dataset README/manifest first, then inventoried the actual current files using SHA-256 and decoded PCM16 geometry/levels/comparisons. New private planning/evaluation inventory: docs/research/ht01-readiness-inventory-2026-11-25.json. All35 selected artifacts exist, including reference-repeat FLP. All24 listed in the older manifest still match it; no mismatch was found. The ducking-off extension is recorded separately and does not create another independent musical case. Bass gain +3.07562390774684 dB / residual2.4967254196682453e-8, kick-up's unchanged Bass, ducking-off residual0.12120425177974996 and repeat comparisons reproduce the supplied record. All selected originals were hashed again after the reads and remained unchanged. The three source-sample files were found and hashed; licence statuses were not newly independently verified. Existing synced dataset documentation was only read.
+
+Saved docs/superpowers/plans/2026-11-25-ht01-calibration-preparation.md; updated the existing R6 readiness document and deliberately invalid draft configuration, preserving their unknown live fields. The proposed copy/title are HT01-live-calibration-v001.flp / HT01 Live Calibration v001; no copy or project edit was made. Owner-confirmed insert5/Bass replaces the earlier unknown; actual fader, live build and dependencies remain unknown. The old0.62–0.86 operating range cannot be assumed to contain the HT01 start.
+
+The code-impact map identifies pinned probe/conversion scope in runtime protocol/device copy, old research client/evaluator, production profile, controller and driver profile construction. HT01 calibration cannot be obtained by merely changing a profile reference: a separately reviewed calibration-only adaptation is needed before new-scope probe writes, with production support only after accepted evidence. Generic inspect can supply the missing starting reading without pretending the old production calibration covers HT01, but no MIDI inspection was performed. Installed files remain the v1 research pair54fb39aa…/0220b3e9…; v2-named files are absent there. Repository runtime/device protocols are byte-identical. These are on-disk observations, not claims about scripts loaded in FL memory.
+
+Corrected the plan: P1 channel restrictions apply to the analyzed pair, not a requirement to fold down the native master; acceptance needs nonempty targets and improvements, not guards alone; application-gain permissions must be mapped to physical fader bounds; and a cost ceiling must include input as well as output tokens. No hidden injection becomes a runtime target, and declarations must not simply be overwritten to pass a starting-state gate.
+
+Preparation only. No production code, original audio/project/source sample, frozen research script, installed script, calibration, provider request, MIDI connection or runtime input root was changed/created. No musical recovery render requested. The new documents and inventory are uncommitted for review. The next gated phase is operator Save As plus an inspect-only session, before any calibration-write approval.
+
+
+## 2026-11-25 — HT01 copy inspected; calibration-only code implemented for review
+
+After operator Save As/title/routing changes, the authorized generic inspect ht01_inspect_20261125_03 returned ok at 10:17:07 UTC: HT01 Live Calibration v001, insert5/Bass, API45, Producer Edition26.1.7 build5654; normalized0.9056249996647239 / +2.982499599456787dB. Evidence remains outside the repository in test/HT01-live-calibration-v001/inspect-20261125-03.jsonl. Earlier client requests timed out; separate FL script output reported project-title mismatch for01 and ok for02. The routing adjustments preceded the successful03 but do not isolate the cause conclusively. Only reads were requested, no fader writes.
+
+Owner approved the new calibration design and calibration-only implementation. Added HT01 plan ht01-mixer-cal-v1 (digest c7bcbf4aae3196d6235ffec995c8e0da7481ec9ace9ce8cdc1b31a6838358b39): nine primary points in proposed0.78–0.92 operating range, each approached from staging0.76 and0.94, 36 targets plus exact return to the captured start. Staging does not widen the range. Runtime protocol/device copy are byte-identical, SHA-256 e4b8cf81dfb6171fe29d091a8985f981ab8724acd32a00e3893721d796e45d96. HT01 production conversion/restore scope is still refused. Old command parity and frozen research hashes remain pinned; the additive runtime snapshot pin and architecture inventory were updated.
+
+New adapter-local calibration runner exclusively creates a JSONL log and flushes/fsyncs pending intent before each dispatch. It chains actual read-backs, stops unknown effects without retries or speculative restore, and records terminal decisions. Its whole-stream evaluator validates scope/build, IDs, order, pending records, exact chains and restore before numerical criteria; it conservatively refuses duplicate/replayed rows because this runner is one-shot. The separate operator module supports run/evaluate and retains failed MIDI cleanup ownership, blocking another run in that process. This extends the existing responsibility without a new port/registry/ADR.
+
+Tests first: new protocol/device tests failed for missing plan functionality; runner/evaluator and helper tests failed at their missing-module boundary before implementation. Additional adversarial regressions failed for malformed/unrelated replies and missing persisted run decisions, then passed after correction. Independent read-only review found a device uncertainty gap: an uncertain attempted step left the prior progression intact. Two new regressions failed first; the device now latches uncertainty before its setter and advances only after a validated applied reply. The reviewer confirmed the fix. An editing script stopped on a formatted-anchor mismatch before writing; it was corrected at exact anchors. One initial fixture deadline of10ms expired under host overhead; successful fake-host runs use5s and timeout tests deterministic clocks. No global limits or live services were changed.
+
+Evidence: calibration tests65 passed with warnings as errors; full architecture-plus-focused checkpoint360 passed before the later added regressions; eleven sequential mutation checks all caught and source SHA-256 restoration verified. Clean full suite run alone after restoration: uv run --locked --extra agent pytest -q -p no:cacheprovider — 7,448 passed,4 skipped in289.49s. Ruff check, format check323 files, fixture verifier, uv lock --check, helper/existing CLI help and git diff --check pass. Frozen FL research files match HEAD checkout bytes with Git line-ending filters applied; direct blob comparison initially differed solely because checkout uses CRLF.
+
+Implementation remains uncommitted. No script installation/reload, calibration write, provider call, production-profile adoption or new audio export occurred during implementation. Recovery of an unknown calibration outcome remains a separately reviewed procedure, not a reload/retry shortcut. Code review, that procedure, installation and explicit live-run authorization precede a live calibration. This is engineering control evidence only, not masking calibration or musical improvement.
+
+## 2026-11-25 — HT01 calibration: second review fixes and persistent restart guard (uncommitted)
+
+A second independent read-only review of the uncommitted HT01 calibration-only code reported three actionable findings; the owner directed fixes before installation. No installation, script reload, MIDI, calibration write, provider call or commit occurred. All evidence uses the real device handler with a fake host and simulated transports.
+
+1. Replayed replies were treated as fresh writes. Reusing a run ID with a new log after a lost restore reply produced `completed` (exit 0) from 37 device replays and zero writes; the evaluator already rejected that log. The runner now stops as `replayed_reply` on any write reply whose `replayed` is not exactly false, in the probe loop and at the restore, with no further command.
+2. The evaluator compared records with Python equality, so `false`/`0`, `true`/`1` and `5.0`/`5` were interchangeable and `diagnostics` was unchecked. It now validates each logged command and compares header, pending, command, reading-chain, restore and terminal records type-strictly (canonical JSON); `diagnostics` must be a list of strings.
+3. The cleanup-failure block was process-local and the device's uncertainty latch is lost on script reload, so nothing on the host recorded an unresolved run. The owner approved a persistent restart guard with two amendments: one fixed guard for the whole HT01 calibration scope, independent of the plan digest (which is stored inside it), and manual clearance that authorizes a new attempt without proving what happened before. The interrupted run stays incomplete. Clearance requires that the owning process has exited, guard and log are preserved with hashes, and the owner's decision is recorded here before the guard is moved, not deleted, into the evidence folder.
+
+Guard behaviour as implemented in `drivers/ht01_calibration.py`. Location: `%LOCALAPPDATA%/autonomous-mixing-system/ht01/ht01-calibration.guard.json`; `run` refuses if `LOCALAPPDATA` is unset. Any existing guard, including empty, unparseable, foreign-digest or a directory, refuses `run` before MIDI opens. The guard is created exclusively and fsynced after MIDI opens and before the log or any command; failure to arm closes MIDI and refuses. Release happens only after clean MIDI cleanup and only for this process's unchanged guard, and only in two cases:
+- a terminated log whose `completed`, exact-restore result evaluates to `H_accepted` or `H_rejected`;
+- a terminated log containing no pending write.
+
+Everything else stays blocked: crashes and exceptions, failed cleanup, unknown, uncertain or replayed outcomes, refusals after applied writes, invalid evidence, and a guard replaced by another owner. No override, recovery writer or general recovery framework was added.
+
+The design document also clarifies the digest's scope. `HT01_PLAN_DIGEST` binds the declared hypothesis version and restore rule as labels. The pinned protocol SHA-256 separately pins their implementation (`h_db`) and the starting value `HT01_START`.
+
+Tests first: 11 new runner/evaluator regressions failed before fixes 1–2. One draft case was dropped because it changed the value, not only the type. 15 new guard regressions failed before the guard existed. They cover a changed run ID and log, a new process, a changed digest, crash, malformed or foreign guards, cleanup failure, invalid evidence, refusal after writes, a replaced guard, an unavailable location and failed arming. Two release-path tests passed vacuously at that point and became meaningful after implementation.
+
+Sequential mutation probes, each followed by a SHA-256-verified source restore:
+- Caught (calibration helper): remove the probe-loop replay check, remove the restore replay check, loosen strict equality (also caught by validating the logged command), remove the diagnostics check.
+- Not caught alone: dropping validation of the logged command. Strict comparison rejects the same inputs, so that check is defence-in-depth.
+- Caught (guard): remove the pre-MIDI guard check, release despite cleanup failure, release unconditionally, skip the verdict check, skip the owner check, ignore pending writes.
+
+Evidence: HT01 calibration and architecture tests 370 passed with warnings as errors. Ruff format and check for `src`, `tests` and `device`: 323 files already formatted, all checks pass. The frozen `scripts/fl_studio/` files are unchanged. Both protocol copies keep SHA-256 `e4b8cf81dfb6171fe29d091a8985f981ab8724acd32a00e3893721d796e45d96`. Clean full suite run alone after all mutations were restored: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — 7,476 passed, 4 skipped in 360.13s.
+
+The unknown-outcome recovery procedure remains a draft for owner approval. An FL console line or a current fader reading alone cannot establish a pending command's outcome. An identical retry is a possible write. Script reload clears only device-session state, never host-side uncertainty. Installation, reload and live calibration still need separate authorization.
+
+## 2026-11-25 — HT01 restart guard: arming order and release-evidence regressions (uncommitted)
+
+The owner requested regressions proving three things: failed guard creation opens no MIDI, a damaged or shortened log cannot release the guard, and a valid pre-write stop still releases it after successful cleanup. No installation, script reload, MIDI, calibration write, provider call or commit occurred. Evidence uses the real device handler with a fake host and simulated transports only.
+
+Tests first. Six new regressions failed against the previous implementation and exposed two real gaps:
+- The helper opened MIDI before creating the guard, so a failed creation still opened MIDI.
+- The pre-write release rule ("no `pending` record") released for three bad logs: one with the initial inspect removed, one whose header named another run, and logs from a run that had written but whose write records were stripped or reshaped into a pre-write stop.
+
+A seventh failure was a test defect: the fake host reads the project title from a closure, so the identity-mismatch case was rewritten to override the host method.
+
+Changes:
+- `drivers/ht01_calibration.py` now creates and fsyncs the guard before opening MIDI. A failed or partial creation refuses without opening MIDI, and a partial guard stays blocking. If MIDI cannot be opened after arming, the process removes its own unchanged guard, because no transport existed and the runner never ran.
+- Release now uses `calibration.release_evidence`, which binds the read-back log to this run ID and to the runner's in-memory result. Only two shapes qualify:
+  - a completed, exact-restore run whose evaluator verdict is `H_accepted` or `H_rejected`;
+  - a stop at the initial inspect whose log is exactly the header, that one inspect exchange and the matching decision.
+- An existing guard test that patched the driver's evaluator name was repointed at the calibration module, so it keeps testing real behaviour.
+
+Regressions now cover:
+- failed creation (parent is a file; fsync failure);
+- unavailable MIDI after arming;
+- ten file-level damages, each applied to both a completed run and a pre-write stop: dropped terminal row, mid-line cut, header only, corrupt JSON, invalid UTF-8, appended row, dropped initial exchange, another run's header, empty file, deleted file;
+- two forgeries of a run that wrote;
+- six row-level damages of a pre-write log;
+- three valid pre-write stops (changed start, identity mismatch, no reply), each released only after successful cleanup, kept on failed cleanup, and still held while MIDI is being closed.
+
+Sequential mutation probes, each followed by a SHA-256-verified source restore. All eight are caught: ignore arming failure, no release on MIDI-open failure, no header binding, no result binding, no length check, no inspect-command check, no terminal check, accept any three-row pre-write log. The last three first survived. Six row-level regressions were added and all three are now caught.
+
+The design document's arming rule and release case (b) are amended in place, with the superseded wording named. Evidence: CLI helper tests 54 passed with warnings as errors. Ruff format and check for `src`, `tests` and `device`: 323 files already formatted, all checks pass. Clean full suite run alone after restoration: `uv run --locked --extra agent pytest -q -p no:cacheprovider` — 7,509 passed, 4 skipped in 437.66s. The frozen `scripts/fl_studio/` files are unchanged, and both protocol copies keep SHA-256 `e4b8cf81…`. Recovery remains a draft. Installation, reload and live calibration need separate authorization.
+
+## 2026-11-26 — HT01 restart guard: construction-cleanup failure and inspect-evidence validation (uncommitted)
+
+A further owner review reported two guard defects, both confirmed in code. No installation, script reload, MIDI, calibration write, provider call or commit occurred. Evidence uses the real device handler with a fake host and simulated transports only.
+
+1. `TransportCleanupError` (an `OSError` subclass raised when partial WinMM construction cannot release what it opened) was caught as an ordinary open failure, so the guard was removed while native resources might still be held. The helper now handles it first: it retains the partial transport in `_HELD`, keeps the guard, and refuses. Later runs are blocked in the same process by `_HELD` and in new processes by the guard.
+2. Pre-write release evidence checked the inspect row's command and diagnostics but not its exchange status or reply. A three-row log with `status="not_a_status"` and `reply=[]` released the guard. The inspect exchange must now be a shape the runner writes, and it must justify the stop:
+   - With no reply (`timeout`, `invalid_reply`, or `unknown` after a transport error), the recorded reply is null.
+   - With `replied`, the reply must belong to this command, be structurally valid and consistent with it, and fail the start check.
+   - An exact-start ok reply contradicts the stop.
+
+Tests first: 11 new regressions failed before the fix. They cover a retained partial construction, and malformed or contradictory inspect evidence: an unknown status with a list reply, a list or null reply for `replied`, another command's ID, a malformed reply, an inconsistent status, an exact-start reply, and a timeout, invalid reply or unknown exchange that still carries a reply. Two further cases were added after two mutation probes survived: an unknown status with a valid reply, and a valid ok reply for another project, which the exchange would have rejected. The pre-write release test now also covers invalid-reply and failed-send stops alongside changed start, identity mismatch and no reply. All five still release only after successful cleanup.
+
+Sequential mutation probes, each followed by a SHA-256-verified source restore. All eight are caught: treat the cleanup error as an ordinary failure, drop the retained transport, accept a reply on a no-reply status, accept any exchange status, skip the reply-ID check, skip reply validation, skip the consistency check, skip the stop justification. The status and consistency probes were caught only after the two added cases.
+
+Verification note. An earlier full-suite run, started 2026-11-25, took 17 hours of wall-clock time (the host was presumably suspended) and reported 2 failed, 7,522 passed, 4 skipped. Only its summary line was kept, so the failing tests are unidentified. A rerun was started before it ended and briefly overlapped it, against the no-concurrent-tests rule; that rerun was stopped without being used. Clean full suite run alone afterwards: `uv run --locked --extra agent pytest -q -p no:cacheprovider -rf` — 7,524 passed, 4 skipped in 409.37s, with no failures listed. The only other Python processes on the host belong to an unrelated project started the previous day. The two earlier failures were not reproduced and remain unexplained.
+
+Ruff format and check for `src`, `tests` and `device`: 323 files already formatted, all checks pass. The frozen `scripts/fl_studio/` files are unchanged, and both protocol copies keep SHA-256 `e4b8cf81…`. The design document's crash/cleanup bullet and release case (b) are extended in place. Recovery remains a draft. Installation, reload and live calibration need separate authorization.

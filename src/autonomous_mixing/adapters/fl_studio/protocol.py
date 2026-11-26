@@ -22,6 +22,7 @@ starting dB read-back plus a requested cut, by the versioned conversion ``CONVER
 compute the same target and the script rejects any disagreement).
 """
 
+import hashlib
 import json
 import math
 import re
@@ -69,6 +70,41 @@ CALIBRATION_SEED = 20261118
 CALIBRATION_SEQUENCE = (0.55, 0.62, 0.73, 0.71, 0.81, 1.0, 0.86, 0.81, 0.86, 0.83, 0.77, 0.79, 0.68, 0.71, 0.45, 0.75,
                         0.83, 0.73, 0.92, 0.79, 0.75, 0.65, 0.3, 0.65, 0.68, 0.62, 0.77)  # fmt: skip
 RESTORE_STEP = "restore"
+
+# HT01 calibration-only extension, pinned before live writes (2026-11-25).
+# This does not extend CONVERSION_SCOPE or permit HT01 production writes.
+HT01_PLAN_ID = "ht01-mixer-cal-v1"
+HT01_TITLE = "HT01 Live Calibration v001"
+HT01_INSERT = {"index": 5, "name": "Bass"}
+HT01_BUILD = "Producer Edition v26.1.7 [build 5654]"
+HT01_API = 45
+HT01_START = {"normalized": 0.9056249996647239, "db": 2.982499599456787}
+HT01_RANGE = (0.78, 0.92)
+HT01_PRIMARY = (0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.91, 0.92)
+HT01_SEQUENCE = tuple(v for point in HT01_PRIMARY for v in (0.76, point, 0.94, point))
+HT01_PLAN_JSON = json.dumps(
+    {
+        "id": HT01_PLAN_ID,
+        "project_title": HT01_TITLE,
+        "insert": HT01_INSERT,
+        "build": HT01_BUILD,
+        "api": HT01_API,
+        "range": HT01_RANGE,
+        "primary": HT01_PRIMARY,
+        "sequence": HT01_SEQUENCE,
+        "roles": ["staging", "primary", "staging", "primary"] * len(HT01_PRIMARY),
+        "hypothesis": "fl-mixer-h125-v1",
+        "stored_tolerance": 0.000001,
+        "model_tolerance_db": 0.01,
+        "repeat_tolerance_db": 0.000001,
+        "restore": "exact_initial_both_coordinates",
+    },
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+)
+HT01_PLAN_DIGEST = hashlib.sha256(HT01_PLAN_JSON.encode("ascii")).hexdigest()
+
 
 # Versioned dB conversion (docs/research/fl-studio-db-conversion-design.md, sections 3-4), accepted by the live
 # calibration run live20261118codex of plan fl-mixer-cal-v1 (verdict H_accepted, max |H - read-back| 2.4e-6 dB at the
@@ -268,6 +304,8 @@ def validate_command(message: dict) -> dict:
         fields |= {"expected", "target"}
     if message["type"] == "probe_gain":
         fields |= {"plan", "step"}
+        if message.get("plan") == HT01_PLAN_ID:
+            fields |= {"plan_digest"}
     if message["type"] == "set_gain_db":
         fields |= {"intended_db_change", "conversion"}
     if set(message) != fields:
@@ -291,6 +329,9 @@ def _validate_probe(message: dict) -> None:
     """A probe follows the pinned plan exactly: plan, project, insert, step and its target."""
     _gain(message["expected"], "expected")
     target = _number(message["target_normalized"], "target_normalized")
+    if message["plan"] == HT01_PLAN_ID:
+        _validate_ht01_probe(message)
+        return
     if message["plan"] != CALIBRATION_PLAN_ID:
         raise ProtocolError("plan", f"plan must be {CALIBRATION_PLAN_ID}")
     if message["project_title"] != CALIBRATION_PROJECT_TITLE or message["insert"] != CALIBRATION_INSERT:
@@ -304,6 +345,55 @@ def _validate_probe(message: dict) -> None:
         raise ProtocolError("field", f"step must be an integer or {RESTORE_STEP!r}")
     if not 0 <= step < len(CALIBRATION_SEQUENCE) or target != CALIBRATION_SEQUENCE[step]:
         raise ProtocolError("plan", "step and target must be a position of the pinned sequence")
+
+
+def _validate_ht01_probe(message: dict) -> None:
+    if (
+        message["plan_digest"] != HT01_PLAN_DIGEST
+        or message["project_title"] != HT01_TITLE
+        or message["insert"] != HT01_INSERT
+    ):
+        raise ProtocolError("plan", "HT01 scope and plan digest must match")
+    step, target = message["step"], message["target_normalized"]
+    if step == RESTORE_STEP:
+        if target != HT01_START["normalized"]:
+            raise ProtocolError("plan", "HT01 restore must target the recorded initial position")
+    elif (
+        isinstance(step, bool)
+        or not isinstance(step, int)
+        or not 0 <= step < len(HT01_SEQUENCE)
+        or target != HT01_SEQUENCE[step]
+    ):
+        raise ProtocolError("plan", "HT01 step and target must match the pinned sequence")
+    elif step == 0 and message["expected"] != HT01_START:
+        raise ProtocolError("plan", "HT01 initial expected reading must match the recorded start")
+
+
+def ht01_probe_command(command_id_: str, expected: dict, step) -> dict:
+    """One calibration-only target; production conversion scope remains unchanged."""
+    target = (
+        HT01_START["normalized"]
+        if step == RESTORE_STEP
+        else (
+            HT01_SEQUENCE[step]
+            if isinstance(step, int) and not isinstance(step, bool) and 0 <= step < len(HT01_SEQUENCE)
+            else -1.0
+        )
+    )
+    return validate_command(
+        {
+            "v": PROTOCOL_VERSION,
+            "id": command_id_,
+            "type": "probe_gain",
+            "project_title": HT01_TITLE,
+            "insert": dict(HT01_INSERT),
+            "plan": HT01_PLAN_ID,
+            "plan_digest": HT01_PLAN_DIGEST,
+            "step": step,
+            "expected": dict(expected),
+            "target_normalized": target,
+        }
+    )
 
 
 def _validate_db(message: dict) -> None:

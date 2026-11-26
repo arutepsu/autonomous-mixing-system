@@ -131,6 +131,11 @@ def _write(command: dict, host, state: dict, history: dict) -> dict:
     db_command = command["type"] == "set_gain_db"
     if (db_command or restore) and host.ui.getVersion(5) != protocol.CONVERSION_SCOPE["fl_version"]:
         return refuse("precondition_failed", "uncalibrated_build")
+    ht01 = command.get("plan") == protocol.HT01_PLAN_ID
+    if ht01 and host.ui.getVersion(5) != protocol.HT01_BUILD:
+        return refuse("precondition_failed", "uncalibrated_build")
+    if ht01 and host.general.getVersion() != protocol.HT01_API:
+        return refuse("precondition_failed", "calibration_api")
     if host.transport.isPlaying():
         return refuse("precondition_failed", "transport_playing")
     if not host.general.safeToEdit():
@@ -142,6 +147,18 @@ def _write(command: dict, host, state: dict, history: dict) -> dict:
     probe = command["type"] == "probe_gain"
     if probe:
         start_key = (_START_KEY, command["plan"])
+        if ht01:
+            progress_key = ("ht01_progress", command["plan"])
+            progress = history.get(progress_key)
+            if progress == "uncertain":
+                return refuse("precondition_failed", "calibration_uncertain")
+            if command["step"] == 0:
+                if progress is not None or before != protocol.HT01_START:
+                    return refuse("precondition_failed", "calibration_start")
+            elif progress is None:
+                return refuse("precondition_failed", "calibration_session")
+            elif command["step"] != protocol.RESTORE_STEP and command["step"] != progress:
+                return refuse("precondition_failed", "calibration_order")
         if command["step"] == protocol.RESTORE_STEP:
             recorded = history.get(start_key)
             if recorded is not None and target != recorded:
@@ -155,6 +172,8 @@ def _write(command: dict, host, state: dict, history: dict) -> dict:
             return refuse("precondition_failed", "uncalibrated_start")
     elif not protocol.cut_in_bounds(before["normalized"], target):
         return refuse("precondition_failed", "cut_bounds")
+    if ht01:
+        history[progress_key] = "uncertain"  # latch before setter; only a validated applied reply advances
     state["attempted"] = True
     if probe and command["step"] == 0:
         history[start_key] = before["normalized"]
@@ -173,7 +192,10 @@ def _write(command: dict, host, state: dict, history: dict) -> dict:
             miss = protocol.db_miss(before, after, command["intended_db_change"])
             if not round(abs(miss), protocol.DECIMALS) <= protocol.DB_SUCCESS_TOLERANCE:
                 return refuse("applied_off_target", "db_off_target", wrote=True)
-        return _finish(protocol.reply(command_id, "applied", observed), True, command)
+        result = _finish(protocol.reply(command_id, "applied", observed), True, command)
+        if ht01 and result["status"] == "applied":
+            history[progress_key] = "restored" if command["step"] == protocol.RESTORE_STEP else command["step"] + 1
+        return result
     except Exception as exc:  # the setter may have run: never report this as a plain error
         return _post_write_uncertain(command, identity, _error_name(exc, "exception_after_write:"), before)
 

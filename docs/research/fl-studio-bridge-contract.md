@@ -379,3 +379,12 @@ Installed and verified live: requested −1 and −2 dB cuts measured −0.99959
 - Whether two FL Studio instances or two scripts on one port could both answer a command. Strays are recorded, but not attributed.
 - Whether the trial tolerances (0.001 normalized, 0.05 dB) match the fader's real resolution. Live, a write of 0.78 read back as 0.7800000002607703. The tolerances are the gain trial's settings, not measured limits.
 - How FL Studio's normalized fader maps to dB. The live points (0.80 → 0 dB, 0.78 → −0.574523 dB, 0.76 → −1.152742 dB) do not define the curve. Image-Line documents no dB-to-normalized helper. A candidate curve and a pre-registered calibration are proposed in [fl-studio-db-conversion-design.md](fl-studio-db-conversion-design.md).
+
+
+## HT01 calibration-only extension (2026-11-25; uncommitted review checkpoint)
+
+The runtime/device v2 protocol now recognizes `ht01-mixer-cal-v1`, scoped to metadata title `HT01 Live Calibration v001`, insert 5 / Bass, API45 and Producer Edition26.1.7 build5654. This does not extend the accepted production conversion or enable HT01 dB/restore commands. Frozen research scripts are unchanged.
+
+The [approved design](../superpowers/plans/2026-11-25-ht01-calibration-design.md) pins the 36-target sequence, primary/staging roles, operating range proposal, numerical criteria and digest. New HT01 probe commands carry `plan_digest`; existing command bytes are unchanged. Device session history enforces order and blocks further calibration writes after uncertainty. Normal restoration is limited to the captured initial target and requires the same session. Reload does not establish authority to recover an unknown write.
+
+The non-frozen adapter-local runner exclusively creates a pending-first JSONL log, never retries, and stops unknown effects. Its evaluator requires the complete chain and exact restore before judging the hypothesis. The separate operator helper retains failed MIDI cleanup ownership. Tests and mutation evidence are simulated only. Installation, a live run, uncertain-outcome recovery procedure and production-profile adoption remain separately reviewed/authorized work.
