@@ -109,3 +109,21 @@ The inspect/reconciliation recovery procedure stays a draft for owner approval, 
 - An FL Script output line or a current fader reading alone cannot establish a pending command's outcome.
 - An identical retry is a possible write unless device-side handling is independently established, so it is not a read-only step.
 - Script reload clears only device-session state (latch, replay history, progress). It never clears host-side uncertainty, and it removes the only software restore path for HT01.
+
+
+## Committed checkpoint and operator-procedure proposal (2026-11-26)
+
+Implementation and review fixes are committed at `f55111c` (`feat: add guarded HT01 calibration runner and evidence validation`). Earlier 'uncommitted' labels above describe their historical review checkpoints. Owner reported the latest isolated full suite as7,524 passed/4 skipped; Codex independently ran141 focused calibration tests after the last fixes. Two earlier full-suite failures have no retained identities and remain unexplained; they are not presented as resolved by the later passing run.
+
+The [operator procedure](2026-11-26-ht01-calibration-operator-procedure.md) proposes the minimum stop-and-review path for uncertainty, without a recovery writer. It preserves the guard/evidence, permits only a separately authorized fresh read once MIDI ownership is settled, and distinguishes current readings from command history. Procedure review, installation/reload/read-only inspection, live calibration, and any exceptional recovery/clearance remain separate decisions. No live action was taken while writing it.
+
+
+## Live HT01 calibration result — 2026-11-26
+
+Owner explicitly authorized the pinned36 probes and planned exact restoration after v2 installation, operator reload/routing and the successful fresh inspect. Ran ht01_live_20261126_01 through the committed helper with a fresh log and the pinned plan digest. The helper exited0/completed/restored_exact true. No provider, save/export or production-profile change was requested.
+
+Evidence outside the repository: C:/uni/Bachelor-Thesis/test/HT01-live-calibration-v001/calibration-live-20261126-01.jsonl (78 records, SHA-256 8c6280c9504a514728b2d80471aac113c52cce0100b66e9d1ee6fb18c408bb84); separate calibration-live-20261126-01-evaluation.json records the reproduced evaluator result, installed hashes and observed final guard state. All37 pending writes precede their outcomes; all36 probes plus the restore have fresh applied replies (replayed false).
+
+Evaluator verdict H_accepted, no record problems. Maximum primary H error1.8734624829264135e-6dB (limit0.01), repeat difference0dB (limit1e-6), maximum stored-target error4.0978198612151573e-10 normalized (limit1e-6). Restore and final inspect exactly equal initial normalized0.9056249996647239 / dB2.982499599456787. Guard absent after successful evidence validation and clean MIDI closure. Installed v2 pair hashes still match installation evidence (f03cf509… /e4b8cf81…). The script console output was not captured during the run; claims above are from recorded requests/replies and the helper result.
+
+Accepted scope is only HT01 Live Calibration v001,5/Bass, Producer Edition26.1.7 build5654/API45, proposed normalized range0.78–0.92. Staging0.76/0.94 does not widen it. This establishes fader conversion/repeatability evidence, not masking validity or better mixing. No uncertain outcome or recovery procedure was exercised live. HT01 production set_gain_db/restore_gain remain unsupported until a separately reviewed profile increment. State-matched native baseline exports, acceptance objective and first integrated agent trial remain future work.

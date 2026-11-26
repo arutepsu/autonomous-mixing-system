@@ -48,7 +48,7 @@ def test_frozen_research_protocol_is_unchanged_and_the_runtime_snapshot_is_pinne
     assert runtime != RESEARCH.read_bytes()  # deliberately extended (restore_gain), no longer byte-identical
 
 
-RUNTIME_PROTOCOL_V2_SHA256 = "e4b8cf81dfb6171fe29d091a8985f981ab8724acd32a00e3893721d796e45d96"  # runtime v2 plus calibration-only HT01 plan (2026-11-25); old parity stays pinned
+RUNTIME_PROTOCOL_V2_SHA256 = "7d5ddd6f540474157340dd713f0d618af33b7a5ee1fd4cbdb85544460ca96d9e"  # runtime v2 + HT01 calibration plan + HT01 production conversion (2026-11-26); old parity stays pinned
 
 
 def _corpus():

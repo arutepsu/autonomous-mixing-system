@@ -2995,3 +2995,71 @@ Sequential mutation probes, each followed by a SHA-256-verified source restore. 
 Verification note. An earlier full-suite run, started 2026-11-25, took 17 hours of wall-clock time (the host was presumably suspended) and reported 2 failed, 7,522 passed, 4 skipped. Only its summary line was kept, so the failing tests are unidentified. A rerun was started before it ended and briefly overlapped it, against the no-concurrent-tests rule; that rerun was stopped without being used. Clean full suite run alone afterwards: `uv run --locked --extra agent pytest -q -p no:cacheprovider -rf` — 7,524 passed, 4 skipped in 409.37s, with no failures listed. The only other Python processes on the host belong to an unrelated project started the previous day. The two earlier failures were not reproduced and remain unexplained.
 
 Ruff format and check for `src`, `tests` and `device`: 323 files already formatted, all checks pass. The frozen `scripts/fl_studio/` files are unchanged, and both protocol copies keep SHA-256 `e4b8cf81…`. The design document's crash/cleanup bullet and release case (b) are extended in place. Recovery remains a draft. Installation, reload and live calibration need separate authorization.
+
+
+## 2026-11-26 — committed HT01 checkpoint; proposed operator stop procedure
+
+Confirmed clean working tree at f55111c (feat: add guarded HT01 calibration runner and evidence validation) after the owner's commit. Wrote docs/superpowers/plans/2026-11-26-ht01-calibration-operator-procedure.md and linked it from the design. Documentation only: no installation/reload, MIDI, calibration write, provider call or project/audio change.
+
+The proposed minimum procedure stops uncertain runs without a recovery writer: preserve the guard, original log/hash, process/cleanup facts and Script output; classify fresh replies versus unknown without inferring non-execution; settle transport ownership before a separately authorized fresh inspect. Exact current readings cannot establish historical effects. Any exceptional restoration or manual guard clearance needs a new owner decision, preserved evidence and a prior log entry. The interrupted run stays incomplete. Reload/project reopen and v1 gain commands are not recovery shortcuts.
+
+Next decision is procedure review, then installation/reload plus read-only inspection only; the pinned live calibration remains separately authorized. No software tests rerun for documentation-only edits. Local links and git diff --check were checked. Latest full-suite result is owner-reported7,524 passed/4 skipped; independently observed focused141 passed. Earlier unidentified full-suite failures remain unexplained, not erased by later success.
+
+
+## 2026-11-26 — authorized v2 installation; operator reload pending
+
+Owner authorized installation/reload and read-only inspection only, not calibration writes. Installed the committed f55111c device pair into the previously absent Hardware/Thesis Bridge v2 folder. Verified source bytes against HEAD checkout and protocol copy against runtime. Installed SHA-256: device_thesis_bridge.py f03cf509d311b2d275a2a0f1044ae3cfafbb5792d36e645ca3aca96791df2407; thesis_bridge_protocol.py e4b8cf81dfb6171fe29d091a8985f981ab8724acd32a00e3893721d796e45d96.
+
+Backups and installation.json are outside FL script folders at C:/uni/Bachelor-Thesis/test/HT01-live-calibration-v001/installation-20261126-e75af2c2/. Existing v1 files remain unchanged (54fb39aa1178… /0220b3e9c560…), as does the gain-trial script (93879cf1e545…). No overwrite of v1, script reload, MIDI connection, provider call or fader write was performed. Operator must select/reload v2 on Cmd input before the authorized fresh read-only inspect; on-disk installation alone does not prove the loaded script.
+
+
+## 2026-11-26 — operator-loaded v2; authorized fresh inspect succeeded
+
+Operator supplied v2 Script output header (API45, input20, output linked1, duplicate history empty), then disabled the old Thesis Bridge input after the screenshot showed both inputs enabled. Authorized read-only inspect ht01_v2_inspect_20261126_01 returned ok at10:41:38UTC: HT01 Live Calibration v001,5/Bass, Producer Edition26.1.7 build5654/API45, normalized0.9056249996647239 / dB2.982499599456787. Both coordinates exactly match the pinned initial reading. No stray or malformed replies. Log: C:/uni/Bachelor-Thesis/test/HT01-live-calibration-v001/inspect-v2-20261126-01.jsonl; SHA-256 dc18de1693224738ae1a0924fdf244e45cafe7d566c42a0bf942fec793638e19. Scope-wide calibration guard exists: False. No gain/probe/restore command, provider call or export was sent. The pinned36 probes plus planned exact restoration still await explicit live-run authorization.
+
+
+## Live HT01 calibration result — 2026-11-26
+
+Owner explicitly authorized the pinned36 probes and planned exact restoration after v2 installation, operator reload/routing and the successful fresh inspect. Ran ht01_live_20261126_01 through the committed helper with a fresh log and the pinned plan digest. The helper exited0/completed/restored_exact true. No provider, save/export or production-profile change was requested.
+
+Evidence outside the repository: C:/uni/Bachelor-Thesis/test/HT01-live-calibration-v001/calibration-live-20261126-01.jsonl (78 records, SHA-256 8c6280c9504a514728b2d80471aac113c52cce0100b66e9d1ee6fb18c408bb84); separate calibration-live-20261126-01-evaluation.json records the reproduced evaluator result, installed hashes and observed final guard state. All37 pending writes precede their outcomes; all36 probes plus the restore have fresh applied replies (replayed false).
+
+Evaluator verdict H_accepted, no record problems. Maximum primary H error1.8734624829264135e-6dB (limit0.01), repeat difference0dB (limit1e-6), maximum stored-target error4.0978198612151573e-10 normalized (limit1e-6). Restore and final inspect exactly equal initial normalized0.9056249996647239 / dB2.982499599456787. Guard absent after successful evidence validation and clean MIDI closure. Installed v2 pair hashes still match installation evidence (f03cf509… /e4b8cf81…). The script console output was not captured during the run; claims above are from recorded requests/replies and the helper result.
+
+Accepted scope is only HT01 Live Calibration v001,5/Bass, Producer Edition26.1.7 build5654/API45, proposed normalized range0.78–0.92. Staging0.76/0.94 does not widen it. This establishes fader conversion/repeatability evidence, not masking validity or better mixing. No uncertain outcome or recovery procedure was exercised live. HT01 production set_gain_db/restore_gain remain unsupported until a separately reviewed profile increment. State-matched native baseline exports, acceptance objective and first integrated agent trial remain future work.
+
+## 2026-11-26 — HT01 production profile implemented tests-first (uncommitted)
+
+The owner approved the [HT01 production-profile plan](../superpowers/plans/2026-11-26-ht01-production-profile-plan.md) (D1–D5, and D6 with an enforced check) with three amendments: enforced journal scope before MIDI, explicit stored-run compatibility, and boundary tests that separate range eligibility from admissible cuts with exact HT01 bounds. Decision recorded as [ADR-044](../decisions/0044-explicit-calibrated-daw-profile-selection.md) (Proposed). No installation, MIDI, provider call, export, commit or live write occurred.
+
+**Evidence re-evaluated before planning.** The live log `calibration-live-20261126-01.jsonl` (SHA-256 `8c6280c9…`) was checked two ways. The committed evaluator, run read-only, returned `H_accepted`. A separate `json`/`math`-only recomputation confirmed:
+- complete pending-before-exchange order and exact `before` chaining;
+- fresh applied replies throughout;
+- maximum stored error 4.1e-10 normalized;
+- maximum |H − read-back| at the primaries 1.873e-6 dB;
+- repeat difference 0 dB;
+- exact restoration to 0.9056249996647239 / 2.982499599456787.
+
+Limits remain explicit: one session and one run, no drift or perceptual estimate, and values between primaries rest on H.
+
+**What now exists, for `HT01 Live Calibration v001`, insert 5 `Bass`, build 5654 / API 45:**
+- `set_gain_db` and `restore_gain` with conversion `fl-mixer-h125-ht01-v1`;
+- normalized range [0.78, 0.92], compared exactly, with the existing 0.1–3 dB cuts and tolerances;
+- an API-45 device check;
+- explicit tool-configuration selection (schema 2 `daw_profile`; schema 1 means the existing profile);
+- an incompatible FL journal scope refused before any transport;
+- a stored run refused under another selection before provider or MIDI construction.
+
+The existing scope's behaviour, rounding and command bytes are unchanged, and the frozen research files are untouched. Staging points 0.76/0.94 and the calibration start grant nothing. A start at 0.78 admits no cut.
+
+**Tests first.**
+- 61 of 65 new tests failed before implementation (the 4 passing were existing-scope regressions), and the selection/stored-run module failed at collection.
+- Two test-harness defects were fixed before implementation was judged: a replay rebuilt from the moved fader, and a restore binding rebuilt from the current reading.
+- The calibration-stage test asserting that HT01 production stays disabled was replaced, as approved, by one limiting production to the approved scope.
+- 13 sequential mutation probes are all caught, with a SHA-256-verified restore after each. One (journal scope compared by title only) survived at first and was caught after six same-title altered-scope journal regressions were added.
+
+**Results.** Clean full suite run alone: 7,609 passed, 4 skipped in 440.30s. Ruff format and check on `src`, `tests` and `device` pass (325 files). The new device pair hashes are:
+- `device_thesis_bridge.py`: `b4b816b4dcfc668b96e509d400a36bf50e9869ffe91bf6c47b9f04bf0a3b5ff8`
+- `thesis_bridge_protocol.py`: `7d5ddd6f540474157340dd713f0d618af33b7a5ee1fd4cbdb85544460ca96d9e`
+
+**Not established.** Live HT01 production control is not established. Installation of the new device pair, reload and a fresh read-only HT01 inspect are separate authorizations. Baseline export preparation and agent-run criteria are the next task. The hidden reference and the known injection never become runtime targets.

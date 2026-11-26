@@ -17,6 +17,10 @@ only inside functions, and the only top-level import is the protocol module by i
   before/after) when the fader reads the target within 0.001, otherwise ``uncertain``. Exactness (both readings
   equal the target) is judged by the runtime, not here. Every failure after the setter is ``uncertain``.
 
+``set_gain_db`` and ``restore_gain`` use the calibrated conversion of the command's exact title and insert: the
+existing one (build check only, as before) or, since the HT01 production-profile plan (2026-11-26), the HT01 one,
+which also requires API 45 before writing and checks the start against its exact range [0.78, 0.92].
+
 Duplicate history, identity (metadata title only) and the uncertain boundary are as in v1. Restoring a fader proves
 only its readings, never routing, plugins, the project or audio.
 """
@@ -129,8 +133,13 @@ def _write(command: dict, host, state: dict, history: dict) -> dict:
     if name != command["insert"]["name"]:
         return refuse("identity_mismatch", "insert")
     db_command = command["type"] == "set_gain_db"
-    if (db_command or restore) and host.ui.getVersion(5) != protocol.CONVERSION_SCOPE["fl_version"]:
+    # The validated command's exact title/insert select its calibrated conversion; the existing one pins no API.
+    conversion = protocol.conversion_for_scope(command["project_title"], command["insert"])
+    calibrated = protocol.conversion_scope(conversion) if (db_command or restore) else None
+    if calibrated is not None and host.ui.getVersion(5) != calibrated["fl_version"]:
         return refuse("precondition_failed", "uncalibrated_build")
+    if calibrated is not None and "api" in calibrated and host.general.getVersion() != calibrated["api"]:
+        return refuse("precondition_failed", "calibration_api")
     ht01 = command.get("plan") == protocol.HT01_PLAN_ID
     if ht01 and host.ui.getVersion(5) != protocol.HT01_BUILD:
         return refuse("precondition_failed", "uncalibrated_build")
@@ -166,7 +175,7 @@ def _write(command: dict, host, state: dict, history: dict) -> dict:
     elif restore:
         pass  # target range and curve were validated with the command; a restoration may start anywhere
     elif db_command:
-        if not protocol.in_conversion_range(before["normalized"]):
+        if not protocol.conversion_admits(conversion, before["normalized"]):
             return refuse("precondition_failed", "range")
         if not protocol.start_on_curve(before):
             return refuse("precondition_failed", "uncalibrated_start")

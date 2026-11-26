@@ -2,8 +2,8 @@
 
 Production pieces the core ports need and no adapter provides: a system clock whose cancellation the operator
 triggers with Ctrl+C, and process-unique identities (UUID tokens; UUID-based FL inspection IDs). The configuration
-(JSON, schema 1) covers what operator tooling uses: the run-store directory, the FL command journal and session, the
-calibrated profile's reference, the MIDI ports, the audio roots and read limits. Network and synced folders are
+(JSON, schema 1 or 2) covers what operator tooling uses: the run-store directory, the FL command journal and session,
+the calibrated profile's reference and (schema 2 only) its explicit selection ``daw_profile``, the MIDI ports, the audio roots and read limits. Network and synced folders are
 unsupported (UNC paths are refused; synced folders are documented, not detected). It has no field for hidden
 evaluation data (SR-10): unknown keys are refused by name.
 
@@ -33,7 +33,7 @@ from pathlib import Path
 from autonomous_mixing.adapters.decision_agent.config import ClaudeConfig
 from autonomous_mixing.adapters.fl_studio.controller import FlStudioParameterController
 from autonomous_mixing.adapters.fl_studio.journal import SqliteCommandJournal
-from autonomous_mixing.adapters.fl_studio.profile import calibrated_profile
+from autonomous_mixing.adapters.fl_studio.profile import EXISTING_PROFILE, PROFILE_NAMES, supported_profile
 from autonomous_mixing.adapters.fl_studio.transport import WinMMTransport
 from autonomous_mixing.adapters.journal.record_codec import decode
 from autonomous_mixing.core.records.admission import ActionAdmissionPolicy, StemBinding, TrackGainPermission
@@ -63,6 +63,7 @@ from autonomous_mixing.core.records.verification_assessment import ConditionMeas
 from autonomous_mixing.core.records.verification_evidence import MeasurementDefinition, SourceRequirement
 
 SCHEMA = 1
+TOOL_SCHEMAS = (1, 2)  # tool configuration: schema 2 adds the explicit daw_profile selection
 _RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
@@ -121,6 +122,11 @@ class DawToolConfig:
     roots: tuple[tuple[str, str], ...]
     max_file_bytes: int
     max_decoded_bytes: int
+    daw_profile: str  # one of PROFILE_NAMES: schema 1 always means the existing profile; schema 2 names it
+
+    def daw_control_profile(self):
+        """The calibrated profile this configuration selects (one of exactly two literal declarations)."""
+        return supported_profile(self.daw_profile, reference=self.profile_reference)
 
     def store_path(self, run_id: str) -> Path:
         if not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id):
@@ -166,7 +172,11 @@ def _positive_int(value, key):
 
 
 def load_config(path: Path) -> DawToolConfig:
-    """Parse and validate ``path`` (JSON, schema 1); raises ``ConfigError`` naming the key path."""
+    """Parse and validate ``path`` (JSON, schema 1 or 2); raises ``ConfigError`` naming the key path.
+
+    Schema 1 always selects the existing calibrated profile; schema 2 requires ``daw_profile``, one of exactly two
+    names (HT01 production-profile plan 2026-11-26). No other profile can be declared.
+    """
     path = Path(path)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -174,9 +184,20 @@ def load_config(path: Path) -> DawToolConfig:
         raise ConfigError(f"configuration: cannot read {path}: {error}") from error
     base = path.parent.resolve()
     keys = ("schema", "run_store_dir", "fl_journal", "profile_reference", "midi", "roots", "read_limits")
-    _object(data, "", keys)
-    if data["schema"] != SCHEMA or type(data["schema"]) is not int:
-        raise ConfigError(f"schema: must be {SCHEMA}")
+    _object(data, "", keys, optional=("daw_profile",))
+    schema = data["schema"]
+    if type(schema) is not int or schema not in TOOL_SCHEMAS:
+        raise ConfigError(f"schema: must be one of {TOOL_SCHEMAS}")
+    if schema == 1:
+        if "daw_profile" in data:
+            raise ConfigError("daw_profile: not allowed in schema 1 (it always means the existing profile)")
+        daw_profile = EXISTING_PROFILE
+    else:
+        if "daw_profile" not in data:
+            raise ConfigError("daw_profile: missing (required by schema 2)")
+        daw_profile = data["daw_profile"]
+        if type(daw_profile) is not str or daw_profile not in PROFILE_NAMES:
+            raise ConfigError(f"daw_profile: must be one of {', '.join(PROFILE_NAMES)}")
     stores = _path(data["run_store_dir"], "run_store_dir", base, directory=True)
     fl = _object(data["fl_journal"], "fl_journal", ("path", "session_key"))
     journal = _path(fl["path"], "fl_journal.path", base, directory=False)
@@ -200,7 +221,8 @@ def load_config(path: Path) -> DawToolConfig:
     return DawToolConfig(path, stores, journal, session, profile, _text(midi["output_port"], "midi.output_port"),
                          _text(midi["input_port"], "midi.input_port"), float(timeout), roots,
                          _positive_int(limits["max_file_bytes"], "read_limits.max_file_bytes"),
-                         _positive_int(limits["max_decoded_bytes"], "read_limits.max_decoded_bytes"))  # fmt: skip
+                         _positive_int(limits["max_decoded_bytes"], "read_limits.max_decoded_bytes"),
+                         daw_profile)  # fmt: skip
 
 
 def open_fl(config: DawToolConfig, *, read_only: bool, transport_factory=None):
@@ -217,10 +239,14 @@ def open_fl(config: DawToolConfig, *, read_only: bool, transport_factory=None):
 
     else:
         factory = transport_factory or (lambda: WinMMTransport(config.midi_output, config.midi_input))
-    controller = FlStudioParameterController(
-        profile=calibrated_profile(reference=config.profile_reference), journal=journal, transport_factory=factory,
-        timeout_s=config.timeout_s, clock=time.monotonic, next_inspect_id=unique_inspect_id,
-    )  # fmt: skip
+    try:
+        controller = FlStudioParameterController(
+            profile=config.daw_control_profile(), journal=journal, transport_factory=factory,
+            timeout_s=config.timeout_s, clock=time.monotonic, next_inspect_id=unique_inspect_id,
+        )  # fmt: skip
+    except BaseException:  # an incompatible journal scope is refused before MIDI; never leave the journal open
+        journal.close()
+        raise
     return journal, controller
 
 
@@ -450,7 +476,7 @@ class DawRunConfig:
                                        *(d.selector.metric for d in diagnostics)]))  # fmt: skip
         configuration = RunConfiguration(run["scope"], AnalysisSpec(specification, metrics), run["render_spec"],
                                          run["context"], run["criteria"], run["controller"], run["budget_limits"])  # fmt: skip
-        daw_session = DawSessionConfig(session["binding"], calibrated_profile(reference=tool.profile_reference),
+        daw_session = DawSessionConfig(session["binding"], tool.daw_control_profile(),
                                        session["permission"], session["routing"], session["export_format"],
                                        session["export_timeline"], session["render_spec"], session["export_root_key"])  # fmt: skip
         return RunRequest(

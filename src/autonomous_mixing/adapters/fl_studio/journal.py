@@ -24,6 +24,7 @@ from autonomous_mixing.adapters.fl_studio.serialization import (
     load_apply_request,
     load_grant,
     load_outcome,
+    load_profile,
     outcome_json,
 )
 from autonomous_mixing.core.records.budgets import BudgetOperation
@@ -456,6 +457,17 @@ class SqliteCommandJournal:
     def pending_or_uncertain(self) -> bool:
         """Any unresolved command (pending or uncertain apply; restoration not confirmed), without a resolution."""
         return bool(self._unresolved())
+
+    def recorded_profiles(self) -> tuple:
+        """The DAW profile every recorded apply and restoration request carries, in row order; fails closed."""
+        result = []
+        for row in self._rows():
+            try:
+                data = row.request["request"] if row.kind == "apply" else row.request["restore"]
+                result.append(load_profile(data["profile"]))
+            except (KeyError, TypeError, ValueError) as error:
+                raise JournalError("invalid journaled profile") from error
+        return tuple(result)
 
     def blocked_conversions(self) -> frozenset[VersionRef]:
         return frozenset(

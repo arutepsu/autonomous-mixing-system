@@ -9,7 +9,7 @@ from dataclasses import asdict, replace
 from autonomous_mixing.adapters.fl_studio import protocol
 from autonomous_mixing.adapters.fl_studio.exchange import exchange
 from autonomous_mixing.adapters.fl_studio.journal import JournalError, JournalRefusal, SqliteCommandJournal
-from autonomous_mixing.adapters.fl_studio.profile import calibrated_profile, make_apply_command
+from autonomous_mixing.adapters.fl_studio.profile import is_supported_profile, make_apply_command, same_calibrated_scope
 from autonomous_mixing.adapters.fl_studio.serialization import (
     _dumps,
     _plain,
@@ -82,6 +82,7 @@ _REFUSALS = {
     "start_gain": DawRefusalCode.START_GAIN,
     "range": DawRefusalCode.OUT_OF_RANGE,
     "uncalibrated_build": DawRefusalCode.UNCALIBRATED_BUILD,
+    "calibration_api": DawRefusalCode.UNCALIBRATED_BUILD,  # HT01 pins API 45 with its build
     "uncalibrated_start": DawRefusalCode.UNCALIBRATED_START,
     "cut_bounds": DawRefusalCode.BOUNDS,
     "bounds": DawRefusalCode.BOUNDS,
@@ -154,8 +155,13 @@ class FlStudioParameterController:
     ):
         require_instance(profile, DawControlProfile, "profile")
         require_instance(journal, SqliteCommandJournal, "journal")
-        if profile != calibrated_profile(reference=profile.reference):
+        if not is_supported_profile(profile):
             raise ValueError("unsupported configured FL profile")
+        # Enforced journal scope (plan 2026-11-26, D6): a journal recording another calibrated scope or conversion is
+        # refused here, before any transport exists, so a profile never reuses another scope's authority, unresolved
+        # state or conversion blocks. Reference labels aside; empty journals are compatible.
+        if any(not same_calibrated_scope(recorded, profile) for recorded in journal.recorded_profiles()):
+            raise JournalRefusal("incompatible_scope", "the FL journal records another calibrated scope or conversion")
         if require_finite(timeout_s, "timeout_s") <= 0:
             raise ValueError("timeout_s must be positive")
         if not all(callable(value) for value in (transport_factory, clock, next_inspect_id)):

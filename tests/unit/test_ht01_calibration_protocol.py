@@ -107,24 +107,21 @@ def test_ht01_existing_write_safety(change):
     assert len(h.writes) == (1 if change == "after" else 0)
 
 
-def test_ht01_does_not_enable_production_db_or_restore_commands():
-    for kind in ("set_gain_db", "restore_gain"):
+def test_ht01_production_commands_are_limited_to_the_approved_profile_scope():
+    """Supersedes the calibration-stage guard that HT01 production writes stay disabled: the owner approved the
+    HT01 profile (plan 2026-11-26) for normalized [0.78, 0.92] only. The calibration staging points still grant
+    nothing, and the calibration plan's start is not a production target."""
+    title = "HT01 Live Calibration v001"
+    command = p.set_gain_db_command("ht01_db_0000", title, 5, "Bass", START["normalized"], START["db"], -1.0)
+    assert command["conversion"] == p.HT01_CONVERSION_ID
+    for staging in (0.76, 0.94):
         with pytest.raises(p.ProtocolError):
-            if kind == "set_gain_db":
-                p.set_gain_db_command(
-                    "ht01_db_0000", "HT01 Live Calibration v001", 5, "Bass", START["normalized"], START["db"], -1.0
-                )
-            else:
-                p.restore_gain_command(
-                    "ht01_restore_00",
-                    "HT01 Live Calibration v001",
-                    5,
-                    "Bass",
-                    START["normalized"],
-                    START["db"],
-                    START["normalized"],
-                    START["db"],
-                )
+            p.set_gain_db_command("ht01_db_0001", title, 5, "Bass", staging, h_db(staging), -0.1)
+        with pytest.raises(p.ProtocolError):
+            p.restore_gain_command("ht01_restore_00", title, 5, "Bass", 0.85, h_db(0.85), staging, h_db(staging))
+    with pytest.raises(p.ProtocolError):  # already at the target: no restoration
+        p.restore_gain_command("ht01_restore_00", title, 5, "Bass", START["normalized"], START["db"],
+                               START["normalized"], START["db"])  # fmt: skip
 
 
 def test_device_protocol_copy_is_exact():

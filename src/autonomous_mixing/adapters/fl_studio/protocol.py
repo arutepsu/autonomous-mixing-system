@@ -120,6 +120,17 @@ DB_CUT_RANGE = (-3.0, -0.1)  # requested change in dB: a cut of at least 0.1 dB 
 DB_SUCCESS_TOLERANCE = 0.05  # |achieved - requested| dB change (the trial's DB_TOLERANCE)
 TARGET_AGREEMENT = 1e-9  # client's and script's targets must agree within this (normalized)
 
+# Second calibrated conversion (HT01 production-profile plan 2026-11-26): the same curve H, accepted by the live run
+# ht01_live_20261126_01 of plan ht01-mixer-cal-v1 (verdict H_accepted, max |H - read-back| 1.87e-6 dB at the primary
+# points) for normalized [0.78, 0.92] on exactly this title, insert, build and API. A new calibration gets a new ID.
+# Its range is exact (no rounding tolerance), so the calibrated bounds are never widened; the staging points 0.76 and
+# 0.94 grant nothing. The existing conversion above, its scope and its rounding are unchanged.
+HT01_CONVERSION_ID = "fl-mixer-h125-ht01-v1"
+HT01_CONVERSION_PLAN = HT01_PLAN_ID
+HT01_CONVERSION_RANGE = HT01_RANGE
+HT01_CONVERSION_SCOPE = {"project_title": HT01_TITLE, "insert": HT01_INSERT, "fl_version": HT01_BUILD,
+                         "api": HT01_API}  # fmt: skip
+
 _ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _INSPECT_OBSERVED = {"project_title", "fl_version", "api", "insert", "gain"}
 _WRITE_OBSERVED = {"project_title", "fl_version", "api", "insert", "before", "after", "db_change", "replayed"}
@@ -242,6 +253,35 @@ def db_target(start_db: float, db_change: float) -> float:
 def in_conversion_range(v: float) -> bool:
     low, high = CONVERSION_RANGE
     return _round(v - low) >= 0.0 and _round(high - v) >= 0.0
+
+
+def conversion_for_scope(project_title: str, insert: dict) -> str | None:
+    """The one calibrated conversion of exactly this title and insert, or None; callers never choose one."""
+    if project_title == CONVERSION_SCOPE["project_title"] and insert == CONVERSION_SCOPE["insert"]:
+        return CONVERSION_ID
+    if project_title == HT01_CONVERSION_SCOPE["project_title"] and insert == HT01_CONVERSION_SCOPE["insert"]:
+        return HT01_CONVERSION_ID
+    return None
+
+
+def conversion_scope(conversion: str) -> dict:
+    """The declared scope of a known conversion (the existing one pins no API: its device checks are unchanged)."""
+    if conversion == CONVERSION_ID:
+        return CONVERSION_SCOPE
+    if conversion == HT01_CONVERSION_ID:
+        return HT01_CONVERSION_SCOPE
+    raise ValueError(f"unknown conversion {conversion!r}")
+
+
+def conversion_admits(conversion: str, v: float) -> bool:
+    """Whether normalized ``v`` lies in the conversion's calibrated range: the existing one keeps its 1e-9 rounding,
+    HT01 compares exactly."""
+    if conversion == CONVERSION_ID:
+        return in_conversion_range(v)
+    if conversion == HT01_CONVERSION_ID:
+        low, high = HT01_CONVERSION_RANGE
+        return low <= v <= high
+    raise ValueError(f"unknown conversion {conversion!r}")
 
 
 def start_on_curve(gain: dict) -> bool:
@@ -398,25 +438,26 @@ def ht01_probe_command(command_id_: str, expected: dict, step) -> dict:
 
 def _validate_db(message: dict) -> None:
     """Conversion ID and scope, cut bounds, start inside the range and on the curve, the shared target, its range."""
-    if message["conversion"] != CONVERSION_ID:
-        raise ProtocolError("conversion", f"conversion must be {CONVERSION_ID}")
-    scope = {"project_title": message["project_title"], "insert": message["insert"]}
-    if scope != {"project_title": CONVERSION_SCOPE["project_title"], "insert": CONVERSION_SCOPE["insert"]}:
+    conversion = message["conversion"]
+    if conversion not in (CONVERSION_ID, HT01_CONVERSION_ID):
+        raise ProtocolError("conversion", f"conversion must be {CONVERSION_ID} or {HT01_CONVERSION_ID}")
+    if conversion_for_scope(message["project_title"], message["insert"]) != conversion:
         raise ProtocolError("conversion_scope", "the conversion is calibrated only for its project title and insert")
+    span = HT01_CONVERSION_RANGE if conversion == HT01_CONVERSION_ID else CONVERSION_RANGE
     expected = _gain(message["expected"], "expected")
     change = _number(message["intended_db_change"], "intended_db_change")
     target = _number(message["target_normalized"], "target_normalized")
     low, high = DB_CUT_RANGE
     if not (_round(change - low) >= 0.0 and _round(high - change) >= 0.0):
         raise ProtocolError("bounds", f"intended_db_change must lie in [{low}, {high}] dB")
-    if not in_conversion_range(expected["normalized"]):
-        raise ProtocolError("range", f"the starting fader must lie in the calibrated range {CONVERSION_RANGE}")
+    if not conversion_admits(conversion, expected["normalized"]):
+        raise ProtocolError("range", f"the starting fader must lie in the calibrated range {span}")
     if not start_on_curve(expected):
         raise ProtocolError("uncalibrated_start", "the starting read-back is not on the calibrated curve")
     if abs(target - db_target(expected["db"], change)) > TARGET_AGREEMENT:
         raise ProtocolError("conversion_mismatch", "target_normalized disagrees with the conversion")
-    if not in_conversion_range(target):
-        raise ProtocolError("range", f"the target must lie in the calibrated range {CONVERSION_RANGE}")
+    if not conversion_admits(conversion, target):
+        raise ProtocolError("range", f"the target must lie in the calibrated range {span}")
     if not _round(expected["normalized"] - target) > MIN_CUT_EXCLUSIVE:
         raise ProtocolError("bounds", f"the fader must move by more than {MIN_CUT_EXCLUSIVE} (normalized)")
 
@@ -426,13 +467,14 @@ def _validate_restore(message: dict) -> None:
 
     No conversion field and no cut bounds: the target is a reading the runtime journaled, written back exactly.
     """
-    scope = {"project_title": message["project_title"], "insert": message["insert"]}
-    if scope != {"project_title": CONVERSION_SCOPE["project_title"], "insert": CONVERSION_SCOPE["insert"]}:
+    conversion = conversion_for_scope(message["project_title"], message["insert"])
+    if conversion is None:
         raise ProtocolError("conversion_scope", "restoration is supported only on the calibrated project and insert")
+    span = HT01_CONVERSION_RANGE if conversion == HT01_CONVERSION_ID else CONVERSION_RANGE
     expected = _gain(message["expected"], "expected")
     target = _gain(message["target"], "target")
-    if not in_conversion_range(target["normalized"]):
-        raise ProtocolError("range", f"the restore target must lie in the calibrated range {CONVERSION_RANGE}")
+    if not conversion_admits(conversion, target["normalized"]):
+        raise ProtocolError("range", f"the restore target must lie in the calibrated range {span}")
     if not start_on_curve(target):
         raise ProtocolError("conversion_mismatch", "the restore target's dB is not on the calibrated curve")
     if target == expected:
@@ -478,15 +520,21 @@ def probe_command(command_id_: str, expected_normalized: float, expected_db: flo
 
 def set_gain_db_command(command_id_: str, project_title: str, insert_index: int, insert_name: str,
                         expected_normalized: float, expected_db: float, db_change: float) -> dict:  # fmt: skip
-    """A dB cut; the target is computed here by the shared conversion (the script recomputes and compares)."""
+    """A dB cut; the target is computed here by the shared conversion (the script recomputes and compares).
+
+    The conversion follows from the exact title and insert; an uncalibrated scope keeps the existing ID, which
+    validation then refuses as ``conversion_scope`` exactly as before.
+    """
     try:
         target = db_target(float(expected_db), float(db_change))
     except (TypeError, ValueError, OverflowError):
         target = -1.0  # validation reports the bad field
+    insert = {"index": insert_index, "name": insert_name}
+    conversion = conversion_for_scope(project_title, insert) or CONVERSION_ID
     message = {"v": PROTOCOL_VERSION, "id": command_id_, "type": "set_gain_db", "project_title": project_title,
-               "insert": {"index": insert_index, "name": insert_name},
+               "insert": insert,
                "expected": {"normalized": expected_normalized, "db": expected_db}, "intended_db_change": db_change,
-               "target_normalized": target, "conversion": CONVERSION_ID}  # fmt: skip
+               "target_normalized": target, "conversion": conversion}  # fmt: skip
     return validate_command(message)
 
 

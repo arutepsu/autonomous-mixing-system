@@ -49,6 +49,7 @@ One file per decision, named `NNNN-short-title.md`. Accepted ADRs are not edited
 
 | [042](0042-programmatic-daw-agent-composition.md) | Owned programmatic DAW agent composition (R5B) | 2026-11-24 | Proposed |
 | [043](0043-validated-daw-agent-run-configuration.md) | Validated run configuration for the DAW agent runtime (R5C C1) | 2026-11-24 | Proposed |
+| [044](0044-explicit-calibrated-daw-profile-selection.md) | Explicit selection between two calibrated DAW profiles (HT01) | 2026-11-26 | Proposed; extends ADR-030/032/043 |
 
 ## Template
 

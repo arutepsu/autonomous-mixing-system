@@ -388,3 +388,25 @@ The runtime/device v2 protocol now recognizes `ht01-mixer-cal-v1`, scoped to met
 The [approved design](../superpowers/plans/2026-11-25-ht01-calibration-design.md) pins the 36-target sequence, primary/staging roles, operating range proposal, numerical criteria and digest. New HT01 probe commands carry `plan_digest`; existing command bytes are unchanged. Device session history enforces order and blocks further calibration writes after uncertainty. Normal restoration is limited to the captured initial target and requires the same session. Reload does not establish authority to recover an unknown write.
 
 The non-frozen adapter-local runner exclusively creates a pending-first JSONL log, never retries, and stops unknown effects. Its evaluator requires the complete chain and exact restore before judging the hypothesis. The separate operator helper retains failed MIDI cleanup ownership. Tests and mutation evidence are simulated only. Installation, a live run, uncertain-outcome recovery procedure and production-profile adoption remain separately reviewed/authorized work.
+
+
+## Live HT01 calibration result — 2026-11-26
+
+Owner explicitly authorized the pinned36 probes and planned exact restoration after v2 installation, operator reload/routing and the successful fresh inspect. Ran ht01_live_20261126_01 through the committed helper with a fresh log and the pinned plan digest. The helper exited0/completed/restored_exact true. No provider, save/export or production-profile change was requested.
+
+Evidence outside the repository: C:/uni/Bachelor-Thesis/test/HT01-live-calibration-v001/calibration-live-20261126-01.jsonl (78 records, SHA-256 8c6280c9504a514728b2d80471aac113c52cce0100b66e9d1ee6fb18c408bb84); separate calibration-live-20261126-01-evaluation.json records the reproduced evaluator result, installed hashes and observed final guard state. All37 pending writes precede their outcomes; all36 probes plus the restore have fresh applied replies (replayed false).
+
+Evaluator verdict H_accepted, no record problems. Maximum primary H error1.8734624829264135e-6dB (limit0.01), repeat difference0dB (limit1e-6), maximum stored-target error4.0978198612151573e-10 normalized (limit1e-6). Restore and final inspect exactly equal initial normalized0.9056249996647239 / dB2.982499599456787. Guard absent after successful evidence validation and clean MIDI closure. Installed v2 pair hashes still match installation evidence (f03cf509… /e4b8cf81…). The script console output was not captured during the run; claims above are from recorded requests/replies and the helper result.
+
+Accepted scope is only HT01 Live Calibration v001,5/Bass, Producer Edition26.1.7 build5654/API45, proposed normalized range0.78–0.92. Staging0.76/0.94 does not widen it. This establishes fader conversion/repeatability evidence, not masking validity or better mixing. No uncertain outcome or recovery procedure was exercised live. HT01 production set_gain_db/restore_gain remain unsupported until a separately reviewed profile increment. State-matched native baseline exports, acceptance objective and first integrated agent trial remain future work.
+
+
+## HT01 production profile (2026-11-26; uncommitted review checkpoint)
+
+Owner approved the [production-profile plan](../superpowers/plans/2026-11-26-ht01-production-profile-plan.md) (D1–D6 with amendments); decision recorded as [ADR-044](../decisions/0044-explicit-calibrated-daw-profile-selection.md) (Proposed).
+- **Wire:** `set_gain_db` for `HT01 Live Calibration v001`, insert 5 `Bass`, carries conversion `fl-mixer-h125-ht01-v1`. Protocol version 1 and existing command bytes are unchanged. The conversion is derived from the exact title and insert.
+- **Range and cuts:** start and target must lie in [0.78, 0.92], compared exactly. Cut limits (0.1–3 dB) and tolerances are unchanged.
+- **Restoration:** `restore_gain` for that scope requires a target in [0.78, 0.92], on the curve.
+- **Device checks:** for this scope the device checks build and API 45 before writing (`calibration_api`). The existing scope's device checks and rounding are unchanged.
+- **Runtime selection:** a tool configuration (schema 2, `daw_profile`) selects the profile. An FL journal of another calibrated scope is refused before any MIDI, and a stored run is refused under another selection.
+- **Status:** simulated evidence only. The new device pair is not installed, and installation, reload and a fresh read-only inspect are separate authorizations. Staging points 0.76/0.94 grant nothing.

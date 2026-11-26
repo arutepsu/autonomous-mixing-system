@@ -29,7 +29,6 @@ from autonomous_mixing.adapters.dsp_analysis.masking_preparation import (
 )
 from autonomous_mixing.adapters.fl_studio.controller import FlStudioParameterController
 from autonomous_mixing.adapters.fl_studio.journal import SqliteCommandJournal
-from autonomous_mixing.adapters.fl_studio.profile import calibrated_profile
 from autonomous_mixing.adapters.fl_studio.transport import WinMMTransport
 from autonomous_mixing.adapters.journal.decision_exchange import SqliteDecisionExchangeStore
 from autonomous_mixing.adapters.journal.sqlite_run import RunStoreBusy, RunStoreError, SqliteRunJournal
@@ -247,8 +246,8 @@ class DawAgentRuntime:
     @staticmethod
     def _preflight(config, request, ingress_profile, preparation=None):
         session = request.daw_session
-        if session is None or session.profile != calibrated_profile(reference=config.profile_reference):
-            raise ValueError("run requires the exact currently calibrated DAW session/profile")
+        if session is None or session.profile != config.daw_control_profile():
+            raise ValueError("run requires the exact DAW session/profile the tool configuration selects")
         roots = dict(config.roots)
         if request.output_root_key != session.export_root_key or request.output_root_key not in roots:
             raise ValueError("output root differs from the declared export root")
@@ -315,6 +314,11 @@ class DawAgentRuntime:
             request = snapshot.value.events[0].payload
             if not isinstance(request, RunRequest) or not isinstance(request.provider_binding, DawAgentBinding):
                 raise RuntimeRefusal("run has no owned runtime configuration")
+            # The stored run's recorded DAW profile must be the one this tool configuration selects (plan 2026-11-26);
+            # refused before any provider or MIDI transport is constructed. Schema-1 configurations keep meaning the
+            # existing profile, so existing stored runs keep their meaning.
+            if request.daw_session is None or request.daw_session.profile != config.daw_control_profile():
+                raise RuntimeRefusal("the stored run's DAW profile differs from the configured profile selection")
             binding = request.provider_binding
             if provider_config is None:
                 try:
