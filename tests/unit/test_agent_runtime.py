@@ -195,7 +195,7 @@ def test_real_diagnosis_can_abstain_without_any_write(tmp_path, case):
         report = runtime.start()
         assert report.final_run.termination_reason is TerminationReason.INSUFFICIENT_EVIDENCE
         assert len(setup.provider.calls) == 1
-        assert setup.provider.calls[0]["diagnosis"]["candidates"] == []
+        assert setup.provider.calls[0]["diagnosis"]["problem_candidates"] == []
         assert setup.world is None
 
 

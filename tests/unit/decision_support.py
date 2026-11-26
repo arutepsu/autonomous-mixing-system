@@ -292,6 +292,6 @@ def request_for(packet, exchange_id="ex-1"):
 
     text = canonical_json({"model": "labelled-model", "messages": [{"role": "user", "content": packet.payload}]})
     return DecisionExchangeRequest(packet.binding.call, exchange_id, packet, text, sha256_text(text),
-                                   VersionRef("prompt", "1"), VersionRef("autonomous_mixing.decision_response", "1"),
+                                   VersionRef("prompt", "1"), VersionRef("autonomous_mixing.decision_response", "2"),
                                    ProviderRequestIdentity("labelled-provider", "api-1", "labelled-model",
                                                            '{"max_tokens":1000,"temperature":0}'), UTC)  # fmt: skip

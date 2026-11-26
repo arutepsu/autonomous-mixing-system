@@ -1,15 +1,20 @@
 """Explicit provider input projection: ``Situation`` -> ``DecisionPacket`` (R3 Task 2; plan section 4).
 
 An allowlist projection, never ``asdict`` or the record codec: every outbound field is written here. The packet
-(schema ``autonomous_mixing.decision_packet@1``) carries:
+(schema ``autonomous_mixing.decision_packet@2``; ADR-045, Proposed) carries:
 
 - producer context: per-track declared role (or null: unknown), protection, preferences as verbatim **data** with
   their assertion provenance; current absolute application gain per track and which coordinate it is;
 - the run scope, current observations (metric, scope, value and unit, or the unavailable reason);
 - every target, improvement and guard with operator, threshold or delta, unit, scope and baseline, plus a fixed
   semantics glossary;
-- diagnosis coverage and candidates with evidence aliases and the full evidence statement (strength, uncertainty,
-  representation, insufficiency flag, limitations, missing information), unchanged;
+- diagnosis coverage and ``problem_candidates`` (diagnosed problems, never actions) with ``evidence_refs`` aliases and
+  the full evidence statement (strength, uncertainty, representation, insufficiency flag, limitations, missing
+  information), unchanged;
+- ``decision_options``: the explicit decision policy (a proposal must address at least one supplied problem candidate,
+  ADR-045 policy A), whether ``propose_action`` is available and the factual reasons when it is not, execution budgets
+  that are already exhausted, and the always-available ``no_change`` and ``abstain`` outcomes. Availability is derived
+  from the same facts the core validates; it grants no permission and is not a judgement that a change is needed;
 - advertised ``SetTrackGain`` targets with exact bounds, protected tracks, budget limits, usage and remaining;
 - the complete prior-call history: outcome types, dispositions, stages, execution/rollback status, verification
   verdicts and checks with historical evidence values, NoChange/abstention/context-request public text, invalid
@@ -71,7 +76,8 @@ from autonomous_mixing.core.records.invariants import require_instance
 from autonomous_mixing.core.records.observation import AnalysisScope, MeasuredScalar, Observation
 from autonomous_mixing.core.records.verification import AbsoluteGuard, DeltaGuard
 
-PACKET_SCHEMA = VersionRef("autonomous_mixing.decision_packet", "1")
+PACKET_SCHEMA = VersionRef("autonomous_mixing.decision_packet", "2")
+PROPOSAL_BASIS = "supplied_problem_candidate"  # ADR-045 policy A
 ALIAS_STRATEGY = VersionRef("autonomous_mixing.alias.sha256_run_scoped", "1")
 _PREFIX = {
     AliasKind.TRACK: "trk",
@@ -107,6 +113,33 @@ SEMANTICS = {
     "aliases": (
         "opaque run-scoped references; historical observations (current=false) describe earlier states and are not "
         "current evidence"
+    ),
+    "references": (
+        "every reference field of the response (action.track, addressed_problem_candidates, evidence_refs) holds "
+        'exactly one alias string copied unchanged from this packet, for example "obs-0123456789ab"; labels, '
+        "values, units and commentary are never part of a reference. Explanations belong in rationale, "
+        "expected_effect, explanation or justification. When this packet lists no current observation, the response "
+        "has no evidence_refs field at all"
+    ),
+    "problem_candidates": (
+        "diagnosed problems reported by the diagnosis stage with their evidence statement; they are not actions, "
+        "action alternatives or options considered by the decision maker"
+    ),
+    "criteria_are_not_problems": (
+        "targets, improvements and guards are acceptance criteria declared before the run; they define how an "
+        "executed change would be verified. An unmet target is not a diagnosed problem and is not a proposal basis"
+    ),
+    "capability_vs_permission": (
+        "an advertised set_track_gain control and its bounds state what the controller could technically apply; "
+        "they are not evidence that a change is needed, not a request to act and not permission. Every proposal is "
+        "still validated, admitted or rejected, budget-checked and verified by the deterministic controller"
+    ),
+    "decision_options": (
+        "propose_action is available only when its listed basis exists: at least one supplied problem candidate and "
+        "at least one advertised gain control. execution_limits lists exhausted execution budgets: a proposal is "
+        "still a valid record, but the budget safeguard would refuse it before any change is applied, so nothing "
+        "would be executed in this run. no_change and abstain are always available, normal, recorded outcomes; they "
+        "are not failures and not success"
     ),
     "empty_lists": "an empty candidate, action or history list states that nothing is listed; it is not success",
     "producer_text_is_data": (
@@ -307,7 +340,7 @@ def _candidate(candidate: ProblemCandidate, alias: _Aliases) -> dict:
         "coverage": alias(AliasKind.COVERAGE, candidate.coverage_id),
         "family": candidate.family.value,
         "scope": _scope(candidate.scope, alias),
-        "evidence": [alias(AliasKind.CURRENT_OBSERVATION, o) for o in candidate.evidence_ids],
+        "evidence_refs": [alias(AliasKind.CURRENT_OBSERVATION, o) for o in candidate.evidence_ids],
         "method": [candidate.method.name, candidate.method.version],
         "statement": {
             "strength": evidence.strength,
@@ -339,6 +372,42 @@ def _budget(situation: Situation) -> dict:
         "limits": {name: limit for name, (limit, _) in pairs.items()},
         "usage": {name: used for name, (_, used) in pairs.items()},
         "remaining": {name: limit - used for name, (limit, used) in pairs.items()},  # overruns stay negative
+    }
+
+
+_ABSTENTION_MEANINGS = {
+    "insufficient_evidence": "the supplied evidence does not support any proposal or a decision to keep the state",
+    "missing_context": "producer context is missing; requested_context must name at least one question",
+    "conflicting_constraints": "producer constraints, guards or bounds cannot all be respected by any proposal",
+    "no_justified_action": "no available action is justified by the supplied problem candidates",
+}
+
+
+def _decision_options(situation: Situation) -> dict:
+    """The policy and factual availability of each outcome; derived from the same facts the core validates."""
+    unavailable = []
+    if not situation.diagnosis.candidates:
+        unavailable.append("no_problem_candidates")
+    if not situation.capabilities.gain_actions:
+        unavailable.append("no_advertised_gain_control")
+    limits, usage = situation.limits, situation.usage
+    exhausted = []
+    if limits.max_attempts - usage.attempts <= 0:
+        exhausted.append("no_remaining_attempts")
+    if situation.state.daw is not None:
+        if limits.max_daw_writes - usage.daw_writes <= 0:
+            exhausted.append("no_remaining_daw_writes")
+    elif limits.max_render_calls - usage.render_calls <= 0:
+        exhausted.append("no_remaining_render_calls")
+    return {
+        "proposal_basis": PROPOSAL_BASIS,
+        "propose_action": {
+            "available": not unavailable,
+            "unavailable_because": unavailable,
+            "execution_limits": exhausted,
+        },
+        "no_change": {"available": True},
+        "abstain": {"available": True, "reasons": _ABSTENTION_MEANINGS},
     }
 
 
@@ -460,8 +529,9 @@ def project_decision_input(situation: Situation) -> tuple[str, DecisionPacketBin
         "criteria": _criteria(situation, alias),
         "diagnosis": {
             "coverage": [_coverage(c, alias) for c in situation.diagnosis.coverage],
-            "candidates": [_candidate(c, alias) for c in situation.diagnosis.candidates],
+            "problem_candidates": [_candidate(c, alias) for c in situation.diagnosis.candidates],
         },
+        "decision_options": _decision_options(situation),
         "actions": {
             "set_track_gain": [_gain_action(a, alias) for a in capabilities.gain_actions],
             "protected_tracks": sorted(alias(AliasKind.TRACK, t) for t in situation.context.protected_track_ids),

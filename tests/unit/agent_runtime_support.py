@@ -98,7 +98,7 @@ class ProviderTransport:
             return received("refused", stop="refusal")
         if self.mode == "timeout":
             return TransportResult(None, None, None, "unit-test", "connection_failed", True)
-        candidates = packet["diagnosis"]["candidates"]
+        candidates = packet["diagnosis"]["problem_candidates"]
         if not candidates:
             return received(ABSTAIN)
         index = len(self.calls) - 1
@@ -109,8 +109,8 @@ class ProviderTransport:
         reply = {
             "type": "propose_action",
             "action": {"operation": "set_track_gain", "track": track, "gain_db": self.gains[index]},
-            "candidates": [candidate["alias"]],
-            "evidence": candidate["evidence"],
+            "addressed_problem_candidates": [candidate["alias"]],
+            "evidence_refs": candidate["evidence_refs"],
             "expected_effect": "numerical fixture level reduction",
             "rationale": "labelled transport response",
             "justification": {

@@ -75,8 +75,8 @@ def proposal(packet, **overrides) -> dict:
     document = {
         "type": "propose_action",
         "action": {"operation": "set_track_gain", "track": alias(packet, AliasKind.TRACK, "t1"), "gain_db": -1.5},
-        "candidates": [alias(packet, AliasKind.CANDIDATE, "cand-1")],
-        "evidence": [alias(packet, AliasKind.CURRENT_OBSERVATION, o) for o in ("o-1", "o-2")],
+        "addressed_problem_candidates": [alias(packet, AliasKind.CANDIDATE, "cand-1")],
+        "evidence_refs": [alias(packet, AliasKind.CURRENT_OBSERVATION, o) for o in ("o-1", "o-2")],
         "expected_effect": "lower overlap of t1 with the pad in the candidate region",
         "rationale": "the labelled candidate cites both observations",
         "justification": {
@@ -138,7 +138,7 @@ def test_out_of_bounds_gain_stays_a_proposal_for_admission_to_judge(packet, s):
 
 
 def test_no_change(packet, s):
-    document = {"type": "no_change", "rationale": "current gains meet the stated preference", "evidence": [],
+    document = {"type": "no_change", "rationale": "current gains meet the stated preference", "evidence_refs": [],
                 "explanation": "keep the accepted state"}  # fmt: skip
     decision = parse(document, packet, s).value.decision
     assert decision.outcome == NoChange("keep the accepted state") and decision.evidence_ids == ()
@@ -146,13 +146,13 @@ def test_no_change(packet, s):
 
 @pytest.mark.parametrize("reason", [r for r in AbstentionReason if r is not AbstentionReason.MISSING_CONTEXT])
 def test_abstain(packet, s, reason):
-    document = {"type": "abstain", "rationale": "public reason", "evidence": [], "reason": reason.value,
+    document = {"type": "abstain", "rationale": "public reason", "evidence_refs": [], "reason": reason.value,
                 "requested_context": []}  # fmt: skip
     assert parse(document, packet, s).value.decision.outcome == Abstain(reason)
 
 
 def test_missing_context_requires_questions(packet, s):
-    document = {"type": "abstain", "rationale": "role of t3 is unknown", "evidence": [], "reason": "missing_context",
+    document = {"type": "abstain", "rationale": "role of t3 is unknown", "evidence_refs": [], "reason": "missing_context",
                 "requested_context": ["Which role does the third track have?"]}  # fmt: skip
     outcome = parse(document, packet, s).value.decision.outcome
     assert outcome.reason is AbstentionReason.MISSING_CONTEXT and outcome.requested_context
@@ -183,12 +183,12 @@ def test_replayed_identities_reproduce_the_exact_recorded_decision(packet, s):
         b"\xff\xfe{}",  # invalid UTF-8
         b'```json\n{"type":"no_change"}\n```',  # fenced prose
         b'Here is my answer: {"type":"no_change"}',
-        b'{"type":"no_change","rationale":"r","evidence":[],"explanation":"e"} {"type":"no_change"}',  # two objects
-        b'{"type":"no_change","rationale":"r","evidence":[],"explanation":"e"}\n',  # trailing data
-        b' {"type":"no_change","rationale":"r","evidence":[],"explanation":"e"}',
-        b'{"type":"no_change","rationale":"r","evidence":[],"explanation":"e","explanation":"f"}',  # duplicate key
+        b'{"type":"no_change","rationale":"r","evidence_refs":[],"explanation":"e"} {"type":"no_change"}',  # two objects
+        b'{"type":"no_change","rationale":"r","evidence_refs":[],"explanation":"e"}\n',  # trailing data
+        b' {"type":"no_change","rationale":"r","evidence_refs":[],"explanation":"e"}',
+        b'{"type":"no_change","rationale":"r","evidence_refs":[],"explanation":"e","explanation":"f"}',  # duplicate key
         b'[{"type":"no_change"}]',
-        b'{"type":"no_change","rationale":"r","evidence":[],"explanation":"e"',  # truncated
+        b'{"type":"no_change","rationale":"r","evidence_refs":[],"explanation":"e"',  # truncated
         b"",
     ],
 )
@@ -218,8 +218,8 @@ def test_integer_gain_is_a_number(packet, s):
         {"project": "p"},
         {"criteria": []},
         {"actions": []},  # multiple proposals
-        {"evidence": "o-1"},
-        {"candidates": []},
+        {"evidence_refs": "o-1"},
+        {"addressed_problem_candidates": []},
         {"expected_effect": ""},
         {"rationale": 3},
         {"justification": {"reasoning": "r", "uncertainty": "u", "assumptions": []}},  # missing key
@@ -239,7 +239,7 @@ def test_schema_violations_are_invalid(packet, s, change):
 
 
 def test_missing_keys_are_invalid(packet, s):
-    for key in ("type", "action", "candidates", "evidence", "expected_effect", "rationale", "justification"):
+    for key in ("type", "action", "addressed_problem_candidates", "evidence_refs", "expected_effect", "rationale", "justification"):
         document = proposal(packet)
         del document[key]
         invalid(parse(document, packet, s))
@@ -270,11 +270,11 @@ def test_unknown_duplicate_and_wrong_kind_references_are_invalid(packet, s):
         {"action": {"operation": "set_track_gain", "track": "trk-000000000000", "gain_db": -1.0}},
         {"action": {"operation": "set_track_gain", "track": "t1", "gain_db": -1.0}},  # raw ID, not an alias
         {"action": {"operation": "set_track_gain", "track": cand, "gain_db": -1.0}},  # wrong kind
-        {"candidates": [cand, cand]},
-        {"candidates": [t1]},
-        {"evidence": [o1, o1, o2]},
-        {"evidence": [o1, "obs-ffffffffffff"]},
-        {"evidence": [o1]},  # does not cite all of the candidate's evidence (core validation)
+        {"addressed_problem_candidates": [cand, cand]},
+        {"addressed_problem_candidates": [t1]},
+        {"evidence_refs": [o1, o1, o2]},
+        {"evidence_refs": [o1, "obs-ffffffffffff"]},
+        {"evidence_refs": [o1]},  # does not cite all of the candidate's evidence (core validation)
     ):
         message = invalid(parse(proposal(packet, **change), packet, s))
         assert message
@@ -283,7 +283,7 @@ def test_unknown_duplicate_and_wrong_kind_references_are_invalid(packet, s):
 def test_historical_observations_cannot_be_cited_as_current_evidence(packet, s):
     historical = alias(packet, AliasKind.HISTORICAL_OBSERVATION, "o-1", Revision("r2"))
     o2 = alias(packet, AliasKind.CURRENT_OBSERVATION, "o-2")
-    message = invalid(parse(proposal(packet, evidence=[historical, o2]), packet, s))
+    message = invalid(parse(proposal(packet, evidence_refs=[historical, o2]), packet, s))
     assert "historical" in message
 
 
@@ -327,7 +327,7 @@ def test_a_packet_for_another_call_or_state_is_a_wiring_error(packet, s):
 
 def test_response_schema_is_versioned_canonical_and_closed():
     schema = json.loads(RESPONSE_JSON_SCHEMA)
-    assert RESPONSE_SCHEMA.version == "1"
+    assert RESPONSE_SCHEMA.version == "2"
     variants = {v["properties"]["type"]["const"] for v in schema["oneOf"]}
     assert variants == {"propose_action", "no_change", "abstain"}
     assert all(v["additionalProperties"] is False for v in schema["oneOf"])
@@ -351,13 +351,13 @@ def test_identity_source_errors_are_wiring_errors_not_invalid_responses(packet, 
         {"type": []},
         {"type": {}},
         {"type": None},
-        {"type": "abstain", "rationale": "r", "evidence": [], "reason": [], "requested_context": []},
-        {"type": "abstain", "rationale": "r", "evidence": [], "reason": {}, "requested_context": []},
+        {"type": "abstain", "rationale": "r", "evidence_refs": [], "reason": [], "requested_context": []},
+        {"type": "abstain", "rationale": "r", "evidence_refs": [], "reason": {}, "requested_context": []},
         {
             "type": "propose_action",
             "action": {"operation": [], "track": "x", "gain_db": 1},
-            "candidates": [],
-            "evidence": [],
+            "addressed_problem_candidates": [],
+            "evidence_refs": [],
             "expected_effect": "e",
             "rationale": "r",
             "justification": {"reasoning": "r", "uncertainty": "u", "assumptions": [], "limitations": []},
@@ -419,7 +419,7 @@ def _with_gain(packet, literal: str) -> bytes:
 
 def test_deeply_nested_json_within_the_byte_bound_is_invalid_not_a_recursion_error(packet, s):
     nested = proposal(packet)
-    nested["evidence"] = "@@"
+    nested["evidence_refs"] = "@@"
     body = json.dumps(nested).replace('"@@"', "[" * 1200 + "]" * 1200).encode()
     assert len(body) < LIMITS.max_response_bytes
     message = invalid(parse(None, packet, s, raw=body))

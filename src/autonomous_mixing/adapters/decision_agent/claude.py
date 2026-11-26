@@ -10,9 +10,13 @@ import hashlib
 import json
 
 from autonomous_mixing.adapters.decision_agent.config import ClaudeConfig
-from autonomous_mixing.adapters.decision_agent.prompt import ClaudeRequestTooLarge, build_claude_request
+from autonomous_mixing.adapters.decision_agent.prompt import PROMPT, ClaudeRequestTooLarge, build_claude_request
 from autonomous_mixing.adapters.decision_agent.request import DecisionPacketTooLarge
-from autonomous_mixing.adapters.decision_agent.response import ResponseLimits, parse_decision_response
+from autonomous_mixing.adapters.decision_agent.response import (
+    RESPONSE_SCHEMA,
+    ResponseLimits,
+    parse_decision_response,
+)
 from autonomous_mixing.adapters.decision_agent.transport import TransportResult
 from autonomous_mixing.core.ports.coordinator_runtime import IdentitySource, RunClock
 from autonomous_mixing.core.ports.decision_audit import DecisionAuditTrail, permits_dispatch
@@ -146,6 +150,14 @@ class ClaudeDecisionMaker:
             record = found.record
             if record.request.call != call:
                 return _failure("audit answered another call")
+            versions = (record.request.prompt, record.request.response_schema)
+            if versions != (PROMPT, RESPONSE_SCHEMA):
+                # A stored exchange stays readable under its own labels; it is never replayed or revalidated here.
+                raise ValueError(
+                    f"recorded exchange uses prompt {versions[0].name}@{versions[0].version} and response schema "
+                    f"{versions[1].name}@{versions[1].version}; this adapter implements {PROMPT.name}@{PROMPT.version} "
+                    f"and {RESPONSE_SCHEMA.name}@{RESPONSE_SCHEMA.version} and does not revalidate it"
+                )
             expected = build_claude_request(
                 situation,
                 config=self.config,

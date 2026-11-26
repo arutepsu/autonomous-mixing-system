@@ -22,9 +22,9 @@ from autonomous_mixing.core.records.decision_exchange import (
 )
 from autonomous_mixing.core.records.results import PortFailure, PortFailureCode, Success
 
-NO_CHANGE = '{"type":"no_change","rationale":"fixture","evidence":[],"explanation":"no supported change"}'
+NO_CHANGE = '{"type":"no_change","rationale":"fixture","evidence_refs":[],"explanation":"no supported change"}'
 ABSTAIN = (
-    '{"type":"abstain","rationale":"fixture","evidence":[],"reason":"insufficient_evidence","requested_context":[]}'
+    '{"type":"abstain","rationale":"fixture","evidence_refs":[],"reason":"insufficient_evidence","requested_context":[]}'
 )
 
 

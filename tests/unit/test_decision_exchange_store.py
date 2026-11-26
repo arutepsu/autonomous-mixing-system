@@ -80,7 +80,7 @@ def store(path, s):
 def request_of(packet, exchange_id="ex-1") -> DecisionExchangeRequest:
     text = canonical_json({"model": "labelled-model", "messages": [{"role": "user", "content": packet.payload}]})
     return DecisionExchangeRequest(packet.binding.call, exchange_id, packet, text, sha256_text(text),
-                                   VersionRef("prompt", "1"), VersionRef("autonomous_mixing.decision_response", "1"),
+                                   VersionRef("prompt", "1"), VersionRef("autonomous_mixing.decision_response", "2"),
                                    ProviderRequestIdentity("labelled-provider", "api-1", "labelled-model",
                                                            '{"max_tokens":1000,"temperature":0}'),
                                    UTC)  # fmt: skip
@@ -95,8 +95,8 @@ def body_of(packet) -> bytes:
     return json.dumps({
         "type": "propose_action",
         "action": {"operation": "set_track_gain", "track": alias(packet, AliasKind.TRACK, "t1"), "gain_db": -1.5},
-        "candidates": [alias(packet, AliasKind.CANDIDATE, "cand-1")],
-        "evidence": [alias(packet, AliasKind.CURRENT_OBSERVATION, o) for o in ("o-1", "o-2")],
+        "addressed_problem_candidates": [alias(packet, AliasKind.CANDIDATE, "cand-1")],
+        "evidence_refs": [alias(packet, AliasKind.CURRENT_OBSERVATION, o) for o in ("o-1", "o-2")],
         "expected_effect": "less overlap", "rationale": "labelled fixture",
         "justification": {"reasoning": "fixture", "uncertainty": "uncalibrated", "assumptions": [], "limitations": []},
     }).encode()  # fmt: skip

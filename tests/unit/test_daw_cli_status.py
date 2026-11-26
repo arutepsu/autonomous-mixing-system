@@ -142,7 +142,7 @@ def test_plain_status_shows_the_useful_provider_information(tmp_path, monkeypatc
     out = capsys.readouterr().out
     assert out.startswith(f"{RUN}: provider_evidence_unavailable - ")
     for text in ("recorded state (unverified): suspended_resumable", "provider: anthropic 2023-06-01",
-                 "prompt autonomous_mixing.claude_prompt@1", "prepared plan sha256 ", "runtime settings sha256 ",
+                 "prompt autonomous_mixing.claude_prompt@2", "prepared plan sha256 ", "runtime settings sha256 ",
                  "authoritative: r1 (sequence 0)", "DAW writes 1/3", f"awaiting export {export_id}",
                  "daw continue --config", "FL facts: available"):  # fmt: skip
         assert text in out, text
